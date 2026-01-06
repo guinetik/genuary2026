@@ -16,10 +16,10 @@ import { Game, Camera3D } from '@guinetik/gcanvas';
 
 const CONFIG = {
   // Tunnel geometry
-  ringCount: 40,
-  ringSpacing: 50,
+  ringCount: 30,
+  ringSpacing: 60,
   baseRadiusRatio: 0.35,  // Ratio of canvas size
-  circlesPerRing: 24,
+  circlesPerRing: 18,
 
   // Movement
   speed: 180,
@@ -159,29 +159,23 @@ class WormholeDemo extends Game {
     circles.sort((a, b) => b.z - a.z);
 
     // Draw circles - ALL THE SAME GREEN
+    // Use simpler rendering for performance
+    ctx.shadowBlur = 8;
+    ctx.shadowColor = `hsl(${CONFIG.hue}, 100%, 50%)`;
+
     for (const circle of circles) {
       if (circle.alpha < 0.05) continue;
 
-      // Glow effect
-      const gradient = ctx.createRadialGradient(
-        circle.x, circle.y, 0,
-        circle.x, circle.y, circle.radius * 2
-      );
-
       const color = `hsl(${CONFIG.hue}, 100%, ${circle.lightness}%)`;
-      const glowColor = `hsla(${CONFIG.hue}, 100%, ${circle.lightness}%, 0)`;
-
-      // Glow effect - same green, just fades out
-      gradient.addColorStop(0, color);
-      gradient.addColorStop(0.4, color);
-      gradient.addColorStop(1, glowColor);
 
       ctx.beginPath();
-      ctx.arc(circle.x, circle.y, circle.radius * 2, 0, Math.PI * 2);
-      ctx.fillStyle = gradient;
+      ctx.arc(circle.x, circle.y, circle.radius, 0, Math.PI * 2);
+      ctx.fillStyle = color;
       ctx.globalAlpha = circle.alpha;
       ctx.fill();
     }
+
+    ctx.shadowBlur = 0;
 
     ctx.globalAlpha = 1;
 
