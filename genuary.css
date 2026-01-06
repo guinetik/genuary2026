@@ -592,7 +592,7 @@ body {
   width: 90%;
   max-width: 1000px;
   margin-top: 8px;
-  padding: 0 4px;
+  padding: 0;
 }
 
 .canvas-btn {
