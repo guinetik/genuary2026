@@ -13,7 +13,7 @@ const CONFIG = {
   cell: { w: 11, h: 18 },
   tick: 70,
   tail: { min: 25, max: 50 },
-  mouse: { radius: 100, force: 5 },
+  mouse: { radius: 180, slowRadius: 120 },  // Reading spotlight
   glow: { blur: 10, color: "#0f0" },
 };
 
@@ -78,7 +78,20 @@ class QuineDemo extends Game {
       this.mouseY = -1000;
     });
 
+    // Click to reset - useful for filming
+    this.canvas.addEventListener("click", () => {
+      this.reset();
+    });
+
     this.ready = true;
+  }
+
+  reset() {
+    const numCols = Math.ceil(this.width / CONFIG.cell.w);
+    this.columns = [];
+    for (let i = 0; i < numCols; i++) {
+      this.columns.push(this.createDrop());
+    }
   }
 
   createDrop() {
@@ -103,15 +116,19 @@ class QuineDemo extends Game {
     for (let i = 0; i < this.columns.length; i++) {
       const col = this.columns[i];
       const x = i * CONFIG.cell.w + CONFIG.cell.w / 2;
-
-      // Mouse repulsion
       const py = col.y * CONFIG.cell.h;
+
+      // Check if in slow-down zone (reading mode)
       const dx = x - this.mouseX;
       const dy = py - this.mouseY;
       const dist = Math.sqrt(dx * dx + dy * dy);
 
-      if (dist < CONFIG.mouse.radius && dist > 0) {
-        col.y -= CONFIG.mouse.force * (1 - dist / CONFIG.mouse.radius);
+      // Slow down drops near mouse so you can read them
+      if (dist < CONFIG.mouse.slowRadius && this.mouseX > 0) {
+        // In slow zone - only advance every few ticks
+        col.slowCounter = (col.slowCounter || 0) + 1;
+        if (col.slowCounter < 3) continue;  // Skip 2 out of 3 ticks
+        col.slowCounter = 0;
       }
 
       // Move drop down
@@ -170,6 +187,13 @@ class QuineDemo extends Game {
           const y = c.row * CONFIG.cell.h;
           if (y < 0 || y > this.height) continue;
 
+          // Distance to mouse for spotlight effect
+          const dx = x - this.mouseX;
+          const dy = y - this.mouseY;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          const inSpotlight = dist < CONFIG.mouse.radius && this.mouseX > 0;
+          const spotlightStrength = inSpotlight ? 1 - dist / CONFIG.mouse.radius : 0;
+
           if (c.age <= 1) {
             // Head - bright white with glow
             ctx.shadowColor = CONFIG.glow.color;
@@ -178,10 +202,21 @@ class QuineDemo extends Game {
             ctx.fillText(c.char, x, y);
             ctx.shadowBlur = 0;
           } else {
-            // Tail - fading green
+            // Tail - normally fading green
             const alpha = 1 - c.age / col.tailLen;
-            const green = Math.floor(255 * alpha);
-            ctx.fillStyle = `rgba(0, ${green}, 50, ${alpha})`;
+
+            if (inSpotlight) {
+              // Spotlight: brighter, whiter, more readable
+              const boost = spotlightStrength * 0.8;
+              const r = Math.floor(200 * boost);
+              const g = Math.floor(255 * (alpha + boost * (1 - alpha)));
+              const b = Math.floor(200 * boost);
+              ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${Math.min(1, alpha + boost)})`;
+            } else {
+              // Normal: fading green
+              const green = Math.floor(255 * alpha);
+              ctx.fillStyle = `rgba(0, ${green}, 50, ${alpha})`;
+            }
             ctx.fillText(c.char, x, y);
           }
         }
@@ -198,13 +233,15 @@ class QuineDemo extends Game {
         }
       }
 
-      // Mouse repel zone
+      // Mouse spotlight - soft reading light
       if (this.mouseX > 0) {
+        // Outer glow - soft white/green
         const gradient = ctx.createRadialGradient(
           this.mouseX, this.mouseY, 0,
           this.mouseX, this.mouseY, CONFIG.mouse.radius
         );
-        gradient.addColorStop(0, "rgba(0, 255, 100, 0.05)");
+        gradient.addColorStop(0, "rgba(255, 255, 255, 0.08)");
+        gradient.addColorStop(0.4, "rgba(150, 255, 200, 0.05)");
         gradient.addColorStop(1, "transparent");
         ctx.fillStyle = gradient;
         ctx.beginPath();

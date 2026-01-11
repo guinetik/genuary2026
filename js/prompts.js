@@ -52,7 +52,7 @@ export const INTERPRETATIONS = {
   8: 'Forge Star: a colonizer ship emerges from a wormhole to build a Dyson swarm to collect energy from the star. They dope the star with heavy elements to forge metals, shifting it from blue to purple.',
   9: 'Cellular automata gone wild - rules that create unexpected emergent behavior.',
   10: 'Hyperbolic Crochet: a polar (r,θ) wireframe mesh with exponential ruffling at the edges. A mathematical coral that crocheters create to visualize negative curvature. Click to excite the fabric.',
-  11: 'Matrix rain that fetches and displays its own source code. The falling lines ARE this file - true self-reference.',
+  11: 'Matrix rain that fetches and displays its own source code. Hover to slow down and illuminate the text for reading. Click to reset.',
   12: 'Compositions made entirely from rectangular boxes',
   13: 'Generative self-portrait: start with basic shapes, add features that look like you',
   14: 'Perfect tessellation where every piece fits exactly with no gaps',
