@@ -45,20 +45,20 @@ const CONFIG = {
   // Dyson lattice
   lattice: {
     shellRadius: 160,
-    nodeSize: 3,
+    nodeSize: 1.5,
     rotationSpeed: 0.03,
     color: '#4af',
     // Multiple shell layers
     layers: [
-      { radius: 140, count: 80, size: 2 },
-      { radius: 160, count: 120, size: 3 },
-      { radius: 180, count: 100, size: 2.5 },
+      { radius: 140, count: 80, size: 1 },
+      { radius: 160, count: 120, size: 1.5 },
+      { radius: 180, count: 100, size: 1.25 },
     ],
   },
 
   // Energy streams (star to lattice) - blue near star, gold at lattice
   streams: {
-    particleCount: 300,
+    particleCount: 80,   // Reduced from 300
     speed: 100,
     innerColor: { r: 150, g: 200, b: 255, a: 0.9 },  // Blue-white near star
     outerColor: { r: 255, g: 200, b: 100, a: 0.8 },  // Gold at lattice
@@ -66,9 +66,10 @@ const CONFIG = {
 
   // Ships/drones - teal/green for life
   ships: {
-    count: 40,              // Lots of activity
+    count: 15,              // Reduced from 40 - less cluttered
     size: 4,
-    speed: 50,
+    speed: 120,             // Regular ship speed
+    constructorSpeed: 250,  // Fast constructor ships
     trailLength: 12,
     color: '#4db',          // Teal
     glowColor: 'rgba(80, 220, 180, 0.8)',
@@ -88,13 +89,29 @@ const CONFIG = {
     friction: 0.92,
   },
 
-  // Scene phases (Kurzgesagt-style loop)
+  // Narrative phases (plays once, then idles in EMPIRE)
   phases: {
-    overview: 8,        // Wide view of the whole system
-    starFocus: 6,       // Zoom emphasis on star
-    latticeFlow: 6,     // Energy harvesting
-    shipActivity: 6,    // Cargo/drone traffic
-    // Then loops back to overview
+    arrival: 6,      // Rocket approaches star
+    deployment: 4,   // Panels deploy, satellites separate
+    capitol: 5,      // Capitol station reveals
+    empire: null,    // Full activity - stays forever
+  },
+
+  // Starship spacecraft
+  rocket: {
+    startDistance: 800,     // Where ship starts (far from star)
+    bodyColor: '#639',      // Purple hull
+    accentColor: '#fc0',    // Yellow accents
+    thrustColor: '#f80',    // Orange engine glow
+    panelColor: '#86f',     // Light purple panels
+    voxelSize: 4,
+  },
+
+  // Reveal animation settings
+  reveal: {
+    staggerDelay: 0.02,     // Delay between each voxel pop
+    annexStagger: 1.5,      // Delay between constructor ship launches (was 3.0)
+    shipSpawnInterval: 1.0, // Delay between each regular ship spawn (was 1.5)
   },
 
   // Visual style
@@ -171,24 +188,37 @@ class Ship {
     this.route = route; // Array of { type: 'station'|'space', target: Object|Point }
     this.routeIndex = 0; // Start at first point
     this.speed = speed;
-    
+
+    this.active = false;  // Ships start inactive, spawn progressively
     this.state = 'travel'; // 'travel' | 'orbit'
     this.stateTimer = 0;
-    
+
     // Orbit/Docking properties
     this.orbitRadius = 25 + Math.random() * 15; // Distance to orbit at
     this.orbitSpeed = (Math.random() > 0.5 ? 1 : -1) * (0.5 + Math.random() * 0.8);
     this.orbitAngle = Math.random() * Math.PI * 2;
     this.orbitTilt = (Math.random() - 0.5) * 1.0;
-    
-    // Initialize position at first target
-    const start = this.getCurrentTargetPos();
-    this.x = start.x + Math.cos(this.orbitAngle) * this.orbitRadius;
-    this.y = start.y;
-    this.z = start.z + Math.sin(this.orbitAngle) * this.orbitRadius;
-    
+
+    // Position will be set when spawned
+    this.x = 0;
+    this.y = 0;
+    this.z = 0;
+
     this.trail = [];
     this.angle = 0;
+  }
+
+  /**
+   * Spawn ship at a specific position (e.g., Capitol)
+   */
+  spawn(x, y, z) {
+    this.active = true;
+    this.x = x;
+    this.y = y;
+    this.z = z;
+    this.state = 'travel';
+    this.routeIndex = 0;
+    this.trail = [];
   }
 
   getCurrentTargetPos() {
@@ -281,6 +311,486 @@ class Ship {
 }
 
 // ============================================================================
+// STARSHIP CLASS - Star Destroyer wedge that slides into orbit
+// ============================================================================
+
+class Starship {
+  constructor(game) {
+    this.game = game;
+    this.visible = true;
+
+    // Position in 3D space
+    this.x = 0;
+    this.y = 0;
+    this.z = 0;
+
+    // Heading angle (yaw) - points in direction of travel
+    this.heading = 0;
+
+    // Animation states
+    this.panelDeployProgress = 0;  // 0 = folded, 1 = deployed
+    this.satelliteSeparation = 0;  // 0 = attached, 1 = separated
+
+    // Disassembly state
+    this.disassembling = false;
+    this.disassemblyProgress = 0;
+
+    // Capitol target for satellite flight
+    this.capitolTarget = null;
+
+    // Voxel assembly
+    this.voxels = [];       // Main hull voxels
+    this.panels = [];       // Solar panel voxels (animate outward)
+    this.satellites = [];   // Satellite voxels (separate during deployment)
+
+    this.generateStarship();
+  }
+
+  /**
+   * Set Capitol target for satellites to fly toward
+   */
+  setCapitolTarget(x, y, z) {
+    this.capitolTarget = { x, y, z };
+  }
+
+  generateStarship() {
+    const size = CONFIG.rocket?.voxelSize || 4;
+    const hullColor = CONFIG.rocket?.bodyColor || '#639';
+    const hullDark = '#426';   // Darker purple for depth
+    const accentColor = CONFIG.rocket?.accentColor || '#fc0';
+    const engineColor = CONFIG.rocket?.thrustColor || '#f80';
+    const panelColor = CONFIG.rocket?.panelColor || '#86f';
+
+    // Helper to create a voxel with disassembly properties
+    const createVoxel = (x, y, z, color, scale = 1) => {
+      // Random scatter direction for disassembly
+      const scatterAngle = Math.random() * Math.PI * 2;
+      const scatterPitch = (Math.random() - 0.5) * Math.PI;
+      const scatterSpeed = 80 + Math.random() * 120;
+
+      return {
+        lx: x * size,
+        ly: y * size,
+        lz: z * size,
+        size: size * scale,
+        color,
+        cube: new Cube3D(size * scale, {
+          camera: this.game.camera,
+          faceColors: {
+            front: color, back: color,
+            left: color, right: color,
+            top: color, bottom: color
+          },
+          stroke: 'rgba(150, 100, 200, 0.4)',
+        }),
+        // Disassembly properties
+        scatterVel: {
+          x: Math.cos(scatterAngle) * Math.cos(scatterPitch) * scatterSpeed,
+          y: Math.sin(scatterPitch) * scatterSpeed,
+          z: Math.sin(scatterAngle) * Math.cos(scatterPitch) * scatterSpeed,
+        },
+        disassemblyOffset: { x: 0, y: 0, z: 0 },
+        alpha: 1,
+      };
+    };
+
+    // ─────────────────────────────────────────────────────────────────
+    // STAR DESTROYER WEDGE - Large triangular hull
+    // Ship points along +X axis (nose at front, engines at back)
+    // Much bigger and more detailed
+    // ─────────────────────────────────────────────────────────────────
+
+    // Hull rows from back to front - BIGGER ship
+    const hullRows = [
+      { x: -8, width: 9 },   // Engine section - widest
+      { x: -7, width: 9 },
+      { x: -6, width: 8 },
+      { x: -5, width: 8 },
+      { x: -4, width: 7 },
+      { x: -3, width: 7 },
+      { x: -2, width: 6 },
+      { x: -1, width: 5 },
+      { x: 0, width: 5 },
+      { x: 1, width: 4 },
+      { x: 2, width: 4 },
+      { x: 3, width: 3 },
+      { x: 4, width: 3 },
+      { x: 5, width: 2 },
+      { x: 6, width: 2 },
+      { x: 7, width: 1 },
+      { x: 8, width: 1 },
+      { x: 9, width: 1 },
+      { x: 10, width: 0.5 },  // Nose tip
+    ];
+
+    for (const row of hullRows) {
+      const halfW = row.width / 2;
+      for (let z = -Math.floor(halfW); z <= Math.floor(halfW); z++) {
+        // Main deck (y = 0)
+        this.voxels.push(createVoxel(row.x, 0, z, hullColor));
+
+        // Upper deck for wider sections
+        if (row.width >= 5 && Math.abs(z) < halfW - 1) {
+          this.voxels.push(createVoxel(row.x, 1, z, hullColor, 0.9));
+        }
+
+        // Lower hull for thicker sections
+        if (row.width >= 4 && Math.abs(z) < halfW - 0.5) {
+          this.voxels.push(createVoxel(row.x, -1, z, hullDark, 0.9));
+        }
+
+        // Bottom hull for widest sections
+        if (row.width >= 7 && Math.abs(z) < halfW - 1.5) {
+          this.voxels.push(createVoxel(row.x, -2, z, hullDark, 0.8));
+        }
+      }
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // BRIDGE TOWER (raised command section - yellow accents)
+    // ─────────────────────────────────────────────────────────────────
+    // Bridge base
+    for (let bx = -4; bx <= 0; bx++) {
+      for (let bz = -1; bz <= 1; bz++) {
+        this.voxels.push(createVoxel(bx, 2, bz, hullColor, 0.85));
+      }
+    }
+    // Bridge tower
+    for (let bx = -3; bx <= -1; bx++) {
+      this.voxels.push(createVoxel(bx, 3, 0, accentColor, 0.7));
+    }
+    // Bridge top - yellow beacon
+    this.voxels.push(createVoxel(-2, 4, 0, accentColor, 0.5));
+
+    // ─────────────────────────────────────────────────────────────────
+    // YELLOW ACCENT STRIPES along hull edges
+    // ─────────────────────────────────────────────────────────────────
+    for (let x = -6; x <= 6; x += 2) {
+      const rowIdx = hullRows.findIndex(r => r.x === x);
+      if (rowIdx >= 0) {
+        const w = Math.floor(hullRows[rowIdx].width / 2);
+        this.voxels.push(createVoxel(x, 0, w, accentColor, 0.6));
+        this.voxels.push(createVoxel(x, 0, -w, accentColor, 0.6));
+      }
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // ENGINE ARRAY (back of ship) - orange glow
+    // ─────────────────────────────────────────────────────────────────
+    for (let z = -4; z <= 4; z++) {
+      this.voxels.push(createVoxel(-9, 0, z, engineColor, 0.8));
+      if (Math.abs(z) < 3) {
+        this.voxels.push(createVoxel(-9, -1, z, engineColor, 0.7));
+      }
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // WEAPON BATTERIES (yellow turrets along spine)
+    // ─────────────────────────────────────────────────────────────────
+    for (let x = 2; x <= 6; x += 2) {
+      this.voxels.push(createVoxel(x, 1, 0, accentColor, 0.5));
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // SOLAR PANELS (deploy from sides during DEPLOYMENT)
+    // ─────────────────────────────────────────────────────────────────
+    const panelRows = [-5, -4, -3, -2, -1, 0, 1, 2];
+    for (const px of panelRows) {
+      const edgeZ = 5;
+      // Right side panels
+      this.panels.push({
+        ...createVoxel(px, 0, edgeZ, panelColor, 0.5),
+        baseX: px * size,
+        baseZ: edgeZ * size,
+        side: 1,
+        deployOffset: 4 * size,
+      });
+      // Left side panels
+      this.panels.push({
+        ...createVoxel(px, 0, -edgeZ, panelColor, 0.5),
+        baseX: px * size,
+        baseZ: -edgeZ * size,
+        side: -1,
+        deployOffset: 4 * size,
+      });
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // SATELLITES (drones that separate - yellow)
+    // ─────────────────────────────────────────────────────────────────
+    const satPositions = [
+      { x: 4, y: 2, z: 2, dir: { x: 1, y: 1, z: 1 } },
+      { x: 4, y: 2, z: -2, dir: { x: 1, y: 1, z: -1 } },
+      { x: 0, y: 2, z: 3, dir: { x: 0, y: 1, z: 1 } },
+      { x: 0, y: 2, z: -3, dir: { x: 0, y: 1, z: -1 } },
+      { x: -4, y: 2, z: 3, dir: { x: -1, y: 1, z: 1 } },
+      { x: -4, y: 2, z: -3, dir: { x: -1, y: 1, z: -1 } },
+    ];
+
+    for (const pos of satPositions) {
+      this.satellites.push({
+        ...createVoxel(pos.x, pos.y, pos.z, accentColor, 0.6),
+        baseX: pos.x * size,
+        baseY: pos.y * size,
+        baseZ: pos.z * size,
+        separationDir: pos.dir,
+      });
+    }
+  }
+
+  /**
+   * Set ship position
+   */
+  setPosition(x, y, z) {
+    this.x = x;
+    this.y = y;
+    this.z = z;
+  }
+
+  /**
+   * Set heading angle (radians) - ship points in this direction
+   */
+  setHeading(angle) {
+    this.heading = angle;
+  }
+
+  /**
+   * Deploy solar panels (0 = folded, 1 = fully extended)
+   */
+  deployPanels(progress) {
+    this.panelDeployProgress = Math.max(0, Math.min(1, progress));
+
+    for (const panel of this.panels) {
+      // Animate Z position outward based on side and progress
+      panel.lz = panel.baseZ + panel.side * panel.deployOffset * this.panelDeployProgress;
+    }
+  }
+
+  /**
+   * Separate satellites and fly them toward Capitol one at a time (fleet style)
+   * @param {number} progress - 0 = all attached, 1 = all at Capitol
+   */
+  separateSatellites(progress) {
+    this.satelliteSeparation = Math.max(0, Math.min(1, progress));
+
+    if (!this.capitolTarget) {
+      // Fallback: just separate outward if no target set
+      const separationDist = 40;
+      for (const sat of this.satellites) {
+        const p = this.satelliteSeparation;
+        sat.lx = sat.baseX + sat.separationDir.x * separationDist * p;
+        sat.ly = sat.baseY + sat.separationDir.y * separationDist * p;
+        sat.lz = sat.baseZ + sat.separationDir.z * separationDist * p;
+      }
+      return;
+    }
+
+    // Stagger satellites - each one flies sequentially
+    const numSats = this.satellites.length;
+    const staggerMultiplier = 0.6;  // Each satellite uses 60% of the time window
+    const staggerOffset = (1 - staggerMultiplier) / Math.max(1, numSats - 1);
+
+    for (let i = 0; i < numSats; i++) {
+      const sat = this.satellites[i];
+
+      // Each satellite has its own time window
+      const satStart = i * staggerOffset;
+      const satEnd = satStart + staggerMultiplier;
+
+      // Calculate this satellite's individual progress
+      let satProgress = 0;
+      if (this.satelliteSeparation >= satEnd) {
+        satProgress = 1;  // Arrived
+      } else if (this.satelliteSeparation > satStart) {
+        satProgress = (this.satelliteSeparation - satStart) / staggerMultiplier;
+      }
+
+      // Lock in start position when this satellite begins moving
+      if (satProgress > 0 && !sat.flightStartPos) {
+        sat.flightStartPos = {
+          x: this.x + sat.baseX,
+          y: this.y + sat.baseY,
+          z: this.z + sat.baseZ,
+        };
+      }
+
+      // If not started yet, stay attached to ship
+      if (!sat.flightStartPos) {
+        sat.lx = sat.baseX;
+        sat.ly = sat.baseY;
+        sat.lz = sat.baseZ;
+        sat.worldPos = null;
+        continue;
+      }
+
+      const eased = satProgress * satProgress * (3 - 2 * satProgress);  // Smoothstep
+
+      // End position: orbit around Capitol (updates with Capitol's current position)
+      const orbitRadius = 30;
+      const orbitAngle = (i / numSats) * Math.PI * 2;
+      const endX = this.capitolTarget.x + Math.cos(orbitAngle) * orbitRadius;
+      const endY = this.capitolTarget.y + 10;  // Slightly above Capitol
+      const endZ = this.capitolTarget.z + Math.sin(orbitAngle) * orbitRadius;
+
+      // Interpolate in world space
+      const worldX = sat.flightStartPos.x + (endX - sat.flightStartPos.x) * eased;
+      const worldY = sat.flightStartPos.y + (endY - sat.flightStartPos.y) * eased;
+      const worldZ = sat.flightStartPos.z + (endZ - sat.flightStartPos.z) * eased;
+
+      // Store world position for rendering (bypass local offset system)
+      sat.worldPos = { x: worldX, y: worldY, z: worldZ };
+
+      // No alpha fade - stay fully visible until popped
+      sat.alpha = 1;
+    }
+  }
+
+  /**
+   * Start disassembly animation - voxels toggle off one by one
+   * @param {number} startTime - Game time when disassembly starts
+   * @param {number} duration - How long the full disassembly takes
+   */
+  startDisassembly(startTime, duration = 4.0) {
+    this.disassembling = true;
+    this.disassemblyStartTime = startTime;
+    this.disassemblyDuration = duration;
+
+    // Collect all voxels and shuffle them randomly
+    const allVoxels = [...this.voxels, ...this.panels, ...this.satellites];
+
+    // Shuffle array
+    for (let i = allVoxels.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [allVoxels[i], allVoxels[j]] = [allVoxels[j], allVoxels[i]];
+    }
+
+    // Assign hideTime to each voxel - staggered over the duration
+    const stagger = duration / allVoxels.length;
+    allVoxels.forEach((v, i) => {
+      v.hideTime = startTime + (i * stagger);
+      v.alpha = 1;
+    });
+  }
+
+  /**
+   * Update disassembly animation - toggle voxels off over time
+   * @param {number} currentTime - Current game time
+   * @returns {boolean} - True if disassembly is complete
+   */
+  updateDisassembly(currentTime) {
+    if (!this.disassembling) return true;
+
+    const allVoxels = [...this.voxels, ...this.panels, ...this.satellites];
+    let allHidden = true;
+
+    for (const v of allVoxels) {
+      if (currentTime >= v.hideTime) {
+        v.alpha = 0;  // Instant toggle off
+      } else {
+        allHidden = false;
+      }
+    }
+
+    // Hide ship when all voxels are gone
+    if (allHidden) {
+      this.disassembling = false;
+      this.visible = false;
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Update ship each frame
+   * @param {number} currentTime - Current game time (for disassembly)
+   */
+  update(currentTime) {
+    // Update disassembly if active
+    if (this.disassembling) {
+      this.updateDisassembly(currentTime);
+    }
+  }
+
+  /**
+   * Add ship voxels to render list
+   */
+  getRenderables(renderList) {
+    if (!this.visible) return;
+
+    // Rotate around Y axis based on heading
+    const cos = Math.cos(this.heading);
+    const sin = Math.sin(this.heading);
+
+    const addVoxelToList = (v) => {
+      // Skip if fully faded
+      if (v.alpha <= 0) return;
+
+      // Apply heading rotation (yaw around Y)
+      const rx = v.lx * cos - v.lz * sin;
+      const rz = v.lx * sin + v.lz * cos;
+      const ry = v.ly;
+
+      // World position + disassembly offset
+      const wx = this.x + rx + (v.disassemblyOffset?.x || 0);
+      const wy = this.y + ry + (v.disassemblyOffset?.y || 0);
+      const wz = this.z + rz + (v.disassemblyOffset?.z || 0);
+
+      const proj = this.game.camera.project(wx, wy, wz);
+
+      renderList.push({
+        type: 'voxel',
+        cube: v.cube,
+        x: wx,
+        y: wy,
+        z: wz,
+        depth: proj.z,
+        scale: proj.scale,
+        revealScale: 1,
+        alpha: v.alpha,  // Pass alpha for fading
+      });
+    };
+
+    // Add all voxel groups
+    for (const v of this.voxels) addVoxelToList(v);
+    for (const v of this.panels) addVoxelToList(v);
+
+    // Satellites: use world position if in flight, otherwise local offset
+    for (const sat of this.satellites) {
+      if (sat.alpha <= 0) continue;
+
+      let wx, wy, wz;
+      if (sat.worldPos) {
+        // In flight - use world position directly
+        wx = sat.worldPos.x;
+        wy = sat.worldPos.y;
+        wz = sat.worldPos.z;
+      } else {
+        // Attached to ship - use local offset with rotation
+        const rx = sat.lx * cos - sat.lz * sin;
+        const rz = sat.lx * sin + sat.lz * cos;
+        wx = this.x + rx;
+        wy = this.y + sat.ly;
+        wz = this.z + rz;
+      }
+
+      const proj = this.game.camera.project(wx, wy, wz);
+      renderList.push({
+        type: 'voxel',
+        cube: sat.cube,
+        x: wx,
+        y: wy,
+        z: wz,
+        depth: proj.z,
+        scale: proj.scale,
+        revealScale: 1,
+        alpha: sat.alpha,
+      });
+    }
+  }
+}
+
+// ============================================================================
 // ORBITAL STATION CLASS - Cloud City Style Procedural Generation
 // ============================================================================
 
@@ -310,9 +820,9 @@ class OrbitalStation {
     this.rotation = Math.random() * Math.PI * 2;
     this.rotationSpeed = 0.1 + Math.random() * 0.1;
 
-    // Size scales with Capitol status
-    this.baseRadius = isCapitol ? 6 : 3 + Math.floor(Math.random() * 2);
-    this.voxelSize = 4;
+    // Size scales with Capitol status - Capitol is much larger
+    this.baseRadius = isCapitol ? 10 : 3 + Math.floor(Math.random() * 2);
+    this.voxelSize = isCapitol ? 5 : 4;  // Capitol has bigger voxels too
 
     this.voxels = [];
     this.generateCity();
@@ -378,6 +888,7 @@ class OrbitalStation {
 
     // Helper to add a voxel
     const addVoxel = (x, y, z, color, scale = 1) => {
+      const voxelIndex = this.voxels.length;
       this.voxels.push({
         lx: x * voxelSize,
         ly: y * voxelSize,
@@ -392,7 +903,12 @@ class OrbitalStation {
             top: color, bottom: color
           },
           stroke: strokeColor,
-        })
+        }),
+        // Visibility system for progressive reveal
+        visible: true,           // Start visible (narrative will hide initially)
+        revealOrder: voxelIndex, // Default order = creation order
+        revealTime: 0,           // When reveal animation started
+        revealScale: 1,          // Current scale (0=hidden, 1=full)
       });
     };
 
@@ -556,11 +1072,92 @@ class OrbitalStation {
     this.y = Math.sin(this.angle * 2) * Math.sin(this.tilt) * this.orbitRadius * 0.15;
   }
 
+  /**
+   * Sort voxels for optimal reveal order: base (bottom) first, growing upward
+   * Uses barycenter approach - finds lowest point and grows from there
+   */
+  sortVoxelsForReveal() {
+    // Find the base point (lowest Y voxel - this is where construction starts)
+    let minY = Infinity;
+    for (const v of this.voxels) {
+      if (v.ly < minY) minY = v.ly;
+    }
+
+    // Calculate reveal order based on distance from base point
+    // Base point is at (0, minY, 0) - center of the lowest level
+    for (const v of this.voxels) {
+      // Distance from base: primarily Y (height above base), with small XZ spread
+      const heightAboveBase = v.ly - minY;
+      const horizontalDist = Math.sqrt(v.lx * v.lx + v.lz * v.lz);
+      // Grow upward layer by layer, with slight outward spread per layer
+      v.revealOrder = heightAboveBase * 10 + horizontalDist * 0.5;
+    }
+
+    // Sort ascending: lowest (base) first, highest (top) last
+    const sorted = [...this.voxels].sort((a, b) => a.revealOrder - b.revealOrder);
+    sorted.forEach((v, i) => v.revealOrder = i);
+  }
+
+  /**
+   * Start reveal animation for all voxels with staggered timing
+   * @param {number} startTime - Game time when reveal starts
+   * @param {number} staggerDelay - Delay between each voxel reveal (seconds)
+   */
+  startReveal(startTime, staggerDelay = 0.02) {
+    this.sortVoxelsForReveal();
+
+    for (const v of this.voxels) {
+      v.visible = true;
+      v.revealTime = startTime + (v.revealOrder * staggerDelay);
+      v.revealScale = 0;
+    }
+  }
+
+  /**
+   * Hide all voxels (for narrative reset)
+   */
+  hideAll() {
+    for (const v of this.voxels) {
+      v.visible = false;
+      v.revealScale = 0;
+    }
+  }
+
+  /**
+   * Update reveal animations using Motion.spring for bouncy pop
+   * @param {number} currentTime - Current game time
+   */
+  updateReveal(currentTime) {
+    for (const v of this.voxels) {
+      if (!v.visible) continue;
+
+      const elapsed = currentTime - v.revealTime;
+      if (elapsed < 0) {
+        v.revealScale = 0;
+        continue;
+      }
+
+      // Minecraft-style instant pop with spring bounce
+      const result = Motion.spring(
+        0, 1,
+        elapsed,
+        0.3,  // Quick 0.3s reveal
+        false, false,
+        { stiffness: 0.8, damping: 0.5 }
+      );
+
+      v.revealScale = Math.min(1, result.value);
+    }
+  }
+
   getRenderables(renderList) {
     const cos = Math.cos(this.rotation);
     const sin = Math.sin(this.rotation);
 
     for (const v of this.voxels) {
+      // Skip invisible or not-yet-revealed voxels
+      if (!v.visible || v.revealScale <= 0.01) continue;
+
       // Apply station rotation (yaw) to local offset
       const rx = v.lx * cos - v.lz * sin;
       const rz = v.lx * sin + v.lz * cos;
@@ -581,7 +1178,8 @@ class OrbitalStation {
         y: wy,
         z: wz,
         depth: proj.z,
-        scale: proj.scale
+        scale: proj.scale,
+        revealScale: v.revealScale,  // Pass to render for size scaling
       });
     }
   }
@@ -639,10 +1237,13 @@ class ForgeStarDemo extends Game {
       for (const node of layerNodes) {
         node.size = layer.size;
         node.layer = layer.radius;
+        node.alpha = 0;           // Start invisible
+        node.revealTime = 0;      // When to start fading in
       }
       this.latticeNodes.push(...layerNodes);
     }
     this.latticeRotation = 0;
+    this.latticeRevealing = false;  // Flag for reveal animation
 
     // Create orbital stations first (ships need station positions)
     this.stations = [];
@@ -655,7 +1256,28 @@ class ForgeStarDemo extends Game {
     // Create energy stream particle system
     this.createEnergyStreams(this.scale);
 
-    // State machine for scene phases
+    // ─────────────────────────────────────────────────────────────────
+    // NARRATIVE STATE
+    // ─────────────────────────────────────────────────────────────────
+
+    // Create starship - starts far to the left
+    this.rocket = new Starship(this);
+    const startX = -CONFIG.rocket.startDistance * this.scale;
+    this.rocket.setPosition(startX, 0, 0);
+    this.rocket.setHeading(0);  // Point right (+X direction)
+    this.rocket.visible = true;
+
+    // Narrative control flags
+    this.shipsActive = false;           // Ships disabled until EMPIRE
+    this.energyParticlesActive = false; // Particles disabled until EMPIRE
+    this.latticeVisible = false;        // Lattice disabled until CAPITOL
+
+    // Hide all station voxels for reveal sequence
+    for (const station of this.stations) {
+      station.hideAll();
+    }
+
+    // State machine for narrative phases
     this.initStateMachine();
   }
 
@@ -745,11 +1367,21 @@ class ForgeStarDemo extends Game {
     const sharedOrbitSpeed = 0.025;
 
     for (let i = 0; i < CONFIG.stations.count; i++) {
-      // Spread stations evenly around orbit (like hours on a clock)
-      const angle = (i / CONFIG.stations.count) * Math.PI * 2;
+      const isCapitol = i === 0;
+
+      // Capitol positioned in FRONT of camera (positive Z) for cinematic reveal
+      // Other stations spread evenly starting from opposite side
+      let angle;
+      if (isCapitol) {
+        angle = Math.PI * 0.5;  // Front-center (positive Z axis)
+      } else {
+        // Spread annexes around the rest of the orbit, starting from back
+        const annexIndex = i - 1;
+        const annexCount = CONFIG.stations.count - 1;
+        angle = Math.PI * 0.5 + ((annexIndex + 1) / (annexCount + 1)) * Math.PI * 2;
+      }
 
       // Vary orbit radius - Capitol (first) is at base radius, others vary
-      const isCapitol = i === 0;
       const baseRadius = CONFIG.stations.orbitRadius * scale;
       const orbitVariance = isCapitol ? 1.0 : 0.85 + Math.random() * 0.3;
       const orbitRadius = baseRadius * orbitVariance;
@@ -805,7 +1437,7 @@ class ForgeStarDemo extends Game {
       const starR = CONFIG.star.radius * this.scale;
 
       this.energyParticles.addEmitter(`stream${i}`, new ParticleEmitter({
-        rate: 8,
+        rate: 2,  // Reduced from 8
         position: {
           x: dir.x * starR * 1.2,
           y: dir.y * starR * 1.2,
@@ -824,46 +1456,461 @@ class ForgeStarDemo extends Game {
       }));
     }
 
-    this.pipeline.add(this.energyParticles);
+    // Don't add to pipeline yet - will be added in EMPIRE phase
+    // this.pipeline.add(this.energyParticles);
+  }
+
+  /**
+   * Start lattice reveal animation - nodes fly from Capitol to final positions
+   */
+  startLatticeReveal(startTime) {
+    this.latticeRevealing = true;
+    this.latticeVisible = true;
+
+    // Store final position for each node (start position captured when flight begins)
+    for (const node of this.latticeNodes) {
+      node.finalX = node.x;
+      node.finalY = node.y;
+      node.finalZ = node.z;
+      node.flightProgress = 0;
+      node.flightStarted = false;  // Will capture start pos when flight begins
+    }
+
+    // Sort by radius descending (outer first), then by random for stagger within layer
+    const sorted = [...this.latticeNodes].sort((a, b) => {
+      if (a.layer !== b.layer) return b.layer - a.layer;
+      return Math.random() - 0.5;  // Randomize within same layer
+    });
+
+    // Assign reveal times - outer first, inner last, with per-node stagger
+    const layerDuration = 4.0;  // 4 seconds between layer starts (slower)
+    const nodeStagger = 0.08;   // 80ms stagger between nodes in same layer
+
+    // Find max/min radius for normalization
+    const maxRadius = Math.max(...CONFIG.lattice.layers.map(l => l.radius));
+    const minRadius = Math.min(...CONFIG.lattice.layers.map(l => l.radius));
+
+    let lastLayer = null;
+    let nodeIndex = 0;
+
+    sorted.forEach((node) => {
+      if (node.layer !== lastLayer) {
+        lastLayer = node.layer;
+        nodeIndex = 0;
+      }
+
+      // Base delay from layer (outer = 0, inner = max)
+      const layerProgress = (maxRadius - node.layer) / (maxRadius - minRadius || 1);
+      const layerDelay = layerProgress * layerDuration;
+
+      // Additional stagger within layer
+      const nodeDelay = nodeIndex * nodeStagger;
+
+      node.revealTime = startTime + layerDelay + nodeDelay;
+      nodeIndex++;
+    });
+  }
+
+  /**
+   * Update lattice flight animation - nodes fly from Capitol to final positions
+   */
+  updateLatticeReveal(currentTime) {
+    if (!this.latticeRevealing) return;
+
+    let allDone = true;
+    const flightDuration = 2.5;  // Slower: 2.5s per node (was 1.2)
+    const capitol = this.stations[0];  // Get current Capitol position
+
+    // Current lattice rotation for target calculation
+    const cos = Math.cos(this.latticeRotation);
+    const sin = Math.sin(this.latticeRotation);
+
+    for (const node of this.latticeNodes) {
+      if (node.flightProgress >= 1) continue;
+
+      const elapsed = currentTime - node.revealTime;
+      if (elapsed < 0) {
+        node.alpha = 0;
+        node.flightProgress = 0;
+        // Stay at Capitol's current position (not started yet)
+        node.x = capitol.x;
+        node.y = capitol.y;
+        node.z = capitol.z;
+        allDone = false;
+      } else {
+        // Capture start position when flight begins
+        if (!node.flightStarted) {
+          node.flightStarted = true;
+          node.startX = capitol.x;
+          node.startY = capitol.y;
+          node.startZ = capitol.z;
+        }
+
+        // Calculate rotated target position (where lattice currently is)
+        const targetX = node.finalX * cos - node.finalZ * sin;
+        const targetZ = node.finalX * sin + node.finalZ * cos;
+        const targetY = node.finalY;
+
+        // Flight progress with easing
+        const t = Math.min(1, elapsed / flightDuration);
+        const eased = t * t * (3 - 2 * t);  // Smoothstep
+        node.flightProgress = t;
+
+        // Interpolate position from start to rotated target
+        node.x = node.startX + (targetX - node.startX) * eased;
+        node.y = node.startY + (targetY - node.startY) * eased;
+        node.z = node.startZ + (targetZ - node.startZ) * eased;
+
+        // Fade in during first half of flight
+        node.alpha = Math.min(1, t * 2);
+
+        if (node.flightProgress < 1) allDone = false;
+      }
+    }
+
+    if (allDone) {
+      this.latticeRevealing = false;
+    }
   }
 
   initStateMachine() {
+    // Track phase elapsed time for animations
+    this.phaseTime = 0;
+
+    // Starship approach path: comes from upper-left, settles at "12 o'clock" (top of star)
+    const capitol = this.stations[0];
+    this.capitolOrbit = {
+      radius: capitol.orbitRadius,
+      angle: capitol.angle,
+    };
+
+    // Ship's final orbit position: TOP of star (12 o'clock = high Y, slight Z offset for visibility)
+    const shipOrbitRadius = capitol.orbitRadius * 0.85;
+    this.shipOrbit = {
+      x: 0,                              // Centered horizontally
+      y: shipOrbitRadius * 0.9,          // High above star (12 o'clock)
+      z: shipOrbitRadius * 0.4,          // Slight forward offset for camera visibility
+    };
+
+    // Start position: upper-left of scene (comes from above and left)
+    this.shipPath = {
+      startX: -CONFIG.rocket.startDistance * this.scale * 0.7,
+      startY: CONFIG.rocket.startDistance * this.scale * 0.5,  // Above the scene
+      startZ: -CONFIG.rocket.startDistance * this.scale * 0.3,
+      // End position: top of star orbit
+      endX: this.shipOrbit.x,
+      endY: this.shipOrbit.y,
+      endZ: this.shipOrbit.z,
+    };
+
     this.sceneFSM = StateMachine.fromSequence(
       [
+        // ─────────────────────────────────────────────────────────────
+        // ARRIVAL: Starship slides in from left, curves into orbit
+        // ─────────────────────────────────────────────────────────────
         {
-          name: 'overview',
-          duration: CONFIG.phases.overview,
+          name: 'arrival',
+          duration: CONFIG.phases.arrival,
           enter: () => {
-            // Wide view - normal auto-rotate
+            console.log('[FORGE STAR] Phase: ARRIVAL');
+            this.phaseTime = 0;
+
+            // Slow camera rotation - contemplative approach
+            this.camera.autoRotateSpeed = CONFIG.camera.autoRotateSpeed * 0.3;
+
+            // Make sure ship is visible
+            this.rocket.visible = true;
+          },
+          update: (dt) => {
+            this.phaseTime += dt;
+            const duration = CONFIG.phases.arrival;
+            const t = Math.min(1, this.phaseTime / (duration * 0.85));
+
+            // Smooth easing for the approach
+            const eased = Easing.easeInOutCubic(t);
+
+            // Simple arc path: stays ABOVE the star at all times
+            // Linear interpolation for X and Z, Y stays high with slight arc
+            const x = this.shipPath.startX + (this.shipPath.endX - this.shipPath.startX) * eased;
+            const z = this.shipPath.startZ + (this.shipPath.endZ - this.shipPath.startZ) * eased;
+
+            // Y: interpolate but add upward arc to ensure we never dip below end height
+            const baseY = this.shipPath.startY + (this.shipPath.endY - this.shipPath.startY) * eased;
+            // Add arc: peaks at t=0.5, ensures path bulges upward
+            const arcBoost = Math.sin(eased * Math.PI) * this.shipOrbit.y * 0.3;
+            const y = -(baseY + arcBoost);  // Negate to go ABOVE star
+
+            this.rocket.setPosition(x, y, z);
+
+            // Calculate heading based on direction of travel (XZ plane)
+            const dx = this.shipPath.endX - this.shipPath.startX;
+            const dz = this.shipPath.endZ - this.shipPath.startZ;
+
+            // Heading angle: atan2 gives angle from +X axis
+            const heading = Math.atan2(dz, dx);
+            this.rocket.setHeading(heading);
+          },
+        },
+
+        // ─────────────────────────────────────────────────────────────
+        // DEPLOYMENT: Rocket settles, panels deploy, satellites separate
+        // ─────────────────────────────────────────────────────────────
+        {
+          name: 'deployment',
+          duration: CONFIG.phases.deployment,
+          enter: () => {
+            console.log('[FORGE STAR] Phase: DEPLOYMENT');
+            this.phaseTime = 0;
+
+            // Ship stays at its orbit position (top of star, 12 o'clock)
+            this.rocket.setPosition(this.shipOrbit.x, -this.shipOrbit.y, this.shipOrbit.z);
+
+            // Face forward (toward positive Z / camera)
+            this.rocket.setHeading(Math.PI / 2);
+
+            // Tell satellites where to fly (Capitol position)
+            const capitol = this.stations[0];
+            this.rocket.setCapitolTarget(capitol.x, capitol.y, capitol.z);
+          },
+          update: (dt) => {
+            this.phaseTime += dt;
+            const t = this.phaseTime / CONFIG.phases.deployment;
+
+            // Ship stays at top of star during deployment
+            this.rocket.setPosition(this.shipOrbit.x, -this.shipOrbit.y, this.shipOrbit.z);
+
+            // Keep facing forward
+            this.rocket.setHeading(Math.PI / 2);
+
+            // Update Capitol target continuously (it orbits!)
+            const capitol = this.stations[0];
+            this.rocket.setCapitolTarget(capitol.x, capitol.y, capitol.z);
+
+            // First half: deploy panels
+            if (t < 0.5) {
+              this.rocket.deployPanels(t * 2);  // 0 -> 1 over first half
+            } else {
+              this.rocket.deployPanels(1);
+              // Second half: separate satellites
+              this.rocket.separateSatellites((t - 0.5) * 2);  // 0 -> 1 over second half
+            }
+          },
+        },
+
+        // ─────────────────────────────────────────────────────────────
+        // CAPITOL: Rocket transforms into Capitol station
+        // ─────────────────────────────────────────────────────────────
+        {
+          name: 'capitol',
+          duration: CONFIG.phases.capitol,
+          enter: () => {
+            console.log('[FORGE STAR] Phase: CAPITOL');
+            this.phaseTime = 0;
+
+            // Calculate how long the Capitol reveal takes
+            const capitol = this.stations[0];
+            const revealDuration = capitol.voxels.length * CONFIG.reveal.staggerDelay + 0.5;
+
+            // Start ship disassembly - voxels toggle off as Capitol assembles
+            this.rocket.startDisassembly(this.time, revealDuration);
+
+            // Start Capitol reveal with bounce animation
+            capitol.startReveal(this.time, CONFIG.reveal.staggerDelay);
+
+            // Start lattice reveal (outer to inner fade)
+            this.startLatticeReveal(this.time);
+
+            // Speed up camera slightly
+            this.camera.autoRotateSpeed = CONFIG.camera.autoRotateSpeed * 0.6;
+          },
+          update: (dt) => {
+            this.phaseTime += dt;
+
+            // Update ship disassembly (pass current time)
+            this.rocket.updateDisassembly(this.time);
+
+            // Update Capitol reveal animation
+            this.stations[0].updateReveal(this.time);
+
+            // Update lattice fade-in
+            this.updateLatticeReveal(this.time);
+          },
+        },
+
+        // ─────────────────────────────────────────────────────────────
+        // EMPIRE: Full activity - annexes reveal, ships activate
+        // ─────────────────────────────────────────────────────────────
+        {
+          name: 'empire',
+          duration: null,  // Stay forever
+          enter: () => {
+            console.log('[FORGE STAR] Phase: EMPIRE');
+            this.phaseTime = 0;
+
+            // Capitol reveal started in CAPITOL phase - calculate remaining time
+            const capitol = this.stations[0];
+            const lastVoxelRevealTime = capitol.voxels.reduce((max, v) => Math.max(max, v.revealTime), 0);
+            const remainingRevealTime = Math.max(0, lastVoxelRevealTime - this.time) + 0.3;
+
+            // Constructor ships: one per annex, flies from Capitol to trigger construction
+            const annexCount = this.stations.length - 1;
+            this.constructorShips = [];
+            this.nextConstructorSpawn = 0;
+            this.nextConstructorSpawnTime = this.time + remainingRevealTime;
+
+            // Create constructor ship assignments (first N ships are constructors)
+            for (let i = 0; i < annexCount; i++) {
+              const annex = this.stations[i + 1];
+              this.constructorShips.push({
+                shipIndex: i,
+                annexIndex: i + 1,
+                annex: annex,
+                arrived: false,
+                triggered: false,
+              });
+            }
+
+            // Track remaining purple ship voxels for depletion
+            this.remainingShipVoxels = this.rocket.voxels.filter(v => v.alpha > 0);
+            this.voxelsPerAnnex = Math.ceil(this.remainingShipVoxels.length / annexCount);
+
+            // Regular ships spawn after constructors
+            this.shipsActive = true;
+            this.nextShipToSpawn = annexCount;  // Skip constructor ships
+            this.nextShipSpawnTime = this.time + remainingRevealTime + annexCount * CONFIG.reveal.annexStagger;
+
+            // Energy particles start AFTER most annexes form
+            this.energyParticlesActive = false;
+            this.annexesBuilt = 0;
+
+            // Track empire completion state
+            this.empireComplete = false;
+            this.starTransitionStartTime = null;
+
+            // Full camera rotation speed
             this.camera.autoRotateSpeed = CONFIG.camera.autoRotateSpeed;
           },
-        },
-        {
-          name: 'starFocus',
-          duration: CONFIG.phases.starFocus,
-          enter: () => {
-            // Slower rotation to appreciate the star
-            this.camera.autoRotateSpeed = CONFIG.camera.autoRotateSpeed * 0.5;
-          },
-        },
-        {
-          name: 'latticeFlow',
-          duration: CONFIG.phases.latticeFlow,
-          enter: () => {
-            // Normal speed
-            this.camera.autoRotateSpeed = CONFIG.camera.autoRotateSpeed;
-          },
-        },
-        {
-          name: 'shipActivity',
-          duration: CONFIG.phases.shipActivity,
-          enter: () => {
-            // Slightly faster to catch ship movement
-            this.camera.autoRotateSpeed = CONFIG.camera.autoRotateSpeed * 1.2;
+          update: (dt) => {
+            this.phaseTime += dt;
+
+            // Update all station reveals
+            for (const station of this.stations) {
+              station.updateReveal(this.time);
+            }
+
+            // Spawn constructor ships one at a time
+            if (this.nextConstructorSpawn < this.constructorShips.length &&
+                this.time >= this.nextConstructorSpawnTime) {
+              const constructor = this.constructorShips[this.nextConstructorSpawn];
+              const ship = this.ships[constructor.shipIndex];
+              const capitol = this.stations[0];
+
+              // Set route: Capitol -> target Annex
+              ship.route = [
+                { type: 'station', target: capitol },
+                { type: 'station', target: constructor.annex },
+              ];
+              ship.routeIndex = 1;  // Start traveling to annex
+              ship.speed = CONFIG.ships.constructorSpeed * this.scale;  // Fast!
+              ship.spawn(capitol.x, capitol.y, capitol.z);
+
+              console.log(`[FORGE STAR] Constructor ship ${this.nextConstructorSpawn} launched to Annex ${constructor.annexIndex}`);
+              this.nextConstructorSpawn++;
+              this.nextConstructorSpawnTime = this.time + CONFIG.reveal.annexStagger;
+            }
+
+            // Check for constructor ship arrivals
+            for (const constructor of this.constructorShips) {
+              if (constructor.triggered) continue;
+
+              const ship = this.ships[constructor.shipIndex];
+              if (!ship.active) continue;
+
+              // Check if ship arrived at annex (switched to orbit state at annex)
+              if (ship.state === 'orbit' && ship.routeIndex === 1) {
+                constructor.arrived = true;
+
+                if (!constructor.triggered) {
+                  constructor.triggered = true;
+                  console.log(`[FORGE STAR] Constructor arrived - building Annex ${constructor.annexIndex}`);
+
+                  // Start this annex's reveal
+                  constructor.annex.startReveal(this.time, CONFIG.reveal.staggerDelay);
+                  this.annexesBuilt++;
+
+                  // Deplete purple ship voxels
+                  const startIdx = (constructor.annexIndex - 1) * this.voxelsPerAnnex;
+                  const endIdx = Math.min(startIdx + this.voxelsPerAnnex, this.remainingShipVoxels.length);
+                  for (let i = startIdx; i < endIdx; i++) {
+                    if (this.remainingShipVoxels[i]) {
+                      this.remainingShipVoxels[i].alpha = 0;
+                    }
+                  }
+                }
+              }
+            }
+
+            // Regular ships spawn after all constructors are done
+            const annexCount = this.stations.length - 1;
+            if (this.annexesBuilt >= annexCount &&
+                this.nextShipToSpawn < this.ships.length &&
+                this.time >= this.nextShipSpawnTime) {
+              const capitol = this.stations[0];
+              const ship = this.ships[this.nextShipToSpawn];
+              ship.spawn(capitol.x, capitol.y, capitol.z);
+
+              this.nextShipToSpawn++;
+              this.nextShipSpawnTime = this.time + CONFIG.reveal.shipSpawnInterval;
+            }
+
+            // Start energy particles after most annexes built
+            if (!this.energyParticlesActive && this.annexesBuilt >= annexCount - 1) {
+              console.log('[FORGE STAR] Energy harvesting begins');
+              this.energyParticlesActive = true;
+              this.pipeline.add(this.energyParticles);
+              for (const [name, emitter] of Object.entries(this.energyParticles.emitters)) {
+                emitter.active = true;
+              }
+            }
+
+            // Check if empire is fully formed
+            if (!this.empireComplete &&
+                this.annexesBuilt >= annexCount &&
+                this.nextShipToSpawn >= this.ships.length) {
+              console.log('[FORGE STAR] Empire complete - star transforms');
+              this.empireComplete = true;
+              this.starTransitionStartTime = this.time;
+            }
+
+            // Transition star to purple when empire is complete
+            if (this.empireComplete) {
+              const transitionDuration = 5.0;  // 5 seconds to fully change
+              const elapsed = this.time - this.starTransitionStartTime;
+              const t = Math.min(1, elapsed / transitionDuration);
+
+              // Interpolate from blue [0.6, 0.8, 1.0] to purple [0.7, 0.3, 1.0]
+              const r = 0.6 + (0.7 - 0.6) * t;
+              const g = 0.8 + (0.3 - 0.8) * t;
+              const b = 1.0;
+
+              // Update color for our custom star rendering
+              this.starColor = { r, g, b };
+
+              // Also update shader if available
+              if (this.star && this.star.setShaderUniforms) {
+                this.star.setShaderUniforms({
+                  uStarColor: [r, g, b],
+                  uTime: this.time
+                });
+              }
+            }
+
+            // Continue lattice fade if not done
+            this.updateLatticeReveal(this.time);
           },
         },
       ],
-      { context: this, loop: true }
+      { context: this, loop: false }  // Play once, then idle in EMPIRE
     );
   }
 
@@ -880,9 +1927,18 @@ class ForgeStarDemo extends Game {
     // Update lattice rotation
     this.latticeRotation += CONFIG.lattice.rotationSpeed * dt;
 
-    // Update ships
-    for (const ship of this.ships) {
-      ship.update(dt);
+    // Update rocket (when visible)
+    if (this.rocket && this.rocket.visible) {
+      this.rocket.update(dt);
+    }
+
+    // Update ships (only active ones)
+    if (this.shipsActive) {
+      for (const ship of this.ships) {
+        if (ship.active) {
+          ship.update(dt);
+        }
+      }
     }
 
     // Update stations
@@ -915,6 +1971,11 @@ class ForgeStarDemo extends Game {
        station.getRenderables(renderList);
     }
 
+    // Add rocket (when visible)
+    if (this.rocket && this.rocket.visible) {
+      this.rocket.getRenderables(renderList);
+    }
+
     // Add star (so it's depth-sorted with everything else)
     const starProj = this.camera.project(0, 0, 0);
     renderList.push({
@@ -925,43 +1986,63 @@ class ForgeStarDemo extends Game {
         scale: starProj.scale,
         depth: starProj.z,
     });
-    
-    // Add ships (update sort key to 'depth')
-    for (const ship of this.ships) {
-      const proj = this.camera.project(ship.x, ship.y, ship.z);
-      renderList.push({
-        type: 'ship',
-        x: proj.x,
-        y: proj.y,
-        z: proj.z,
-        scale: proj.scale,
-        depth: proj.z,
-        angle: ship.angle,
-        trail: ship.trail.map(t => {
-          const tp = this.camera.project(t.x, t.y, t.z);
-          return { x: tp.x, y: tp.y };
-        }),
-      });
+
+    // Add ships (only active ones)
+    if (this.shipsActive) {
+      for (const ship of this.ships) {
+        if (!ship.active) continue;  // Skip inactive ships
+
+        const proj = this.camera.project(ship.x, ship.y, ship.z);
+        renderList.push({
+          type: 'ship',
+          x: proj.x,
+          y: proj.y,
+          z: proj.z,
+          scale: proj.scale,
+          depth: proj.z,
+          angle: ship.angle,
+          trail: ship.trail.map(t => {
+            const tp = this.camera.project(t.x, t.y, t.z);
+            return { x: tp.x, y: tp.y };
+          }),
+        });
+      }
     }
     
-    // Add lattice nodes
-    for (const node of this.latticeNodes) {
-      // Apply lattice rotation
-      const cos = Math.cos(this.latticeRotation);
-      const sin = Math.sin(this.latticeRotation);
-      const rx = node.x * cos - node.z * sin;
-      const rz = node.x * sin + node.z * cos;
+    // Add lattice nodes (only when revealed in CAPITOL+)
+    if (this.latticeVisible) {
+      for (const node of this.latticeNodes) {
+        // Skip if not yet visible
+        if (node.alpha <= 0) continue;
 
-      const proj = this.camera.project(rx, node.y, rz);
-      renderList.push({
-        type: 'latticeNode',
-        x: proj.x,
-        y: proj.y,
-        z: proj.z,
-        scale: proj.scale,
-        depth: proj.z,
-        nodeSize: node.size,
-      });
+        let rx, rz, ry;
+
+        if (node.flightProgress < 1) {
+          // Node is still flying - use world space position directly (no rotation)
+          rx = node.x;
+          ry = node.y;
+          rz = node.z;
+        } else {
+          // Node has arrived - apply lattice rotation to final position
+          const cos = Math.cos(this.latticeRotation);
+          const sin = Math.sin(this.latticeRotation);
+          rx = node.finalX * cos - node.finalZ * sin;
+          rz = node.finalX * sin + node.finalZ * cos;
+          ry = node.finalY;
+        }
+
+        const proj = this.camera.project(rx, ry, rz);
+        renderList.push({
+          type: 'latticeNode',
+          x: proj.x,
+          y: proj.y,
+          z: proj.z,
+          scale: proj.scale,
+          depth: proj.z,
+          nodeSize: node.size,
+          alpha: node.alpha,  // Pass alpha for fade effect
+        });
+      }
     }
 
     // Sort by depth (back to front) - using new 'depth' property
@@ -989,7 +2070,32 @@ class ForgeStarDemo extends Game {
               item.cube.x = item.x;
               item.cube.y = item.y;
               item.cube.z = item.z;
-              item.cube.draw();
+
+              // Check if we need special rendering (scale or alpha)
+              const needsScale = item.revealScale !== undefined && item.revealScale < 1;
+              const needsAlpha = item.alpha !== undefined && item.alpha < 1;
+
+              if (needsScale || needsAlpha) {
+                ctx.save();
+
+                // Apply alpha for fade out
+                if (needsAlpha) {
+                  ctx.globalAlpha = Math.max(0, item.alpha);
+                }
+
+                // Apply scale for pop-in
+                if (needsScale) {
+                  const proj = this.camera.project(item.x, item.y, item.z);
+                  ctx.translate(proj.x, proj.y);
+                  ctx.scale(item.revealScale, item.revealScale);
+                  ctx.translate(-proj.x, -proj.y);
+                }
+
+                item.cube.draw();
+                ctx.restore();
+              } else {
+                item.cube.draw();
+              }
           }
           break;
         case 'star':
@@ -1002,41 +2108,123 @@ class ForgeStarDemo extends Game {
   }
 
   drawStarItem(ctx, item) {
-     // Render the Sphere3D star
-     if (this.star) {
-       ctx.save();
-       // Translate to projected screen position (context is already at center)
-       ctx.translate(item.x, item.y);
-       // Scale by perspective
-       ctx.scale(item.scale, item.scale);
-       // Star is at origin in its local space
-       this.star.x = 0;
-       this.star.y = 0;
-       this.star.z = 0;
-       // Draw the star
-       this.star.draw();
-       ctx.restore();
-     }
- 
-     // Additional glow halo
-     const glowRadius = CONFIG.star.radius * this.scale * 2 * item.scale;
-     const gx = item.x;
-     const gy = item.y;
- 
-     const gradient = ctx.createRadialGradient(gx, gy, 0, gx, gy, glowRadius);
-     gradient.addColorStop(0, 'rgba(150, 200, 255, 0.3)');
-     gradient.addColorStop(0.3, 'rgba(100, 180, 255, 0.15)');
-     gradient.addColorStop(0.6, 'rgba(80, 150, 255, 0.05)');
-     gradient.addColorStop(1, 'transparent');
- 
-     ctx.fillStyle = gradient;
-     ctx.beginPath();
-     ctx.arc(gx, gy, glowRadius, 0, Math.PI * 2);
-     ctx.fill();
+    const gx = item.x;
+    const gy = item.y;
+    const baseRadius = CONFIG.star.radius * this.scale * item.scale;
+    const time = this.time || 0;
+
+    // Get current star color (blue -> purple transition)
+    // Default blue: [0.6, 0.8, 1.0], Purple: [0.7, 0.3, 1.0]
+    const sc = this.starColor || { r: 0.6, g: 0.8, b: 1.0 };
+    const r = Math.floor(sc.r * 255);
+    const g = Math.floor(sc.g * 255);
+    const b = Math.floor(sc.b * 255);
+
+    // Pulsing intensity
+    const pulse = 1 + Math.sin(time * 2) * 0.05 + Math.sin(time * 3.7) * 0.03;
+
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+
+    // Layer 1: Outer corona (very large, subtle)
+    const coronaRadius = baseRadius * 4 * pulse;
+    const corona = ctx.createRadialGradient(gx, gy, baseRadius * 0.5, gx, gy, coronaRadius);
+    corona.addColorStop(0, `rgba(${r+50}, ${g+50}, ${b}, 0.15)`);
+    corona.addColorStop(0.3, `rgba(${r}, ${g}, ${b}, 0.08)`);
+    corona.addColorStop(0.6, `rgba(${Math.floor(r*0.7)}, ${Math.floor(g*0.7)}, ${b}, 0.03)`);
+    corona.addColorStop(1, 'transparent');
+    ctx.fillStyle = corona;
+    ctx.beginPath();
+    ctx.arc(gx, gy, coronaRadius, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Layer 2: Solar flares (spiky rays)
+    const flareCount = 12;
+    for (let i = 0; i < flareCount; i++) {
+      const angle = (i / flareCount) * Math.PI * 2 + time * 0.1;
+      const flareLength = baseRadius * (1.5 + Math.sin(time * 2 + i) * 0.5) * pulse;
+      const flareWidth = baseRadius * 0.15;
+
+      ctx.save();
+      ctx.translate(gx, gy);
+      ctx.rotate(angle);
+
+      const flareGrad = ctx.createLinearGradient(baseRadius * 0.8, 0, baseRadius + flareLength, 0);
+      flareGrad.addColorStop(0, `rgba(${r+80}, ${g+60}, ${b}, 0.4)`);
+      flareGrad.addColorStop(0.3, `rgba(${r+30}, ${g+30}, ${b}, 0.2)`);
+      flareGrad.addColorStop(1, 'transparent');
+
+      ctx.fillStyle = flareGrad;
+      ctx.beginPath();
+      ctx.moveTo(baseRadius * 0.8, 0);
+      ctx.lineTo(baseRadius + flareLength, -flareWidth * 0.3);
+      ctx.lineTo(baseRadius + flareLength, flareWidth * 0.3);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Layer 3: Inner glow halo
+    const haloRadius = baseRadius * 2 * pulse;
+    const halo = ctx.createRadialGradient(gx, gy, 0, gx, gy, haloRadius);
+    halo.addColorStop(0, `rgba(${r+100}, ${g+80}, ${b}, 0.5)`);
+    halo.addColorStop(0.2, `rgba(${r+50}, ${g+50}, ${b}, 0.35)`);
+    halo.addColorStop(0.5, `rgba(${r}, ${g}, ${b}, 0.15)`);
+    halo.addColorStop(1, 'transparent');
+    ctx.fillStyle = halo;
+    ctx.beginPath();
+    ctx.arc(gx, gy, haloRadius, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Layer 4: Bright core
+    const coreRadius = baseRadius * 1.1;
+    const core = ctx.createRadialGradient(gx, gy, 0, gx, gy, coreRadius);
+    core.addColorStop(0, 'rgba(255, 255, 255, 1)');
+    core.addColorStop(0.3, `rgba(${r+100}, ${g+80}, ${b}, 0.95)`);
+    core.addColorStop(0.6, `rgba(${r+50}, ${g+50}, ${b}, 0.8)`);
+    core.addColorStop(0.85, `rgba(${r}, ${g}, ${b}, 0.6)`);
+    core.addColorStop(1, `rgba(${Math.floor(r*0.6)}, ${Math.floor(g*0.6)}, ${b}, 0.3)`);
+    ctx.fillStyle = core;
+    ctx.beginPath();
+    ctx.arc(gx, gy, coreRadius, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Layer 5: Hot white center
+    const hotRadius = baseRadius * 0.4;
+    const hot = ctx.createRadialGradient(gx, gy, 0, gx, gy, hotRadius);
+    hot.addColorStop(0, 'rgba(255, 255, 255, 1)');
+    hot.addColorStop(0.5, 'rgba(255, 255, 255, 0.8)');
+    hot.addColorStop(1, 'rgba(230, 245, 255, 0.4)');
+    ctx.fillStyle = hot;
+    ctx.beginPath();
+    ctx.arc(gx, gy, hotRadius, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+
+    // Render the Sphere3D star on top (if using shader)
+    if (this.star) {
+      ctx.save();
+      ctx.globalAlpha = 0.6;  // Blend with our glow effects
+      ctx.translate(gx, gy);
+      ctx.scale(item.scale, item.scale);
+      this.star.x = 0;
+      this.star.y = 0;
+      this.star.z = 0;
+      this.star.draw();
+      ctx.restore();
+    }
   }
 
   drawLatticeNode(ctx, item) {
     const size = (item.nodeSize || CONFIG.lattice.nodeSize) * item.scale;
+    const alpha = item.alpha !== undefined ? item.alpha : 1;
+
+    // Skip if fully transparent
+    if (alpha <= 0) return;
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
 
     // Glow - subtle
     const gradient = ctx.createRadialGradient(
@@ -1057,6 +2245,8 @@ class ForgeStarDemo extends Game {
     ctx.beginPath();
     ctx.arc(item.x, item.y, size, 0, Math.PI * 2);
     ctx.fill();
+
+    ctx.restore();
   }
 
   drawShipWithTrail(ctx, item) {
