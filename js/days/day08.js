@@ -47,7 +47,7 @@ const CONFIG = {
     shellRadius: 160,
     nodeSize: 1.5,
     rotationSpeed: 0.03,
-    color: '#4af',
+    color: '#44aaff',
     // Multiple shell layers
     layers: [
       { radius: 140, count: 80, size: 1 },
@@ -71,7 +71,7 @@ const CONFIG = {
     speed: 120,             // Regular ship speed
     constructorSpeed: 250,  // Fast constructor ships
     trailLength: 12,
-    color: '#4db',          // Teal
+    color: '#44ddbb',       // Teal
     glowColor: 'rgba(80, 220, 180, 0.8)',
     trailColor: 'rgba(80, 200, 170, 0.4)',
   },
@@ -98,12 +98,13 @@ const CONFIG = {
   },
 
   // Starship spacecraft
+  // NOTE: Must use 6-char hex (not 3-char shorthand) for Cube3D._applyLighting()
   rocket: {
     startDistance: 800,     // Where ship starts (far from star)
-    bodyColor: '#639',      // Purple hull
-    accentColor: '#fc0',    // Yellow accents
-    thrustColor: '#f80',    // Orange engine glow
-    panelColor: '#86f',     // Light purple panels
+    bodyColor: '#663399',   // Purple hull
+    accentColor: '#ffcc00', // Yellow accents
+    thrustColor: '#ff8800', // Orange engine glow
+    panelColor: '#8866ff',  // Light purple panels
     voxelSize: 4,
   },
 
@@ -119,6 +120,16 @@ const CONFIG = {
     bgColor: '#000',
     glowColor: 'rgba(100, 180, 255, 0.3)',
     trailAlpha: 0.12,
+  },
+
+  // Background starfield for space immersion
+  starfield: {
+    count: 250,           // Number of background stars
+    radius: 450,          // Sphere radius (behind stations but visible)
+    minSize: 0.5,
+    maxSize: 1.5,
+    twinkleSpeed: 1.5,    // How fast stars twinkle
+    color: '#ffffff',
   },
 };
 
@@ -355,11 +366,11 @@ class Starship {
 
   generateStarship() {
     const size = CONFIG.rocket?.voxelSize || 4;
-    const hullColor = CONFIG.rocket?.bodyColor || '#639';
-    const hullDark = '#426';   // Darker purple for depth
-    const accentColor = CONFIG.rocket?.accentColor || '#fc0';
-    const engineColor = CONFIG.rocket?.thrustColor || '#f80';
-    const panelColor = CONFIG.rocket?.panelColor || '#86f';
+    const hullColor = CONFIG.rocket?.bodyColor || '#663399';
+    const hullDark = '#442266';   // Darker purple for depth
+    const accentColor = CONFIG.rocket?.accentColor || '#ffcc00';
+    const engineColor = CONFIG.rocket?.thrustColor || '#ff8800';
+    const panelColor = CONFIG.rocket?.panelColor || '#8866ff';
 
     // Helper to create a voxel with disassembly properties
     const createVoxel = (x, y, z, color, scale = 1) => {
@@ -838,42 +849,43 @@ class OrbitalStation {
     const voxelSize = this.voxelSize;
 
     // Color palettes - each station type gets unique colors
+    // NOTE: Must use 6-char hex (not 3-char shorthand) for Cube3D._applyLighting()
     const palettes = {
       capitol: {
-        main: '#fa4',      // Gold
-        accent: '#fc8',    // Light gold
-        dark: '#a60',      // Dark gold
-        glow: '#ff0',      // Bright yellow
+        main: '#ffaa44',      // Gold
+        accent: '#ffcc88',    // Light gold
+        dark: '#aa6600',      // Dark gold
+        glow: '#ffff00',      // Bright yellow
         stroke: 'rgba(255, 200, 100, 0.4)'
       },
       // Annex palettes - varied industrial colors
       annex: [
         { // Cyan/Teal
-          main: '#0fa',
-          accent: '#4fc',
-          dark: '#064',
-          glow: '#0ff',
+          main: '#00ffaa',
+          accent: '#44ffcc',
+          dark: '#006644',
+          glow: '#00ffff',
           stroke: 'rgba(0, 255, 200, 0.4)'
         },
         { // Blue
-          main: '#48f',
-          accent: '#8af',
-          dark: '#226',
-          glow: '#4cf',
+          main: '#4488ff',
+          accent: '#88aaff',
+          dark: '#222266',
+          glow: '#44ccff',
           stroke: 'rgba(100, 150, 255, 0.4)'
         },
         { // Purple/Violet
-          main: '#a4f',
-          accent: '#c8f',
-          dark: '#424',
-          glow: '#f4f',
+          main: '#aa44ff',
+          accent: '#cc88ff',
+          dark: '#442244',
+          glow: '#ff44ff',
           stroke: 'rgba(180, 100, 255, 0.4)'
         },
         { // Green
-          main: '#4f4',
-          accent: '#8f8',
-          dark: '#242',
-          glow: '#0f0',
+          main: '#44ff44',
+          accent: '#88ff88',
+          dark: '#224422',
+          glow: '#00ff00',
           stroke: 'rgba(100, 255, 100, 0.4)'
         },
       ]
@@ -1216,6 +1228,22 @@ class ForgeStarDemo extends Game {
       sensitivity: 0.004,
     });
     this.camera.enableMouseControl(this.canvas);
+
+    // Generate background starfield for space immersion
+    this.starfield = [];
+    const sfConfig = CONFIG.starfield;
+    const starPositions = fibonacciSphere(sfConfig.count, sfConfig.radius * this.scale);
+    for (const pos of starPositions) {
+      this.starfield.push({
+        x: pos.x,
+        y: pos.y,
+        z: pos.z,
+        size: sfConfig.minSize + Math.random() * (sfConfig.maxSize - sfConfig.minSize),
+        twinkleOffset: Math.random() * Math.PI * 2,  // Random phase
+        brightness: 0.3 + Math.random() * 0.7,       // Varying base brightness
+      });
+    }
+    console.log('[STARFIELD] Created', this.starfield.length, 'stars');
 
     // Create the blue hypergiant star
     this.star = new Sphere3D(CONFIG.star.radius * this.scale, {
@@ -1573,6 +1601,72 @@ class ForgeStarDemo extends Game {
     }
   }
 
+  /**
+   * Update constructor ships - spawning and arrival handling
+   * Shared between CAPITOL (starts at 50%) and EMPIRE phases
+   */
+  updateConstructorShips() {
+    // Guard: not yet initialized or spawning not started
+    if (!this.constructorShips || !this.constructorSpawningStarted) return;
+
+    // Spawn constructor ships one at a time
+    if (this.nextConstructorSpawn < this.constructorShips.length &&
+        this.time >= this.nextConstructorSpawnTime) {
+      const constructor = this.constructorShips[this.nextConstructorSpawn];
+      const ship = this.ships[constructor.shipIndex];
+      const capitol = this.stations[0];
+
+      // Set route: Capitol -> target Annex
+      ship.route = [
+        { type: 'station', target: capitol },
+        { type: 'station', target: constructor.annex },
+      ];
+      ship.routeIndex = 1;  // Start traveling to annex
+      ship.speed = CONFIG.ships.constructorSpeed * this.scale;  // Fast!
+      ship.spawn(capitol.x, capitol.y, capitol.z);
+
+      console.log(`[FORGE STAR] Constructor ship ${this.nextConstructorSpawn} launched to Annex ${constructor.annexIndex}`);
+      this.nextConstructorSpawn++;
+      this.nextConstructorSpawnTime = this.time + CONFIG.reveal.annexStagger;
+    }
+
+    // Check for constructor ship arrivals
+    for (const constructor of this.constructorShips) {
+      if (constructor.triggered) continue;
+
+      const ship = this.ships[constructor.shipIndex];
+      if (!ship.active) continue;
+
+      // Check if ship arrived at annex (switched to orbit state at annex)
+      if (ship.state === 'orbit' && ship.routeIndex === 1) {
+        constructor.arrived = true;
+
+        if (!constructor.triggered) {
+          constructor.triggered = true;
+          console.log(`[FORGE STAR] Constructor arrived - building Annex ${constructor.annexIndex}`);
+
+          // Start this annex's reveal
+          constructor.annex.startReveal(this.time, CONFIG.reveal.staggerDelay);
+          this.annexesBuilt = (this.annexesBuilt || 0) + 1;
+
+          // Deplete purple ship voxels
+          const startIdx = (constructor.annexIndex - 1) * this.voxelsPerAnnex;
+          const endIdx = Math.min(startIdx + this.voxelsPerAnnex, this.remainingShipVoxels.length);
+          for (let i = startIdx; i < endIdx; i++) {
+            if (this.remainingShipVoxels[i]) {
+              this.remainingShipVoxels[i].alpha = 0;
+            }
+          }
+
+          // Set regular ships spawn time after last constructor
+          if (this.nextConstructorSpawn >= this.constructorShips.length) {
+            this.nextShipSpawnTime = this.time + CONFIG.reveal.shipSpawnInterval;
+          }
+        }
+      }
+    }
+  }
+
   initStateMachine() {
     // Track phase elapsed time for animations
     this.phaseTime = 0;
@@ -1710,6 +1804,8 @@ class ForgeStarDemo extends Game {
             // Calculate how long the Capitol reveal takes
             const capitol = this.stations[0];
             const revealDuration = capitol.voxels.length * CONFIG.reveal.staggerDelay + 0.5;
+            this.capitolRevealDuration = revealDuration;
+            this.capitolRevealStartTime = this.time;
 
             // Start ship disassembly - voxels toggle off as Capitol assembles
             this.rocket.startDisassembly(this.time, revealDuration);
@@ -1720,45 +1816,12 @@ class ForgeStarDemo extends Game {
             // Start lattice reveal (outer to inner fade)
             this.startLatticeReveal(this.time);
 
-            // Speed up camera slightly
-            this.camera.autoRotateSpeed = CONFIG.camera.autoRotateSpeed * 0.6;
-          },
-          update: (dt) => {
-            this.phaseTime += dt;
-
-            // Update ship disassembly (pass current time)
-            this.rocket.updateDisassembly(this.time);
-
-            // Update Capitol reveal animation
-            this.stations[0].updateReveal(this.time);
-
-            // Update lattice fade-in
-            this.updateLatticeReveal(this.time);
-          },
-        },
-
-        // ─────────────────────────────────────────────────────────────
-        // EMPIRE: Full activity - annexes reveal, ships activate
-        // ─────────────────────────────────────────────────────────────
-        {
-          name: 'empire',
-          duration: null,  // Stay forever
-          enter: () => {
-            console.log('[FORGE STAR] Phase: EMPIRE');
-            this.phaseTime = 0;
-
-            // Capitol reveal started in CAPITOL phase - calculate remaining time
-            const capitol = this.stations[0];
-            const lastVoxelRevealTime = capitol.voxels.reduce((max, v) => Math.max(max, v.revealTime), 0);
-            const remainingRevealTime = Math.max(0, lastVoxelRevealTime - this.time) + 0.3;
-
-            // Constructor ships: one per annex, flies from Capitol to trigger construction
+            // Initialize constructor ships NOW (will spawn at 50% Capitol progress)
             const annexCount = this.stations.length - 1;
             this.constructorShips = [];
             this.nextConstructorSpawn = 0;
-            this.nextConstructorSpawnTime = this.time + remainingRevealTime;
+            this.constructorSpawningStarted = false;
 
-            // Create constructor ship assignments (first N ships are constructors)
             for (let i = 0; i < annexCount; i++) {
               const annex = this.stations[i + 1];
               this.constructorShips.push({
@@ -1774,14 +1837,60 @@ class ForgeStarDemo extends Game {
             this.remainingShipVoxels = this.rocket.voxels.filter(v => v.alpha > 0);
             this.voxelsPerAnnex = Math.ceil(this.remainingShipVoxels.length / annexCount);
 
-            // Regular ships spawn after constructors
+            // Activate ships system (but don't spawn regular ships yet)
             this.shipsActive = true;
-            this.nextShipToSpawn = annexCount;  // Skip constructor ships
-            this.nextShipSpawnTime = this.time + remainingRevealTime + annexCount * CONFIG.reveal.annexStagger;
+            this.nextShipToSpawn = annexCount;  // Regular ships start after constructors
+            this.nextShipSpawnTime = Infinity;  // Will be set when constructors done
+            this.annexesBuilt = 0;
+
+            // Speed up camera slightly
+            this.camera.autoRotateSpeed = CONFIG.camera.autoRotateSpeed * 0.6;
+          },
+          update: (dt) => {
+            this.phaseTime += dt;
+
+            // Update ship disassembly (pass current time)
+            this.rocket.updateDisassembly(this.time);
+
+            // Update Capitol reveal animation
+            this.stations[0].updateReveal(this.time);
+
+            // Update lattice fade-in
+            this.updateLatticeReveal(this.time);
+
+            // Check Capitol progress - start constructor ships at 50%
+            const capitolProgress = (this.time - this.capitolRevealStartTime) / this.capitolRevealDuration;
+            if (capitolProgress >= 0.5 && !this.constructorSpawningStarted) {
+              this.constructorSpawningStarted = true;
+              this.nextConstructorSpawnTime = this.time;
+              console.log('[FORGE STAR] Capitol at 50% - starting constructor ships');
+            }
+
+            // Spawn constructor ships (shared logic with EMPIRE)
+            this.updateConstructorShips();
+          },
+        },
+
+        // ─────────────────────────────────────────────────────────────
+        // EMPIRE: Full activity - annexes reveal, ships activate
+        // ─────────────────────────────────────────────────────────────
+        {
+          name: 'empire',
+          duration: null,  // Stay forever
+          enter: () => {
+            console.log('[FORGE STAR] Phase: EMPIRE');
+            this.phaseTime = 0;
+
+            // Constructor ships already initialized in CAPITOL phase
+            // Just ensure spawning has started (in case we skipped ahead)
+            if (!this.constructorSpawningStarted) {
+              this.constructorSpawningStarted = true;
+              this.nextConstructorSpawnTime = this.time;
+            }
 
             // Energy particles start AFTER most annexes form
             this.energyParticlesActive = false;
-            this.annexesBuilt = 0;
+            this.annexesBuilt = this.annexesBuilt || 0;
 
             // Track empire completion state
             this.empireComplete = false;
@@ -1798,57 +1907,8 @@ class ForgeStarDemo extends Game {
               station.updateReveal(this.time);
             }
 
-            // Spawn constructor ships one at a time
-            if (this.nextConstructorSpawn < this.constructorShips.length &&
-                this.time >= this.nextConstructorSpawnTime) {
-              const constructor = this.constructorShips[this.nextConstructorSpawn];
-              const ship = this.ships[constructor.shipIndex];
-              const capitol = this.stations[0];
-
-              // Set route: Capitol -> target Annex
-              ship.route = [
-                { type: 'station', target: capitol },
-                { type: 'station', target: constructor.annex },
-              ];
-              ship.routeIndex = 1;  // Start traveling to annex
-              ship.speed = CONFIG.ships.constructorSpeed * this.scale;  // Fast!
-              ship.spawn(capitol.x, capitol.y, capitol.z);
-
-              console.log(`[FORGE STAR] Constructor ship ${this.nextConstructorSpawn} launched to Annex ${constructor.annexIndex}`);
-              this.nextConstructorSpawn++;
-              this.nextConstructorSpawnTime = this.time + CONFIG.reveal.annexStagger;
-            }
-
-            // Check for constructor ship arrivals
-            for (const constructor of this.constructorShips) {
-              if (constructor.triggered) continue;
-
-              const ship = this.ships[constructor.shipIndex];
-              if (!ship.active) continue;
-
-              // Check if ship arrived at annex (switched to orbit state at annex)
-              if (ship.state === 'orbit' && ship.routeIndex === 1) {
-                constructor.arrived = true;
-
-                if (!constructor.triggered) {
-                  constructor.triggered = true;
-                  console.log(`[FORGE STAR] Constructor arrived - building Annex ${constructor.annexIndex}`);
-
-                  // Start this annex's reveal
-                  constructor.annex.startReveal(this.time, CONFIG.reveal.staggerDelay);
-                  this.annexesBuilt++;
-
-                  // Deplete purple ship voxels
-                  const startIdx = (constructor.annexIndex - 1) * this.voxelsPerAnnex;
-                  const endIdx = Math.min(startIdx + this.voxelsPerAnnex, this.remainingShipVoxels.length);
-                  for (let i = startIdx; i < endIdx; i++) {
-                    if (this.remainingShipVoxels[i]) {
-                      this.remainingShipVoxels[i].alpha = 0;
-                    }
-                  }
-                }
-              }
-            }
+            // Continue spawning constructor ships (shared logic)
+            this.updateConstructorShips();
 
             // Regular ships spawn after all constructors are done
             const annexCount = this.stations.length - 1;
@@ -2050,6 +2110,29 @@ class ForgeStarDemo extends Game {
 
     // Render pipeline (includes energy particles)
     super.render();
+
+    // Render background starfield (after super.render clears, before main items)
+    if (this.starfield && this.starfield.length > 0) {
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.fillStyle = '#ffffff';
+
+      for (const star of this.starfield) {
+        const proj = this.camera.project(star.x, star.y, star.z);
+        if (proj.scale <= 0) continue;
+
+        // Twinkle effect
+        const twinkle = 0.5 + 0.5 * Math.sin(this.time * CONFIG.starfield.twinkleSpeed + star.twinkleOffset);
+
+        ctx.globalAlpha = star.brightness * twinkle;
+        ctx.beginPath();
+        ctx.arc(proj.x, proj.y, star.size, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      ctx.globalAlpha = 1;
+      ctx.restore();
+    }
 
     // Draw sorted items
     ctx.save();
