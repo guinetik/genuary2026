@@ -211,6 +211,11 @@ body {
   box-shadow: 0 0 20px var(--accent-glow);
 }
 
+.nav-logo svg {
+  width: 26px;
+  height: 23px;
+}
+
 .nav-branding h1 {
   font-size: 16px;
   font-weight: bold;
@@ -222,9 +227,47 @@ body {
 
 .nav-subtitle {
   font-size: 11px;
-  color: var(--text-muted);
+  color: #888;
   text-transform: uppercase;
   letter-spacing: 1px;
+}
+
+.nav-icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin: 12px auto 0;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-bright);
+  border-radius: 50%;
+  color: #888;
+  text-decoration: none;
+  transition: all var(--transition-fast);
+}
+
+.nav-icon-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: 0 0 10px var(--accent-glow);
+}
+
+.nav-author {
+  font-size: 11px;
+  color: var(--accent);
+  margin-top: 4px;
+  text-align: center;
+}
+
+.nav-author a {
+  color: var(--accent);
+  text-decoration: none;
+  transition: opacity var(--transition-fast);
+}
+
+.nav-author a:hover {
+  opacity: 0.7;
 }
 
 .nav-links {
@@ -706,7 +749,7 @@ body {
 
 .day-interpretation {
   font-size: 12px;
-  color: var(--text-muted);
+  color: #aaa; /* Light gray for better legibility */
   font-style: italic;
   line-height: 1.5;
   margin-bottom: 14px;
@@ -718,7 +761,7 @@ body {
 
 .day-date {
   font-size: 12px;
-  color: var(--text-muted);
+  color: #888; /* Lighter gray */
   line-height: 1.6;
   font-family: var(--font-mono);
   border-top: 1px solid var(--border);
