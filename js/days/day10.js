@@ -40,16 +40,17 @@ const CONFIG = {
   initialRotationX: 0,  
   initialRotationY: 0.0,
 
-  // Polar mesh
-  radiusRatio: 0.38,  // Ratio of min(width, height)
-  rings: 24,
-  slices: 48,
+  // Polar mesh - denser for more detail
+  radiusRatio: 0.42,  // Ratio of min(width, height)
+  rings: 32,
+  slices: 64,
 
-  // Hyperbolic crochet deformation - MORE dramatic ruffles
-  waves: 12,
-  exponent: 2.4,      // Higher = more ruffling at edges
-  flow: 6.0,
-  speed: 1.2,         // Slower, more organic
+  // Hyperbolic crochet deformation - TRUE hyperbolic ruffles
+  waves: 18,          // More waves = more ruffling
+  waves2: 7,          // Secondary wave for complexity
+  exponent: 3.2,      // Higher = exponential edge ruffling
+  flow: 4.0,
+  speed: 0.8,         // Slower, more organic
 
   // Noise - fabric texture, increases on click
   noiseScale: 0.008,
@@ -60,18 +61,19 @@ const CONFIG = {
   // Energy - click to wiggle
   energyKick: 0.4,
   energyDecay: 0.92,
-  amplitudeRatioBase: 0.08,   // Ratio of radius
-  amplitudeRatioMax: 0.25,    // Much more dramatic on click
+  amplitudeRatioBase: 0.22,   // Much taller waves for true ruffling
+  amplitudeRatioMax: 0.40,    // Even more dramatic on click
 
   // Wireframe
   lineWidth: 0.8,
 
-  // Excitations (particles) - yarn fibers
-  maxParticles: 1500,
-  excitationRate: 40,
-  excitationLifetime: { min: 0.5, max: 1.5 },
-  excitationSize: { min: 1.0, max: 2.0 },
-  excitationDamping: 0.95,
+  // Excitations (particles) - traveling through hyperbolic space
+  maxParticles: 2000,
+  excitationRate: 30,
+  excitationLifetime: { min: 2.5, max: 5.0 },   // Much longer journeys
+  excitationSize: { min: 1.5, max: 3.0 },
+  excitationSpeed: 120,                          // Faster travel
+  excitationDamping: 0.98,                       // Less friction = longer paths
 };
 
 const TAU = Math.PI * 2;
@@ -145,16 +147,17 @@ class Day10Demo extends Game {
         Updaters.velocity,
         Updaters.damping(CONFIG.excitationDamping),
         Updaters.fadeOut,
-        Updaters.shrink(0.15),
+        Updaters.shrink(0.3),
         Updaters.lifetime,
       ],
     });
 
+    const spd = CONFIG.excitationSpeed;
     this.particles.addEmitter('excite', new ParticleEmitter({
       rate: 0,
       position: { x: 0, y: 0, z: 0 },
-      velocity: { x: 0, y: 0, z: 40 },
-      velocitySpread: { x: 60, y: 60, z: 60 },
+      velocity: { x: 0, y: 0, z: spd * 0.5 },
+      velocitySpread: { x: spd, y: spd, z: spd },
       lifetime: CONFIG.excitationLifetime,
       size: CONFIG.excitationSize,
       color: { r: 100, g: 200, b: 255, a: 1 },  // Teal/cyan
@@ -248,6 +251,7 @@ class Day10Demo extends Game {
 
   /**
    * Compute fabric height z(r, θ, t) for a vertex.
+   * True hyperbolic ruffling: waves compound exponentially at edges.
    * @param {{x:number,y:number,theta:number,rRatio:number}} v
    * @returns {number}
    */
@@ -256,18 +260,33 @@ class Day10Demo extends Game {
     const rRatio = v.rRatio ?? 0;
     const theta = v.theta ?? 0;
 
-    const wavePhase = theta * CONFIG.waves;
-    const twistPhase = wavePhase + (rRatio * CONFIG.flow - this.time * CONFIG.speed);
-    const zBase = Math.pow(rRatio, CONFIG.exponent) * this.amplitude * Math.sin(twistPhase);
+    // Hyperbolic factor: exponential growth at edges
+    const hyperbolic = Math.pow(rRatio, CONFIG.exponent);
 
+    // Primary wave - main ruffles
+    const wave1Phase = theta * CONFIG.waves + (rRatio * CONFIG.flow - this.time * CONFIG.speed);
+    const wave1 = Math.sin(wave1Phase);
+
+    // Secondary wave - adds complexity/overlap (different frequency)
+    const wave2Phase = theta * CONFIG.waves2 - (rRatio * CONFIG.flow * 0.7 + this.time * CONFIG.speed * 1.3);
+    const wave2 = Math.sin(wave2Phase) * 0.4;
+
+    // Tertiary wave - high frequency detail at edges only
+    const wave3Phase = theta * (CONFIG.waves * 2) + this.time * CONFIG.speed * 0.5;
+    const wave3 = Math.sin(wave3Phase) * 0.15 * rRatio;
+
+    // Combine waves with hyperbolic scaling
+    const zBase = hyperbolic * this.amplitude * (wave1 + wave2 + wave3);
+
+    // Noise for organic texture
     const t = this.time * CONFIG.noiseSpeed;
     const n = Noise.simplex3(
       v.x * CONFIG.noiseScale + t,
       v.y * CONFIG.noiseScale + t,
-      zBase * 0.01
+      rRatio * 2
     );
 
-    return zBase + n * this.noiseStrength * rRatio;
+    return zBase + n * this.noiseStrength * hyperbolic;
   }
 
   /**
