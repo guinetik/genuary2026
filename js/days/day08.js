@@ -91,9 +91,10 @@ const CONFIG = {
 
   // Narrative phases (plays once, then idles in EMPIRE)
   phases: {
-    arrival: 6,      // Rocket approaches star
-    deployment: 4,   // Panels deploy, satellites separate
-    capitol: 5,      // Capitol station reveals
+    intro: 6,        // Just the star, contemplative
+    arrival: 7,      // Rocket approaches star
+    deployment: 5,   // Panels deploy, satellites separate
+    capitol: 6,      // Capitol station reveals
     empire: null,    // Full activity - stays forever
   },
 
@@ -130,6 +131,23 @@ const CONFIG = {
     maxSize: 1.5,
     twinkleSpeed: 1.5,    // How fast stars twinkle
     color: '#ffffff',
+  },
+
+  // Wormhole portal effect (Twilight Princess style)
+  wormhole: {
+    radius: 60,           // Base size of portal
+    ringCount: 5,         // Number of swirling rings
+    particleCount: 40,    // Particles spiraling in
+    rotationSpeed: 2,     // Ring rotation speed
+    spawnTime: 2.3,       // Time to fully open (dramatic reveal)
+    colors: {
+      core: '#ffffff',
+      inner: '#aa88ff',   // Purple inner glow
+      outer: '#4488ff',   // Blue outer ring
+      particles: '#cc99ff',
+    },
+    fadeOutStart: 0.4,    // Start fading at 40% through ARRIVAL
+    fadeOutEnd: 0.8,      // Fully faded at 80%
   },
 };
 
@@ -1686,11 +1704,12 @@ class ForgeStarDemo extends Game {
       z: shipOrbitRadius * 0.4,          // Slight forward offset for camera visibility
     };
 
-    // Start position: upper-left of scene (comes from above and left)
+    // Start position: left edge of screen, visible in default camera
+    // Negative X = left side, positive Z = toward camera (visible)
     this.shipPath = {
-      startX: -CONFIG.rocket.startDistance * this.scale * 0.7,
-      startY: CONFIG.rocket.startDistance * this.scale * 0.5,  // Above the scene
-      startZ: -CONFIG.rocket.startDistance * this.scale * 0.3,
+      startX: -350 * this.scale,   // Left side of visible area
+      startY: 50 * this.scale,     // Slightly above center
+      startZ: 200 * this.scale,    // In front (toward camera) so it's visible
       // End position: top of star orbit
       endX: this.shipOrbit.x,
       endY: this.shipOrbit.y,
@@ -1699,6 +1718,29 @@ class ForgeStarDemo extends Game {
 
     this.sceneFSM = StateMachine.fromSequence(
       [
+        // ─────────────────────────────────────────────────────────────
+        // INTRO: Just the star, contemplative silence before the story
+        // ─────────────────────────────────────────────────────────────
+        {
+          name: 'intro',
+          duration: CONFIG.phases.intro,
+          enter: () => {
+            console.log('[FORGE STAR] Phase: INTRO');
+            this.phaseTime = 0;
+
+            // Hide everything except star and starfield
+            this.rocket.visible = false;
+            this.wormhole = null;
+
+            // Slow camera rotation - peaceful contemplation
+            this.camera.autoRotateSpeed = CONFIG.camera.autoRotateSpeed * 0.2;
+          },
+          update: (dt) => {
+            this.phaseTime += dt;
+            // Just let the star breathe, nothing else happens
+          },
+        },
+
         // ─────────────────────────────────────────────────────────────
         // ARRIVAL: Starship slides in from left, curves into orbit
         // ─────────────────────────────────────────────────────────────
@@ -1712,25 +1754,96 @@ class ForgeStarDemo extends Game {
             // Slow camera rotation - contemplative approach
             this.camera.autoRotateSpeed = CONFIG.camera.autoRotateSpeed * 0.3;
 
-            // Make sure ship is visible
-            this.rocket.visible = true;
+            // Ship stays hidden until portal opens
+            this.rocket.visible = false;
+
+            // Initialize wormhole at ship's starting position (Y is negated like ship position)
+            this.wormhole = {
+              x: this.shipPath.startX,
+              y: -this.shipPath.startY,  // Negate Y to match ship's actual position
+              z: this.shipPath.startZ,
+              alpha: 0,        // Start invisible
+              scale: 0,        // Start at zero size
+              rotation: 0,
+              active: true,
+              spawnTime: CONFIG.wormhole.spawnTime,
+              particles: [],
+            };
+
+            // Generate wormhole particles (spiral pattern)
+            const pCount = CONFIG.wormhole.particleCount;
+            for (let i = 0; i < pCount; i++) {
+              const angle = (i / pCount) * Math.PI * 2 * 3;  // 3 spiral arms
+              const dist = (i / pCount) * CONFIG.wormhole.radius * this.scale;
+              this.wormhole.particles.push({
+                angle: angle,
+                dist: dist,
+                speed: 0.5 + Math.random() * 1.5,
+                size: 1 + Math.random() * 2,
+              });
+            }
           },
           update: (dt) => {
             this.phaseTime += dt;
             const duration = CONFIG.phases.arrival;
-            const t = Math.min(1, this.phaseTime / (duration * 0.85));
+            const spawnTime = CONFIG.wormhole.spawnTime;
+
+            // Update wormhole - spawn, rotation and fade
+            if (this.wormhole && this.wormhole.active) {
+              this.wormhole.rotation += CONFIG.wormhole.rotationSpeed * dt;
+
+              const progress = this.phaseTime / duration;
+              const spawnProgress = Math.min(1, this.phaseTime / spawnTime);
+
+              // Spawn in (scale up with overshoot)
+              if (spawnProgress < 1) {
+                // Elastic ease out for punchy spawn
+                const sp = spawnProgress;
+                const overshoot = Math.sin(sp * Math.PI * 1.5) * 0.2 * (1 - sp);
+                this.wormhole.scale = sp + overshoot;
+                this.wormhole.alpha = sp;
+              } else {
+                this.wormhole.scale = 1;
+
+                // Show ship once portal is fully open
+                if (!this.rocket.visible) {
+                  this.rocket.visible = true;
+                }
+
+                // Fade out as ship moves away
+                const fadeStart = CONFIG.wormhole.fadeOutStart;
+                const fadeEnd = CONFIG.wormhole.fadeOutEnd;
+
+                if (progress < fadeStart) {
+                  this.wormhole.alpha = 1;
+                } else if (progress > fadeEnd) {
+                  this.wormhole.alpha = 0;
+                  this.wormhole.active = false;
+                } else {
+                  this.wormhole.alpha = 1 - (progress - fadeStart) / (fadeEnd - fadeStart);
+                }
+              }
+
+              // Update particle positions (spiral inward)
+              for (const p of this.wormhole.particles) {
+                p.angle += p.speed * dt;
+              }
+            }
+
+            // Ship movement only starts after portal opens
+            const shipTime = Math.max(0, this.phaseTime - spawnTime);
+            const shipDuration = duration - spawnTime;
+            const t = Math.min(1, shipTime / (shipDuration * 0.85));
 
             // Smooth easing for the approach
             const eased = Easing.easeInOutCubic(t);
 
             // Simple arc path: stays ABOVE the star at all times
-            // Linear interpolation for X and Z, Y stays high with slight arc
             const x = this.shipPath.startX + (this.shipPath.endX - this.shipPath.startX) * eased;
             const z = this.shipPath.startZ + (this.shipPath.endZ - this.shipPath.startZ) * eased;
 
             // Y: interpolate but add upward arc to ensure we never dip below end height
             const baseY = this.shipPath.startY + (this.shipPath.endY - this.shipPath.startY) * eased;
-            // Add arc: peaks at t=0.5, ensures path bulges upward
             const arcBoost = Math.sin(eased * Math.PI) * this.shipOrbit.y * 0.3;
             const y = -(baseY + arcBoost);  // Negate to go ABOVE star
 
@@ -1739,8 +1852,6 @@ class ForgeStarDemo extends Game {
             // Calculate heading based on direction of travel (XZ plane)
             const dx = this.shipPath.endX - this.shipPath.startX;
             const dz = this.shipPath.endZ - this.shipPath.startZ;
-
-            // Heading angle: atan2 gives angle from +X axis
             const heading = Math.atan2(dz, dx);
             this.rocket.setHeading(heading);
           },
@@ -2047,6 +2158,23 @@ class ForgeStarDemo extends Game {
         depth: starProj.z,
     });
 
+    // Add wormhole (when active during ARRIVAL)
+    if (this.wormhole && this.wormhole.active && this.wormhole.alpha > 0) {
+      const whProj = this.camera.project(this.wormhole.x, this.wormhole.y, this.wormhole.z);
+      renderList.push({
+        type: 'wormhole',
+        x: whProj.x,
+        y: whProj.y,
+        z: whProj.z,
+        scale: whProj.scale,
+        depth: whProj.z,
+        alpha: this.wormhole.alpha,
+        spawnScale: this.wormhole.scale,  // Spawn animation scale
+        rotation: this.wormhole.rotation,
+        particles: this.wormhole.particles,
+      });
+    }
+
     // Add ships (only active ones)
     if (this.shipsActive) {
       for (const ship of this.ships) {
@@ -2184,8 +2312,88 @@ class ForgeStarDemo extends Game {
         case 'star':
           this.drawStarItem(ctx, item);
           break;
+        case 'wormhole':
+          this.drawWormhole(ctx, item);
+          break;
       }
     }
+
+    ctx.restore();
+  }
+
+  /**
+   * Draw Twilight Princess style wormhole portal
+   */
+  drawWormhole(ctx, item) {
+    const spawnScale = item.spawnScale || 1;
+    const baseRadius = CONFIG.wormhole.radius * this.scale * item.scale * spawnScale;
+    const colors = CONFIG.wormhole.colors;
+    const ringCount = CONFIG.wormhole.ringCount;
+
+    ctx.save();
+    ctx.translate(item.x, item.y);
+    ctx.globalAlpha = item.alpha;
+    ctx.globalCompositeOperation = 'lighter';
+
+    // Outer glow
+    const outerGlow = ctx.createRadialGradient(0, 0, baseRadius * 0.5, 0, 0, baseRadius * 2);
+    outerGlow.addColorStop(0, 'rgba(68, 136, 255, 0.3)');
+    outerGlow.addColorStop(0.5, 'rgba(170, 136, 255, 0.15)');
+    outerGlow.addColorStop(1, 'transparent');
+    ctx.fillStyle = outerGlow;
+    ctx.beginPath();
+    ctx.arc(0, 0, baseRadius * 2, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Swirling rings (alternate rotation directions)
+    for (let i = 0; i < ringCount; i++) {
+      const ringRadius = baseRadius * (0.3 + (i / ringCount) * 0.7);
+      const ringRotation = item.rotation * (i % 2 === 0 ? 1 : -0.7) + (i * Math.PI / ringCount);
+      const ringAlpha = 0.6 - (i / ringCount) * 0.3;
+
+      ctx.save();
+      ctx.rotate(ringRotation);
+
+      // Draw ring segments (broken circle effect)
+      const segments = 8;
+      const gapRatio = 0.3;
+      for (let s = 0; s < segments; s++) {
+        const startAngle = (s / segments) * Math.PI * 2;
+        const endAngle = startAngle + (Math.PI * 2 / segments) * (1 - gapRatio);
+
+        ctx.strokeStyle = i < ringCount / 2 ? colors.inner : colors.outer;
+        ctx.lineWidth = 2 + (ringCount - i) * 0.5;
+        ctx.globalAlpha = item.alpha * ringAlpha;
+        ctx.beginPath();
+        ctx.arc(0, 0, ringRadius, startAngle, endAngle);
+        ctx.stroke();
+      }
+
+      ctx.restore();
+    }
+
+    // Spiral particles
+    ctx.globalAlpha = item.alpha * 0.8;
+    ctx.fillStyle = colors.particles;
+    for (const p of item.particles) {
+      const px = Math.cos(p.angle) * p.dist;
+      const py = Math.sin(p.angle) * p.dist;
+      ctx.beginPath();
+      ctx.arc(px, py, p.size * item.scale, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Bright core
+    const coreGradient = ctx.createRadialGradient(0, 0, 0, 0, 0, baseRadius * 0.4);
+    coreGradient.addColorStop(0, 'rgba(255, 255, 255, 0.9)');
+    coreGradient.addColorStop(0.3, 'rgba(200, 180, 255, 0.6)');
+    coreGradient.addColorStop(0.7, 'rgba(136, 100, 255, 0.3)');
+    coreGradient.addColorStop(1, 'transparent');
+    ctx.globalAlpha = item.alpha;
+    ctx.fillStyle = coreGradient;
+    ctx.beginPath();
+    ctx.arc(0, 0, baseRadius * 0.4, 0, Math.PI * 2);
+    ctx.fill();
 
     ctx.restore();
   }
