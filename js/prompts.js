@@ -49,15 +49,15 @@ export const INTERPRETATIONS = {
   5: 'Pixel-art letters defined in code, rendered as 3D particles. Inspired by the title sequence from the TV show "Pluribus".',
   6: 'A digital lava lamp: toggle the "lights" to fade the heat, glow, and motion in/out',
   7: 'Bitwise fractals: Sierpinski triangles and infinite patterns emerge from simple boolean operations like (x & y) and (x ^ y)',
-  8: 'Forge Star: a stellar foundry where civilization industrialized a blue hypergiant into a Dyson-like megastructure',
-  9: "Maxwell's Demon: a thought experiment where a tiny demon sorts hot and cold gas particles, seemingly violating the second law of thermodynamics. To me this is the ultimate example of Crazy Automaton 😈.",
-  10: 'Visualizations driven by polar coordinate systems (r, θ) instead of cartesian (x, y)',
-  11: 'A Quine is code poetry: a program that outputs exactly its own source code',
+  8: 'Forge Star: a colonizer ship emerges from a wormhole to build a Dyson swarm to collect energy from the star. They dope the star with heavy elements to forge metals, shifting it from blue to purple.',
+  9: 'Cellular automata gone wild - rules that create unexpected emergent behavior.',
+  10: 'String Theory Worldsheet: a polar (r,θ) mesh becomes a ruffled hyperbolic “spacetime fabric” that you can excite with clicks.',
+  11: 'Matrix rain that fetches and displays its own source code. The falling lines ARE this file - true self-reference.',
   12: 'Compositions made entirely from rectangular boxes',
   13: 'Generative self-portrait: start with basic shapes, add features that look like you',
   14: 'Perfect tessellation where every piece fits exactly with no gaps',
   15: 'An invisible object revealed only by the shadows it casts',
-  16: 'The tension and interplay between order and chaos',
+  16: "Maxwell's Demon: a tiny demon sorts hot and cold gas particles, seemingly violating the second law of thermodynamics. Order emerges from chaos... or does it? 😈",
   17: 'One of 17 ways to tile a plane with repeating patterns (or 35 if you count symmetries)',
   18: 'Draw a route that changes direction based on one simple rule',
   19: 'Create something within a 16×16 pixel constraint',
@@ -97,4 +97,4 @@ export function getInterpretation(day) {
  * Total number of Genuary days to display
  * (Expand as implementations are added)
  */
-export const TOTAL_DAYS = 9;
+export const TOTAL_DAYS = 11;
