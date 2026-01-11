@@ -25,7 +25,52 @@ import {
   Shape,
   Cloud,
   Painter,
+  heatTransferFalloff,
 } from "@guinetik/gcanvas";
+
+/**
+ * Apply heat transfer between nearby particles.
+ * (Temporary local copy until npm link works)
+ */
+function applyParticleHeatTransfer(particles, options = {}) {
+  const {
+    maxDistance = 50,
+    rate = 0.01,
+    falloff = 1,
+    temperatureKey = 'temperature',
+    filter = null,
+  } = options;
+
+  const n = particles.length;
+  const maxDist2 = maxDistance * maxDistance;
+
+  for (let i = 0; i < n; i++) {
+    const pi = particles[i];
+    if (filter && !filter(pi)) continue;
+    if (pi.custom[temperatureKey] === undefined) pi.custom[temperatureKey] = 0.5;
+
+    for (let j = i + 1; j < n; j++) {
+      const pj = particles[j];
+      if (filter && !filter(pj)) continue;
+      if (pj.custom[temperatureKey] === undefined) pj.custom[temperatureKey] = 0.5;
+
+      const dx = pi.x - pj.x;
+      const dy = pi.y - pj.y;
+      const dist2 = dx * dx + dy * dy;
+      if (dist2 >= maxDist2 || dist2 < 0.0001) continue;
+
+      const dist = Math.sqrt(dist2);
+      const delta = heatTransferFalloff(
+        pi.custom[temperatureKey],
+        pj.custom[temperatureKey],
+        dist, maxDistance, rate, falloff
+      );
+
+      pi.custom[temperatureKey] = Math.max(0, Math.min(1, pi.custom[temperatureKey] + delta));
+      pj.custom[temperatureKey] = Math.max(0, Math.min(1, pj.custom[temperatureKey] - delta));
+    }
+  }
+}
 
 /**
  * Ellipse shape - not built into gcanvas, so we create our own
@@ -355,9 +400,14 @@ class ThoughtBubble extends GameObject {
 }
 
 const CONFIG = {
-  particleSize: 12,
-  maxParticles: 30,
-  gravity: 0,  // No gravity for gas
+  particleSize: 20,  // 30% smaller
+  // maxParticles calculated dynamically based on screen size
+  // @ 1080p, scales proportionally
+  baseParticles: 200,
+  baseArea: 1920 * 1080,  // 1080p reference
+  minParticles: 100,
+  maxParticles: 300,
+  gravity: 0,  // No gravity - pure gas
   container: {
     marginX: 0,
     marginY: 0,
@@ -366,9 +416,16 @@ const CONFIG = {
   wall: {
     width: 8,
   },
+  // Particle-to-particle heat transfer (uses applyParticleHeatTransfer from gcanvas)
+  heatTransfer: {
+    maxDistance: 36,        // Particles must be this close to exchange heat
+    rateEntropy: 0.015,     // Heat transfer rate during entropy (mixing)
+    rateSorting: 0.002,     // Much slower while demon sorts (insulated boxes)
+    falloff: 1,             // Linear falloff (2 = quadratic)
+  },
   // Demon AI settings
   demon: {
-    speedThreshold: 120,  // Particles faster than this are "hot"
+    tempThreshold: 0.5,   // Particles hotter than this are "hot"
     detectionRange: 600,  // How far demon can see (whole chamber)
     gobbleCooldown: 0.2,  // Seconds between gobbles
   },
@@ -505,9 +562,18 @@ class Day16Demo extends Game {
     // Calculate wall position (center of container)
     this.wallX = this.bounds.x + this.bounds.w / 2;
 
-    // FluidSystem in gas mode - no heat zones, just gas physics
+    // Calculate particle count based on screen size
+    const canvasArea = this.width * this.height;
+    const scale = canvasArea / CONFIG.baseArea;
+    this.particleCount = Math.floor(
+      Math.min(CONFIG.maxParticles,
+        Math.max(CONFIG.minParticles, CONFIG.baseParticles * scale))
+    );
+    console.log(`[Day16] Canvas: ${this.width}x${this.height}, particles: ${this.particleCount}`);
+
+    // FluidSystem in gas mode - we handle heat transfer ourselves
     this.fluid = new FluidSystem(this, {
-      maxParticles: CONFIG.maxParticles,
+      maxParticles: this.particleCount,
       particleSize: CONFIG.particleSize,
       width: this.bounds.w,
       height: this.bounds.h,
@@ -515,15 +581,15 @@ class Day16Demo extends Game {
       physics: "gas",
       debug: false,
       gravity: CONFIG.gravity,
+      heat: { enabled: false },  // Disable built-in heat zones
       particleColor: { r: 255, g: 255, b: 255, a: 0.9 },
     });
 
     // Spawn particles
-    this.fluid.spawn(CONFIG.maxParticles);
+    this.fluid.spawn(this.particleCount);
 
-    // Lock in particle temperatures based on initial speed
-    // This color will NEVER change - demon just sorts them
-    this._lockParticleTemperatures();
+    // Initialize particle custom data
+    this._initParticles();
 
     this.pipeline.add(this.fluid);
 
@@ -552,27 +618,15 @@ class Day16Demo extends Game {
   }
 
   /**
-   * Lock particle temperatures based on initial velocity.
-   * Called once at start - colors never change after this!
-   * Splits particles 50/50 into hot and cold based on relative speed.
+   * Initialize particle custom data.
+   * Random temperatures create initial entropy.
+   * sorted = false initially, becomes true once demon spits it.
    */
-  _lockParticleTemperatures() {
-    // Calculate all speeds first
-    const speeds = [];
+  _initParticles() {
     for (const p of this.fluid.particles) {
-      const speed = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
-      speeds.push({ particle: p, speed });
-    }
-
-    // Sort by speed to find median
-    speeds.sort((a, b) => a.speed - b.speed);
-    const medianSpeed = speeds[Math.floor(speeds.length / 2)].speed;
-    const maxSpeed = speeds[speeds.length - 1].speed || 1;
-
-    // Assign hot/cold based on median (50/50 split)
-    for (const { particle: p, speed } of speeds) {
-      p.custom.temperature = Math.min(1, speed / maxSpeed);
-      p.custom.isHot = speed > medianSpeed;
+      // Random temperature [0.1-0.9] creates initial disorder
+      p.custom.temperature = 0.1 + Math.random() * 0.8;
+      p.custom.sorted = false;  // Not yet processed by demon
     }
   }
 
@@ -595,10 +649,26 @@ class Day16Demo extends Game {
 
     super.update(dt);
 
-    // Color particles by temperature (gradient in entropy, binary when demon active)
+    // Apply particle-to-particle heat transfer (excludes sorted particles)
+    // Slower rate when demon is sorting (insulated boxes)
+    const heatRate = this.demonArrived
+      ? CONFIG.heatTransfer.rateSorting
+      : CONFIG.heatTransfer.rateEntropy;
+
+    applyParticleHeatTransfer(this.fluid.particles, {
+      maxDistance: CONFIG.heatTransfer.maxDistance,
+      rate: heatRate,
+      falloff: CONFIG.heatTransfer.falloff,
+      filter: (p) => !p.custom.sorted && p !== this.gobbleTarget,
+    });
+
+    // Lock sorted particle temperatures (FluidSystem zones may have touched them)
+    this._lockSortedTemperatures();
+
+    // Color particles by temperature
     this._colorByTemperature();
 
-    // Keep hot particles fast, cold particles slow (always active)
+    // Keep sorted particles at their locked speeds
     this._enforceTemperatureSpeeds();
   }
 
@@ -765,13 +835,11 @@ class Day16Demo extends Game {
   // ============================================
 
   /**
-   * Check if all particles are sorted (hot on left, cold on right)
+   * Check if all particles have been sorted by the demon
    */
   _checkAllSorted() {
     for (const p of this.fluid.particles) {
-      const isHot = p.custom.isHot;
-      const onCorrectSide = isHot ? (p.x < this.wallX) : (p.x > this.wallX);
-      if (!onCorrectSide) {
+      if (!p.custom.sorted) {
         return false;
       }
     }
@@ -779,7 +847,7 @@ class Day16Demo extends Game {
   }
 
   /**
-   * Randomize particle velocities to restore entropy
+   * Randomize particle velocities and reset sorted flag to restore entropy
    */
   _randomizeParticleVelocities() {
     for (const p of this.fluid.particles) {
@@ -787,6 +855,8 @@ class Day16Demo extends Game {
       const angle = Math.random() * Math.PI * 2;
       p.vx = Math.cos(angle) * speed;
       p.vy = Math.sin(angle) * speed;
+      p.custom.sorted = false;  // Back to unsorted state
+      p.custom.temperature = 0.1 + Math.random() * 0.8;  // Random temperature
     }
   }
 
@@ -833,19 +903,37 @@ class Day16Demo extends Game {
       return;
     }
 
-    const { detectionRange } = CONFIG.demon;
+    const { detectionRange, tempThreshold } = CONFIG.demon;
 
-    // Find the nearest "wrong" particle
+    // Find the nearest "wrong" particle (unsorted only)
     let target = null;
     let minDist = Infinity;
+    let targetIsHot = false;
+
+    // Also track any unsorted particle as a fallback (straggler)
+    let straggler = null;
+    let stragglerIsHot = false;
 
     for (const p of this.fluid.particles) {
+      // Skip already sorted particles
+      if (p.custom.sorted) continue;
+
       const dx = p.x - this.wallX;
       const distToWall = Math.abs(dx);
 
+      // Determine hot/cold based on stored TEMPERATURE
+      const temp = p.custom.temperature ?? 0.5;
+      const isHot = temp > tempThreshold;
+
+      // Track as straggler - ANY unsorted particle (no range limit)
+      if (!straggler) {
+        straggler = p;
+        stragglerIsHot = isHot;
+      }
+
+      // For "wrong" detection, use range limit
       if (distToWall > detectionRange) continue;
 
-      const isHot = p.custom.isHot;
       const onRightSide = dx > 0;
       const onLeftSide = dx < 0;
       const isWrong = (isHot && onRightSide) || (!isHot && onLeftSide);
@@ -853,17 +941,28 @@ class Day16Demo extends Game {
       if (isWrong && distToWall < minDist) {
         minDist = distToWall;
         target = p;
+        targetIsHot = isHot;
       }
+    }
+
+    // If no "wrong" particle found, grab a straggler anyway
+    // (particles near threshold that ended up on the "correct" side by chance)
+    if (!target && straggler) {
+      target = straggler;
+      targetIsHot = stragglerIsHot;
     }
 
     if (target) {
       // Found a target - start gobbling
       this.gobbleTarget = target;
 
+      // Lock the temperature decision NOW (based on current speed)
+      target.custom.isHot = targetIsHot;
+
       // Determine which side particle is on and where to spit
       const particleOnRight = target.x > this.wallX;
       this.gobbleFromDirection = particleOnRight ? 1 : -1;  // 1 = right, -1 = left
-      this.spitDirection = target.custom.isHot ? -1 : 1;    // Hot→left, Cold→right
+      this.spitDirection = targetIsHot ? -1 : 1;    // Hot→left, Cold→right
 
       // Store original position for inhale animation
       this.gobbleStartX = target.x;
@@ -969,6 +1068,7 @@ class Day16Demo extends Game {
 
   /**
    * Perform the spit - eject particle with force
+   * Mark particle as sorted and lock its temperature
    */
   _doSpit() {
     if (!this.gobbleTarget) return;
@@ -981,9 +1081,15 @@ class Day16Demo extends Game {
     const spitForce = 450 + Math.random() * 150;
     const spitAngle = (Math.random() - 0.5) * 0.3;
 
-    // Spit in the correct direction
+    // Spit in the correct direction (based on current temperature at gobble time)
     this.gobbleTarget.vx = this.spitDirection * spitForce;
     this.gobbleTarget.vy = spitAngle * spitForce;
+
+    // Mark as sorted - this particle is now "locked" out of heat dynamics
+    this.gobbleTarget.custom.sorted = true;
+    // Lock the temperature so FluidSystem zones can't change it
+    this.gobbleTarget.custom.lockedTemp = this.gobbleTarget.custom.isHot ? 0.9 : 0.1;
+    this.gobbleTarget.custom.temperature = this.gobbleTarget.custom.lockedTemp;
 
     // Activate spit effect on demon
     if (this.demon) {
@@ -1011,14 +1117,28 @@ class Day16Demo extends Game {
   }
 
   /**
-   * Keep hot particles fast, cold particles slow
+   * Lock sorted particle temperatures to their values at sort time.
+   * FluidSystem's zone heating can mess with temperatures - this overrides it.
+   */
+  _lockSortedTemperatures() {
+    for (const p of this.fluid.particles) {
+      if (p.custom.sorted && p.custom.lockedTemp !== undefined) {
+        p.custom.temperature = p.custom.lockedTemp;
+      }
+    }
+  }
+
+  /**
+   * Enforce sorted particle speeds based on their locked temperature.
+   * Unsorted particles are managed by FluidSystem's thermal physics.
    */
   _enforceTemperatureSpeeds() {
-    const hotSpeed = 180;   // Target speed for hot particles
-    const coldSpeed = 60;   // Target speed for cold particles
+    const hotSpeed = 150;   // Target speed for hot particles
+    const coldSpeed = 50;   // Target speed for cold particles
 
     for (const p of this.fluid.particles) {
-      if (p === this.gobbleTarget) continue;  // Don't mess with gobbled particle
+      if (p === this.gobbleTarget) continue;
+      if (!p.custom.sorted) continue;  // Only enforce on sorted particles
 
       const speed = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
       if (speed < 1) continue;
@@ -1033,30 +1153,19 @@ class Day16Demo extends Game {
   }
 
   /**
-   * Color particles by temperature.
-   * Before demon: gradient based on speed
-   * After demon: pure red (hot) or pure blue (cold)
+   * Color particles by stored temperature.
+   * Uses temperature [0-1] directly for gradient coloring.
+   * Blue (cold, 0) → Purple (neutral, 0.5) → Red (hot, 1)
    */
   _colorByTemperature() {
     for (const p of this.fluid.particles) {
-      if (this.demonArrived) {
-        // After demon arrives: pure binary colors
-        if (p.custom.isHot) {
-          p.color.r = 255;
-          p.color.g = 50;
-          p.color.b = 50;
-        } else {
-          p.color.r = 50;
-          p.color.g = 50;
-          p.color.b = 255;
-        }
-      } else {
-        // Before demon: gradient based on temperature
-        const t = p.custom?.temperature ?? 0.5;
-        p.color.r = Math.floor(255 * t);
-        p.color.g = Math.floor(80 * (1 - Math.abs(t - 0.5) * 2));
-        p.color.b = Math.floor(255 * (1 - t));
-      }
+      const t = p.custom.temperature;
+
+      // Temperature-based color gradient
+      // Blue (cold) → Purple (mid) → Red (hot)
+      p.color.r = Math.floor(255 * t);
+      p.color.g = Math.floor(80 * (1 - Math.abs(t - 0.5) * 2));  // Peak at 0.5
+      p.color.b = Math.floor(255 * (1 - t));
     }
   }
 
