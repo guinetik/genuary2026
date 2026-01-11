@@ -51,7 +51,7 @@ export const INTERPRETATIONS = {
   7: 'Bitwise fractals: Sierpinski triangles and infinite patterns emerge from simple boolean operations like (x & y) and (x ^ y)',
   8: 'Forge Star: a colonizer ship emerges from a wormhole to build a Dyson swarm to collect energy from the star. They dope the star with heavy elements to forge metals, shifting it from blue to purple.',
   9: 'Cellular automata gone wild - rules that create unexpected emergent behavior.',
-  10: 'Hyperbolic Crochet: a polar (r,θ) wireframe mesh with exponential ruffling at the edges - like the mathematical coral that crocheters create to visualize negative curvature. Click to excite the fabric.',
+  10: 'Hyperbolic Crochet: a polar (r,θ) wireframe mesh with exponential ruffling at the edges. A mathematical coral that crocheters create to visualize negative curvature. Click to excite the fabric.',
   11: 'Matrix rain that fetches and displays its own source code. The falling lines ARE this file - true self-reference.',
   12: 'Compositions made entirely from rectangular boxes',
   13: 'Generative self-portrait: start with basic shapes, add features that look like you',

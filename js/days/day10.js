@@ -121,9 +121,17 @@ class Day10Demo extends Game {
       inertia: true,
       friction: 0.95,
       clampX: false,
+      autoRotate: true,
+      autoRotateSpeed: 0.075,  // Very slow constant roll
+      autoRotateAxis: 'z',    // Roll on Z while mouse controls X/Y
     });
     this.camera.enableMouseControl(this.canvas);
     this.camera.update(0);  // Initialize camera state
+
+    // Remove double-click reset so rapid clicking doesn't reset camera
+    if (this.camera._boundHandlers?.dblclick) {
+      this.canvas.removeEventListener('dblclick', this.camera._boundHandlers.dblclick);
+    }
 
     this.initMesh();
 
@@ -155,26 +163,42 @@ class Day10Demo extends Game {
 
     this.pipeline.add(this.particles);
 
-    this._onClick = (e) => {
-      if (this.camera._isDragging) return;
-
-      if (e.shiftKey) {
-        this.seed = Math.floor(Math.random() * 65535);
-        Noise.seed(this.seed);
-        return;
-      }
-
-      this.energy = Math.min(1, this.energy + CONFIG.energyKick);
+    // Use mousedown/mouseup to detect clicks without camera interference
+    this._clickStart = null;
+    this._onMouseDown = (e) => {
+      this._clickStart = { x: e.clientX, y: e.clientY, time: Date.now() };
     };
-    this.canvas.addEventListener('click', this._onClick);
+    this._onMouseUp = (e) => {
+      if (!this._clickStart) return;
+
+      const dx = e.clientX - this._clickStart.x;
+      const dy = e.clientY - this._clickStart.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const elapsed = Date.now() - this._clickStart.time;
+
+      // Only count as click if minimal movement and quick press
+      if (dist < 5 && elapsed < 300) {
+        if (e.shiftKey) {
+          this.seed = Math.floor(Math.random() * 65535);
+          Noise.seed(this.seed);
+        } else {
+          this.energy = Math.min(1, this.energy + CONFIG.energyKick);
+        }
+      }
+      this._clickStart = null;
+    };
+    this.canvas.addEventListener('mousedown', this._onMouseDown);
+    this.canvas.addEventListener('mouseup', this._onMouseUp);
   }
 
   /**
    * Cleanup event listeners to avoid leaks on mount/unmount.
    */
   cleanup() {
-    if (this._onClick) this.canvas.removeEventListener('click', this._onClick);
-    this._onClick = null;
+    if (this._onMouseDown) this.canvas.removeEventListener('mousedown', this._onMouseDown);
+    if (this._onMouseUp) this.canvas.removeEventListener('mouseup', this._onMouseUp);
+    this._onMouseDown = null;
+    this._onMouseUp = null;
   }
 
   /**
