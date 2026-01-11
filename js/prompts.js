@@ -49,8 +49,8 @@ export const INTERPRETATIONS = {
   5: 'Pixel-art letters defined in code, rendered as 3D particles. Inspired by the title sequence from the TV show "Pluribus".',
   6: 'A digital lava lamp: toggle the "lights" to fade the heat, glow, and motion in/out',
   7: 'Bitwise fractals: Sierpinski triangles and infinite patterns emerge from simple boolean operations like (x & y) and (x ^ y)',
-  8: 'Create a generative metropolis - buildings, streets, and urban sprawl',
-  9: 'Cellular automata with crazy rules - go beyond Conway\'s Game of Life',
+  8: 'Forge Star: a stellar foundry where civilization industrialized a blue hypergiant into a Dyson-like megastructure',
+  9: "Maxwell's Demon: a thought experiment where a tiny demon sorts hot and cold gas particles, seemingly violating the second law of thermodynamics. To me this is the ultimate example of Crazy Automaton 😈.",
   10: 'Visualizations driven by polar coordinate systems (r, θ) instead of cartesian (x, y)',
   11: 'A Quine is code poetry: a program that outputs exactly its own source code',
   12: 'Compositions made entirely from rectangular boxes',
@@ -97,4 +97,4 @@ export function getInterpretation(day) {
  * Total number of Genuary days to display
  * (Expand as implementations are added)
  */
-export const TOTAL_DAYS = 7;
+export const TOTAL_DAYS = 9;

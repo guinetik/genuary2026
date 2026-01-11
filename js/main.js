@@ -16,7 +16,7 @@ import { PROMPTS, TOTAL_DAYS, getPrompt, getInterpretation } from './prompts.js'
 
 const CONFIG = {
   scrollDebounce: 150,
-  implementedDays: [1, 2, 3, 4, 5, 6, 7], // Days with actual implementations
+  implementedDays: [1, 2, 3, 4, 5, 6, 7, 8, 9], // Days with actual implementations
 };
 
 // ============================================
@@ -220,24 +220,26 @@ function generateSections() {
         <div class="tech-decor-top">SYSTEM.Render(0${day})</div>
         <canvas id="canvas-${day}"></canvas>
       </div>
-      <div class="canvas-controls">
-        <button class="canvas-btn btn-restart" data-day="${day}" title="Restart">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
-            <path d="M3 3v5h5"/>
-          </svg>
-        </button>
+      <div class="canvas-bottom-row">
+        <div class="canvas-controls">
+          <button class="canvas-btn btn-restart" data-day="${day}" title="Restart">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+              <path d="M3 3v5h5"/>
+            </svg>
+          </button>
+        </div>
+        <div class="day-info">
+          <div class="day-number-display">Day ${day}</div>
+          <h2 class="day-title">${getPrompt(day)}</h2>
+          <p class="day-interpretation">${getInterpretation(day)}</p>
+          <p class="day-date">January ${day}, 2026</p>
+        </div>
         <button class="canvas-btn btn-fullscreen" data-day="${day}" title="Fullscreen">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
           </svg>
         </button>
-      </div>
-      <div class="day-info">
-        <div class="day-number-display">Day ${day}</div>
-        <h2 class="day-title">${getPrompt(day)}</h2>
-        <p class="day-interpretation">${getInterpretation(day)}</p>
-        <p class="day-date">January ${day}, 2026</p>
       </div>
     `;
 
@@ -538,6 +540,7 @@ function setupArrowNavigation() {
 
 /**
  * Handle window resize - remount current day to resize canvas
+ * Games can opt-out by setting game.handlesResize = true
  */
 function setupResizeHandler() {
   let resizeTimeout;
@@ -545,9 +548,25 @@ function setupResizeHandler() {
   window.addEventListener('resize', () => {
     clearTimeout(resizeTimeout);
     resizeTimeout = setTimeout(() => {
-      // Remount current day to resize canvas
       const day = state.currentDay;
-      if (state.games.has(day)) {
+      const gameEntry = state.games.get(day);
+
+      if (gameEntry) {
+        // Check if the game handles resize itself (e.g., FluidSystem)
+        // handlesResize can be on the wrapper object or the game instance
+        if (gameEntry.handlesResize) {
+          // Game handles resize reactively - just resize the canvas
+          const canvas = document.getElementById(`canvas-${day}`);
+          if (canvas) {
+            const container = canvas.parentElement;
+            canvas.width = container.clientWidth;
+            canvas.height = container.clientHeight;
+          }
+          console.log(`[Genuary] Day ${day} handles resize internally`);
+          return;
+        }
+
+        // Default: remount to resize canvas
         unmountDay(day);
         mountDay(day);
       }

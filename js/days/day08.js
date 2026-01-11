@@ -18,6 +18,7 @@ import {
   Game,
   Camera3D,
   Sphere3D,
+  Cube3D,
   Painter,
   Motion,
   StateMachine,
@@ -43,9 +44,8 @@ const CONFIG = {
 
   // Dyson lattice
   lattice: {
-    shellRadius: 160,          // Distance from star center
-    nodeCount: 200,            // Many more nodes for denser shell
-    nodeSize: 3,               // Smaller individual nodes
+    shellRadius: 160,
+    nodeSize: 3,
     rotationSpeed: 0.03,
     color: '#4af',
     // Multiple shell layers
@@ -75,19 +75,10 @@ const CONFIG = {
     trailColor: 'rgba(80, 200, 170, 0.4)',
   },
 
-  // Orbital stations - gold/amber for warmth and habitation
+  // Orbital stations - Cloud City style
   stations: {
-    count: 5,
-    orbitRadius: 280,
-    color: '#fa4',           // Gold/amber
-    accentColor: '#fc8',     // Lighter gold
-    glowColor: 'rgba(255, 180, 80, 0.5)',
-    types: [
-      { name: 'hub', size: 20, spokes: 8, rings: 2 },
-      { name: 'collector', size: 16, spokes: 6, rings: 1 },
-      { name: 'relay', size: 12, spokes: 4, rings: 1 },
-      { name: 'dock', size: 24, spokes: 3, rings: 3 },
-    ],
+    count: 5,                 // 1 Capitol + 4 Annexes
+    orbitRadius: 280,         // Base orbit distance from star
   },
 
   // Camera
@@ -167,177 +158,8 @@ function drawShip(ctx, x, y, size, angle) {
   ctx.restore();
 }
 
-/**
- * Draw a Cloud City style station - sleek, floating, detailed
- */
-function drawStation(ctx, x, y, size, rotation, stationType) {
-  ctx.save();
-  ctx.translate(x, y);
-
-  // Cloud City stays mostly upright, maybe a slight gentle sway
-  const sway = Math.sin(rotation) * 0.08;
-  ctx.rotate(sway);
-
-  const type = stationType || { spokes: 6, rings: 1 };
-  // Use properties for variety
-  const density = (type.spokes || 6) / 2;
-  const heightMult = 1 + (type.rings || 1) * 0.2;
-
-  const w = size * 2.5; // Wider relative to base size
-  const h = size * 1.1;
-
-  // NEON TRON PALETTE based on station ID or type
-  // Use a hash of the name or ID to pick a color
-  const hues = [
-    { main: '#0ff', glow: 'rgba(0, 255, 255, 0.4)', dark: '#044' }, // Cyan
-    { main: '#f0f', glow: 'rgba(255, 0, 255, 0.4)', dark: '#404' }, // Magenta
-    { main: '#0f0', glow: 'rgba(0, 255, 0, 0.4)', dark: '#040' },   // Green
-    { main: '#ff0', glow: 'rgba(255, 255, 0, 0.4)', dark: '#440' }, // Yellow
-    { main: '#f40', glow: 'rgba(255, 64, 0, 0.4)', dark: '#410' },  // Orange
-  ];
-  const paletteIdx = (type.name.charCodeAt(0) + (type.spokes || 0)) % hues.length;
-  const palette = hues[paletteIdx];
-  
-  const mainColor = palette.main;
-  const glowColor = palette.glow;
-  const darkColor = 'rgba(10, 10, 15, 0.9)'; // Dark body
-
-  // 1. The Stem (Spire) - extending downwards
-  const stemLen = h * 1.0 * heightMult;
-  const stemWidth = w * 0.15;
-
-  // Stem Glow
-  const stemGrad = ctx.createLinearGradient(0, 0, 0, stemLen);
-  stemGrad.addColorStop(0, darkColor);
-  stemGrad.addColorStop(0.5, palette.dark);
-  stemGrad.addColorStop(1, '#000');
-
-  ctx.beginPath();
-  ctx.moveTo(-stemWidth * 0.6, 0);
-  ctx.lineTo(-stemWidth * 0.3, stemLen * 0.9);
-  ctx.lineTo(0, stemLen); // Tip
-  ctx.lineTo(stemWidth * 0.3, stemLen * 0.9);
-  ctx.lineTo(stemWidth * 0.6, 0);
-  ctx.fillStyle = stemGrad;
-  ctx.fill();
-  ctx.strokeStyle = mainColor;
-  ctx.lineWidth = 1;
-  ctx.stroke();
-
-  // Stem details (vanes)
-  ctx.beginPath();
-  ctx.moveTo(0, 0);
-  ctx.lineTo(0, stemLen * 0.8);
-  ctx.strokeStyle = glowColor;
-  ctx.lineWidth = 1;
-  ctx.stroke();
-
-  // 2. The Bulb (Reactor/Sensor pod on stem)
-  const bulbY = stemLen * 0.7;
-  const bulbSize = stemWidth * 0.8;
-  ctx.beginPath();
-  ctx.arc(0, bulbY, bulbSize, 0, Math.PI * 2);
-  ctx.fillStyle = darkColor;
-  ctx.fill();
-  ctx.strokeStyle = mainColor;
-  ctx.stroke();
-  
-  // Tiny light on bulb
-  ctx.fillStyle = '#fff';
-  ctx.shadowBlur = 5;
-  ctx.shadowColor = mainColor;
-  ctx.fillRect(-1, bulbY - 1, 2, 2);
-  ctx.shadowBlur = 0;
-
-  // 3. The Main Dish (Saucer)
-  // Drawn as a flattened ellipse
-  ctx.beginPath();
-  ctx.ellipse(0, 0, w * 0.6, w * 0.12, 0, 0, Math.PI * 2);
-  ctx.fillStyle = darkColor;
-  ctx.fill();
-  ctx.strokeStyle = mainColor;
-  ctx.lineWidth = 1.5;
-  ctx.stroke();
-
-  // Underside details (bowl shape)
-  ctx.beginPath();
-  ctx.arc(0, 0, w * 0.3, 0, Math.PI, false); // Half circle down
-  ctx.fillStyle = palette.dark;
-  ctx.fill();
-  ctx.strokeStyle = glowColor;
-  ctx.lineWidth = 1;
-  ctx.stroke();
-
-  // 4. Cityscape (Buildings on top)
-  // Procedural skyline based on station properties
-  const buildW = w * 0.08;
-  const buildBase = -w * 0.02; // Start slightly above center line
-
-  // Draw buildings from back (edges) to front (center) roughly, 
-  // or just draw them and rely on 2D overlap. 
-  // Since it's a profile, drawing order matters for overlap.
-  // Let's draw center outwards? No, let's draw left to right.
-  
-  for (let i = -density; i <= density; i++) {
-    // Unique seed per building per station
-    const seed = Math.abs(Math.sin(i * 12.34 + type.size * 5.67));
-    const bh = h * (0.2 + seed * 0.5);
-    const bx = i * (buildW * 1.1);
-    
-    ctx.fillStyle = darkColor;
-    ctx.strokeStyle = mainColor;
-    ctx.lineWidth = 1;
-
-    // Different shapes based on seed
-    if (seed > 0.7) {
-        // Spire
-        ctx.beginPath();
-        ctx.moveTo(bx - buildW/2, buildBase);
-        ctx.lineTo(bx, buildBase - bh);
-        ctx.lineTo(bx + buildW/2, buildBase);
-        ctx.fill();
-        ctx.stroke();
-    } else if (seed > 0.4) {
-        // Dome
-        ctx.beginPath();
-        ctx.arc(bx, buildBase, bh * 0.6, Math.PI, 0); // Half circle up
-        ctx.fill();
-        ctx.stroke();
-    } else {
-        // Block
-        ctx.fillRect(bx - buildW/2, buildBase - bh, buildW, bh);
-        ctx.strokeRect(bx - buildW/2, buildBase - bh, buildW, bh);
-    }
-
-    // Windows / Lights
-    ctx.fillStyle = (i === 0) ? '#fff' : glowColor;
-    if (seed > 0.3) {
-      const winH = 2;
-      const winY = buildBase - bh * 0.8;
-      ctx.fillRect(bx - 1, winY, 2, winH);
-    }
-  }
-
-  // 5. Landing Lights / Beacons
-  const blink = Math.sin(rotation * 8) > 0.5;
-  if (blink) {
-    ctx.shadowBlur = 4;
-    ctx.shadowColor = '#f55';
-    ctx.fillStyle = '#f55'; // Red beacon
-    ctx.beginPath();
-    ctx.arc(-w * 0.6, 0, 1.5, 0, Math.PI * 2);
-    ctx.fill();
-    
-    ctx.shadowColor = '#5f5';
-    ctx.fillStyle = '#5f5'; // Green beacon
-    ctx.beginPath();
-    ctx.arc(w * 0.6, 0, 1.5, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.shadowBlur = 0;
-  }
-
-  ctx.restore();
-}
+// Remove old drawStation function as it's no longer used
+// function drawStation(...) { ... }
 
 // ============================================================================
 // SHIP CLASS - 3D cargo ships traveling between waypoints with orbiting behavior
@@ -459,35 +281,309 @@ class Ship {
 }
 
 // ============================================================================
-// ORBITAL STATION CLASS
+// ORBITAL STATION CLASS - Cloud City Style Procedural Generation
 // ============================================================================
 
 class OrbitalStation {
-  constructor(id, orbitRadius, orbitSpeed, startAngle, stationType) {
+  /**
+   * @param {Game} game - Parent game instance
+   * @param {number} id - Station ID (0 = Capitol)
+   * @param {number} orbitRadius - Distance from star center
+   * @param {number} startAngle - Initial orbital position
+   * @param {boolean} isCapitol - Is this the main Capitol station?
+   */
+  constructor(game, id, orbitRadius, startAngle, isCapitol = false, sharedOrbitSpeed = 0.03) {
+    this.game = game;
     this.id = id;
     this.orbitRadius = orbitRadius;
-    this.orbitSpeed = orbitSpeed;
-    this.angle = startAngle;
-    this.rotation = Math.random() * Math.PI * 2;
-    this.tilt = (Math.random() - 0.5) * 0.6; // Slight orbital tilt
-    this.stationType = stationType;
-    this.size = stationType.size;
+    this.isCapitol = isCapitol;
 
-    // Calculate initial position immediately so ships can target it
+    // All stations share same angular velocity (orbit together like a clock face)
+    // This keeps them equidistant over time instead of drifting with Keplerian physics
+    this.orbitSpeed = sharedOrbitSpeed;
+
+    // Slight orbital inclination for visual depth
+    this.tilt = (Math.random() - 0.5) * 0.4;
+    this.angle = startAngle;
+
+    // Station self-rotation (slow spin)
+    this.rotation = Math.random() * Math.PI * 2;
+    this.rotationSpeed = 0.1 + Math.random() * 0.1;
+
+    // Size scales with Capitol status
+    this.baseRadius = isCapitol ? 6 : 3 + Math.floor(Math.random() * 2);
+    this.voxelSize = 4;
+
+    this.voxels = [];
+    this.generateCity();
     this.updatePosition();
   }
 
+  /**
+   * Procedural city generation - Cloud City style
+   * Structure: Thruster (bottom) -> Dome Base (middle) -> Skyline (top)
+   */
+  generateCity() {
+    const r = this.baseRadius;
+    const voxelSize = this.voxelSize;
+
+    // Color palettes - each station type gets unique colors
+    const palettes = {
+      capitol: {
+        main: '#fa4',      // Gold
+        accent: '#fc8',    // Light gold
+        dark: '#a60',      // Dark gold
+        glow: '#ff0',      // Bright yellow
+        stroke: 'rgba(255, 200, 100, 0.4)'
+      },
+      // Annex palettes - varied industrial colors
+      annex: [
+        { // Cyan/Teal
+          main: '#0fa',
+          accent: '#4fc',
+          dark: '#064',
+          glow: '#0ff',
+          stroke: 'rgba(0, 255, 200, 0.4)'
+        },
+        { // Blue
+          main: '#48f',
+          accent: '#8af',
+          dark: '#226',
+          glow: '#4cf',
+          stroke: 'rgba(100, 150, 255, 0.4)'
+        },
+        { // Purple/Violet
+          main: '#a4f',
+          accent: '#c8f',
+          dark: '#424',
+          glow: '#f4f',
+          stroke: 'rgba(180, 100, 255, 0.4)'
+        },
+        { // Green
+          main: '#4f4',
+          accent: '#8f8',
+          dark: '#242',
+          glow: '#0f0',
+          stroke: 'rgba(100, 255, 100, 0.4)'
+        },
+      ]
+    };
+
+    // Select palette based on station type
+    const palette = this.isCapitol
+      ? palettes.capitol
+      : palettes.annex[this.id % palettes.annex.length];
+
+    const strokeColor = palette.stroke;
+
+    // Helper to add a voxel
+    const addVoxel = (x, y, z, color, scale = 1) => {
+      this.voxels.push({
+        lx: x * voxelSize,
+        ly: y * voxelSize,
+        lz: z * voxelSize,
+        size: voxelSize * scale,
+        color,
+        cube: new Cube3D(voxelSize * scale, {
+          camera: this.game.camera,
+          faceColors: {
+            front: color, back: color,
+            left: color, right: color,
+            top: color, bottom: color
+          },
+          stroke: strokeColor,
+        })
+      });
+    };
+
+    // ─────────────────────────────────────────────────────────────────
+    // 1. THRUSTER STEM (extends DOWN from center) - Negative Y
+    // ─────────────────────────────────────────────────────────────────
+    const thrusterHeight = this.isCapitol ? 8 : 4 + Math.floor(Math.random() * 3);
+
+    // Main thruster column
+    for (let y = 1; y <= thrusterHeight; y++) {
+      // Taper toward bottom
+      const taper = y > thrusterHeight * 0.7 ? 0.7 : 1;
+      addVoxel(0, -y, 0, palette.dark, taper);
+    }
+
+    // Thruster engine glow at very bottom
+    addVoxel(0, -(thrusterHeight + 1), 0, palette.glow, 0.6);
+
+    // Thruster fins (Capitol has more)
+    const finCount = this.isCapitol ? 4 : 2;
+    for (let f = 0; f < finCount; f++) {
+      const finAngle = (f / finCount) * Math.PI * 2;
+      const fx = Math.round(Math.cos(finAngle) * 1.5);
+      const fz = Math.round(Math.sin(finAngle) * 1.5);
+      for (let y = 2; y <= thrusterHeight * 0.6; y++) {
+        addVoxel(fx, -y, fz, palette.dark, 0.6);
+      }
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // 2. DOME BASE PLATFORM (circular disk at Y=0)
+    // ─────────────────────────────────────────────────────────────────
+    for (let x = -r; x <= r; x++) {
+      for (let z = -r; z <= r; z++) {
+        const d2 = x * x + z * z;
+        if (d2 <= r * r) {
+          // Main platform floor
+          addVoxel(x, 0, z, palette.dark);
+
+          // Dome underside curve (bowl shape)
+          const depth = Math.floor(Math.sqrt(Math.max(0, r * r - d2)) * 0.3);
+          if (depth > 0 && d2 > (r - 2) * (r - 2)) {
+            // Only outer ring curves down
+            addVoxel(x, -1, z, palette.dark, 0.8);
+          }
+        }
+      }
+    }
+
+    // Platform rim/edge highlight
+    for (let a = 0; a < Math.PI * 2; a += 0.3) {
+      const ex = Math.round(Math.cos(a) * r);
+      const ez = Math.round(Math.sin(a) * r);
+      if (Math.random() > 0.3) {
+        addVoxel(ex, 1, ez, palette.accent, 0.5);
+      }
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // 3. SKYLINE (buildings grow UP from platform) - Positive Y
+    // ─────────────────────────────────────────────────────────────────
+    const buildingMap = new Map();
+
+    // Downtown cluster(s) - taller buildings near center
+    const clusterCount = this.isCapitol ? 4 : 2;
+    for (let c = 0; c < clusterCount; c++) {
+      const clusterAngle = (c / clusterCount) * Math.PI * 2 + Math.random() * 0.5;
+      const clusterDist = Math.random() * r * 0.5;
+      const cx = Math.round(Math.cos(clusterAngle) * clusterDist);
+      const cz = Math.round(Math.sin(clusterAngle) * clusterDist);
+
+      // Cluster base height (Capitol has taller buildings)
+      const maxHeight = this.isCapitol ? 6 + Math.floor(Math.random() * 4) : 3 + Math.floor(Math.random() * 3);
+
+      // Build cluster
+      for (let ox = -1; ox <= 1; ox++) {
+        for (let oz = -1; oz <= 1; oz++) {
+          const bx = cx + ox;
+          const bz = cz + oz;
+          const key = `${bx},${bz}`;
+
+          if (buildingMap.has(key)) continue;
+          if (bx * bx + bz * bz > r * r) continue;
+          if (Math.random() > 0.7) continue;
+
+          // Height varies within cluster
+          const h = Math.max(1, maxHeight - Math.abs(ox) - Math.abs(oz) + Math.floor(Math.random() * 2));
+
+          // Build upward (positive Y) with color gradient
+          for (let y = 1; y <= h; y++) {
+            // Slight taper at top
+            const scale = y === h && h > 2 ? 0.7 : 0.9;
+            // Color varies by height: dark base -> main middle -> accent top
+            let color;
+            if (y === h && h > 2) {
+              color = palette.accent;  // Top floor is brightest
+            } else if (y > h * 0.6) {
+              color = palette.main;    // Upper floors
+            } else {
+              color = palette.dark;    // Lower floors
+            }
+            addVoxel(bx, y, bz, color, scale);
+          }
+
+          // Antenna/spire on tall buildings
+          if (h >= maxHeight - 1 && Math.random() > 0.5) {
+            addVoxel(bx, h + 1, bz, palette.glow, 0.3);
+          }
+
+          buildingMap.set(key, true);
+        }
+      }
+    }
+
+    // Scatter smaller buildings around platform
+    const scatterCount = this.isCapitol ? 20 : 10;
+    for (let i = 0; i < scatterCount; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const dist = 0.3 * r + Math.random() * r * 0.6;
+      const bx = Math.round(Math.cos(angle) * dist);
+      const bz = Math.round(Math.sin(angle) * dist);
+      const key = `${bx},${bz}`;
+
+      if (buildingMap.has(key)) continue;
+      if (bx * bx + bz * bz > r * r) continue;
+
+      const h = 1 + Math.floor(Math.random() * 2);
+
+      for (let y = 1; y <= h; y++) {
+        // Small buildings: dark base, main/accent top
+        const color = y === h ? palette.main : palette.dark;
+        addVoxel(bx, y, bz, color, 0.8);
+      }
+      buildingMap.set(key, true);
+    }
+
+    // Capitol gets a central tower
+    if (this.isCapitol) {
+      const towerHeight = 8;
+      for (let y = 1; y <= towerHeight; y++) {
+        const scale = y < 3 ? 1.2 : (y > towerHeight - 2 ? 0.6 : 0.9);
+        addVoxel(0, y, 0, y === towerHeight ? palette.glow : palette.main, scale);
+      }
+    }
+  }
+
   update(dt) {
+    // Keplerian orbital motion
     this.angle += this.orbitSpeed * dt;
-    this.rotation += dt * 0.15;
+
+    // Station self-rotation
+    this.rotation += this.rotationSpeed * dt;
+
     this.updatePosition();
   }
 
   updatePosition() {
-    // Calculate 3D position on tilted orbit
+    // Orbital position with slight vertical oscillation from tilt
     this.x = Math.cos(this.angle) * this.orbitRadius;
-    this.y = Math.sin(this.angle) * Math.sin(this.tilt) * this.orbitRadius * 0.4;
     this.z = Math.sin(this.angle) * this.orbitRadius;
+    this.y = Math.sin(this.angle * 2) * Math.sin(this.tilt) * this.orbitRadius * 0.15;
+  }
+
+  getRenderables(renderList) {
+    const cos = Math.cos(this.rotation);
+    const sin = Math.sin(this.rotation);
+
+    for (const v of this.voxels) {
+      // Apply station rotation (yaw) to local offset
+      const rx = v.lx * cos - v.lz * sin;
+      const rz = v.lx * sin + v.lz * cos;
+      const ry = -v.ly;  // Flip Y for correct screen orientation (skyline UP, thruster DOWN)
+
+      // World position
+      const wx = this.x + rx;
+      const wy = this.y + ry;
+      const wz = this.z + rz;
+
+      // Project for sorting
+      const proj = this.game.camera.project(wx, wy, wz);
+
+      renderList.push({
+        type: 'voxel',
+        cube: v.cube,
+        x: wx,
+        y: wy,
+        z: wz,
+        depth: proj.z,
+        scale: proj.scale
+      });
+    }
   }
 }
 
@@ -645,22 +741,26 @@ class ForgeStarDemo extends Game {
   }
 
   createStations(scale) {
-    const types = CONFIG.stations.types;
+    // Shared orbit speed - all stations rotate together like clock hands
+    const sharedOrbitSpeed = 0.025;
 
     for (let i = 0; i < CONFIG.stations.count; i++) {
+      // Spread stations evenly around orbit (like hours on a clock)
       const angle = (i / CONFIG.stations.count) * Math.PI * 2;
-      const orbitSpeed = 0.025 + Math.random() * 0.02;
-      // Vary orbit radius slightly
-      const orbitVariance = 0.85 + Math.random() * 0.3;
-      // Assign station type (cycle through types)
-      const stationType = types[i % types.length];
+
+      // Vary orbit radius - Capitol (first) is at base radius, others vary
+      const isCapitol = i === 0;
+      const baseRadius = CONFIG.stations.orbitRadius * scale;
+      const orbitVariance = isCapitol ? 1.0 : 0.85 + Math.random() * 0.3;
+      const orbitRadius = baseRadius * orbitVariance;
 
       this.stations.push(new OrbitalStation(
+        this,
         i,
-        CONFIG.stations.orbitRadius * scale * orbitVariance,
-        orbitSpeed,
+        orbitRadius,
         angle,
-        stationType
+        isCapitol,
+        sharedOrbitSpeed  // Same speed for all = no drift
       ));
     }
   }
@@ -810,6 +910,40 @@ class ForgeStarDemo extends Game {
     // Collect all renderable items for depth sorting
     const renderList = [];
 
+    // Add stations (as individual voxels)
+    for (const station of this.stations) {
+       station.getRenderables(renderList);
+    }
+
+    // Add star (so it's depth-sorted with everything else)
+    const starProj = this.camera.project(0, 0, 0);
+    renderList.push({
+        type: 'star',
+        x: starProj.x,
+        y: starProj.y,
+        z: starProj.z,
+        scale: starProj.scale,
+        depth: starProj.z,
+    });
+    
+    // Add ships (update sort key to 'depth')
+    for (const ship of this.ships) {
+      const proj = this.camera.project(ship.x, ship.y, ship.z);
+      renderList.push({
+        type: 'ship',
+        x: proj.x,
+        y: proj.y,
+        z: proj.z,
+        scale: proj.scale,
+        depth: proj.z,
+        angle: ship.angle,
+        trail: ship.trail.map(t => {
+          const tp = this.camera.project(t.x, t.y, t.z);
+          return { x: tp.x, y: tp.y };
+        }),
+      });
+    }
+    
     // Add lattice nodes
     for (const node of this.latticeNodes) {
       // Apply lattice rotation
@@ -825,54 +959,13 @@ class ForgeStarDemo extends Game {
         y: proj.y,
         z: proj.z,
         scale: proj.scale,
+        depth: proj.z,
         nodeSize: node.size,
       });
     }
 
-    // Add ships
-    for (const ship of this.ships) {
-      const proj = this.camera.project(ship.x, ship.y, ship.z);
-      renderList.push({
-        type: 'ship',
-        x: proj.x,
-        y: proj.y,
-        z: proj.z,
-        scale: proj.scale,
-        angle: ship.angle,
-        trail: ship.trail.map(t => {
-          const tp = this.camera.project(t.x, t.y, t.z);
-          return { x: tp.x, y: tp.y };
-        }),
-      });
-    }
-
-    // Add stations
-    for (const station of this.stations) {
-      const proj = this.camera.project(station.x, station.y, station.z);
-      renderList.push({
-        type: 'station',
-        x: proj.x,
-        y: proj.y,
-        z: proj.z,
-        scale: proj.scale,
-        rotation: station.rotation,
-        stationType: station.stationType,
-        size: station.size,
-      });
-    }
-
-    // Add star (so it's depth-sorted with everything else)
-    const starProj = this.camera.project(0, 0, 0);
-    renderList.push({
-        type: 'star',
-        x: starProj.x,
-        y: starProj.y,
-        z: starProj.z,
-        scale: starProj.scale,
-    });
-
-    // Sort by depth (back to front)
-    renderList.sort((a, b) => b.z - a.z);
+    // Sort by depth (back to front) - using new 'depth' property
+    renderList.sort((a, b) => b.depth - a.depth);
 
     // Render pipeline (includes energy particles)
     super.render();
@@ -891,15 +984,13 @@ class ForgeStarDemo extends Game {
         case 'ship':
           this.drawShipWithTrail(ctx, item);
           break;
-        case 'station':
-          drawStation(
-            ctx,
-            item.x,
-            item.y,
-            item.size * item.scale,
-            item.rotation,
-            item.stationType
-          );
+        case 'voxel':
+          if (item.cube) {
+              item.cube.x = item.x;
+              item.cube.y = item.y;
+              item.cube.z = item.z;
+              item.cube.draw();
+          }
           break;
         case 'star':
           this.drawStarItem(ctx, item);
