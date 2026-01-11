@@ -1,0 +1,37 @@
+{
+  "name": "Genuary 2026 - GCanvas Showcase",
+  "short_name": "Genuary 2026",
+  "description": "A month-long generative art challenge showcasing the @guinetik/gcanvas library",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/favicon.ico",
+      "sizes": "48x48",
+      "type": "image/x-icon"
+    },
+    {
+      "src": "/favicon-32x32.png",
+      "sizes": "32x32",
+      "type": "image/png"
+    },
+    {
+      "src": "/mstile-150x150.png",
+      "sizes": "150x150",
+      "type": "image/png"
+    },
+    {
+      "src": "/safari-pinned-tab.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "categories": ["art", "entertainment", "education"],
+  "lang": "en-US",
+  "dir": "ltr"
+}
+

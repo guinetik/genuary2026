@@ -1,0 +1,36 @@
+{
+  "@context": "https://schema.org",
+  "@type": "WebApplication",
+  "name": "Genuary 2026 - GCanvas Showcase",
+  "description": "A month-long generative art challenge showcasing the @guinetik/gcanvas library. Daily creative coding experiments with particles, 3D cameras, and interactive animations.",
+  "url": "https://genuary2026.guinetik.com",
+  "applicationCategory": "EntertainmentApplication",
+  "operatingSystem": "Web",
+  "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "USD"
+  },
+  "author": {
+    "@type": "Person",
+    "name": "@guinetik",
+    "url": "https://guinetik.com"
+  },
+  "creator": {
+    "@type": "Person",
+    "name": "@guinetik",
+    "url": "https://guinetik.com"
+  },
+  "inLanguage": "en-US",
+  "isAccessibleForFree": true,
+  "keywords": "genuary, generative art, creative coding, gcanvas, particles, 3D, interactive art, webgl, canvas, javascript",
+  "screenshot": "https://genuary2026.guinetik.com/og_image.png",
+  "featureList": [
+    "Interactive generative art",
+    "3D particle systems",
+    "Daily creative coding challenges",
+    "Mouse-controlled 3D camera",
+    "Real-time animations"
+  ]
+}
+
