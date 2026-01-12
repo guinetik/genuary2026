@@ -53,9 +53,9 @@ export const INTERPRETATIONS = {
   9: 'Cellular automata gone wild - rules that create unexpected emergent behavior.',
   10: 'Hyperbolic Crochet: a polar (r,θ) wireframe mesh with exponential ruffling at the edges. A mathematical coral that crocheters create to visualize negative curvature. Click to excite the fabric.',
   11: 'Matrix rain that fetches and displays its own source code. Hover to slow down and illuminate the text for reading. Click to reset.',
-  12: 'Compositions made entirely from rectangular boxes',
-  13: 'Generative self-portrait: start with basic shapes, add features that look like you',
-  14: 'Perfect tessellation where every piece fits exactly with no gaps',
+  12: 'Isometric Mondrian: recursive grid subdivision rendered as 3D boxes with primary colors on black. Swipe/drag or Q/E to rotate, tap/click to regenerate.',
+  13: 'Pixel Teleporter: pixels fly from your image to reveal a hidden portrait. Layer multiple sources for variations.',
+  14: 'Tangram: 7 ancient puzzle pieces spring into cats, birds, runners, and more. Click to transform.',
   15: 'An invisible object revealed only by the shadows it casts',
   16: "Maxwell's Demon: a tiny demon sorts hot and cold gas particles, seemingly violating the second law of thermodynamics. Order emerges from chaos... or does it? 😈",
   17: 'One of 17 ways to tile a plane with repeating patterns (or 35 if you count symmetries)',
@@ -97,4 +97,4 @@ export function getInterpretation(day) {
  * Total number of Genuary days to display
  * (Expand as implementations are added)
  */
-export const TOTAL_DAYS = 11;
+export const TOTAL_DAYS = 14;
