@@ -29,7 +29,7 @@ const CONFIG = {
   boxGap: 40,
 
   // UI
-  buttonWidth: 150,
+  buttonWidth: 220,
   buttonHeight: 50,
   buttonY: 50,
 
@@ -39,9 +39,16 @@ const CONFIG = {
   // Pixel animation
   pixelSampleStep: 4,       // Sample every Nth pixel (lower = more particles)
   pixelSize: 4,             // Size of flying pixels
-  flightDuration: 2.0,      // Base flight time in seconds
-  flightStagger: 0.003,     // Delay between each pixel starting
+  flightDuration: 0.4,      // Base flight time in seconds
+  flightStagger: 0.0003,    // Delay between each pixel starting
   trailAlpha: 0.15,         // Motion blur trail
+
+  // Color matching
+  colorPreservation: 0.7,   // 0 = exact match, 1 = full source color variety
+  processResolution: 128,   // Downsample source to this max dimension for processing
+
+  // Layering
+  layerOpacity: 0.6,        // Opacity for subsequent layers (first is always 1.0)
 };
 
 /**
@@ -131,7 +138,7 @@ class ImageBox extends Scene {
  * Flying Pixel - represents a pixel traveling from source to target
  */
 class FlyingPixel {
-  constructor(sx, sy, tx, ty, color, delay, sourcePixelInfo) {
+  constructor(sx, sy, tx, ty, color, delay, sourcePixelInfo, layerOpacity = 1.0) {
     this.sx = sx;  // Source x
     this.sy = sy;  // Source y
     this.tx = tx;  // Target x
@@ -143,8 +150,21 @@ class FlyingPixel {
     this.time = 0;
     this.arrived = false;
     this.spawned = false;  // Track if pixel has left source
-    this.alpha = 1;
+    this.layerOpacity = layerOpacity;  // Max opacity for this layer
+    this.alpha = layerOpacity;
     this.sourcePixelInfo = sourcePixelInfo;  // { x, y } in display coords
+    // Store RGB for rasterization
+    this.r = 0; this.g = 0; this.b = 0;
+    this._parseColor(color);
+  }
+
+  _parseColor(color) {
+    const match = color.match(/rgb\((\d+),(\d+),(\d+)\)/);
+    if (match) {
+      this.r = parseInt(match[1]);
+      this.g = parseInt(match[2]);
+      this.b = parseInt(match[3]);
+    }
   }
 
   update(dt) {
@@ -168,8 +188,8 @@ class FlyingPixel {
     this.x = this.sx + (this.tx - this.sx) * eased;
     this.y = this.sy + (this.ty - this.sy) * eased;
 
-    // Fade in as it flies
-    this.alpha = Math.min(1, progress * 2);
+    // Fade in as it flies (respect layer opacity as max)
+    this.alpha = Math.min(this.layerOpacity, progress * 2 * this.layerOpacity);
 
     if (progress >= 1) {
       this.arrived = true;
@@ -201,6 +221,167 @@ function shuffleArray(array) {
     [array[i], array[j]] = [array[j], array[i]];
   }
   return array;
+}
+
+/**
+ * Create Web Worker for color matching (inline worker via Blob)
+ */
+function createMatchingWorker() {
+  const workerCode = `
+    // Perceptual luminance
+    function getLuminance(r, g, b) {
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    }
+
+    // Build luminance-based color map
+    function buildColorMap(sourceData, width, height) {
+      const map = new Map();
+      const bucketSize = 8;
+
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const i = (y * width + x) * 4;
+          const r = sourceData[i];
+          const g = sourceData[i + 1];
+          const b = sourceData[i + 2];
+          const a = sourceData[i + 3];
+
+          if (a < 10) continue;
+
+          const lum = getLuminance(r, g, b);
+          const lumBucket = Math.floor(lum / bucketSize);
+
+          const lumKey = 'L' + lumBucket;
+          if (!map.has(lumKey)) {
+            map.set(lumKey, []);
+          }
+          map.get(lumKey).push({ r, g, b, x, y, lum });
+        }
+      }
+      return map;
+    }
+
+    // Find matching pixel with color preservation
+    // colorPreservation: 0 = exact match, 1 = random from luminance bracket
+    function findBestMatch(targetR, targetG, targetB, colorMap, sourceData, sourceWidth, sourceHeight, colorPreservation) {
+      const targetLum = getLuminance(targetR, targetG, targetB);
+      const lumBucketSize = 8;
+      const lumBucket = Math.floor(targetLum / lumBucketSize);
+
+      // Collect all candidates within luminance range
+      const goodCandidates = [];
+      const lumTolerance = 15;  // Accept pixels within this luminance difference
+
+      for (let dl = -2; dl <= 2; dl++) {
+        const lumKey = 'L' + (lumBucket + dl);
+        const candidates = colorMap.get(lumKey);
+
+        if (!candidates) continue;
+
+        for (const candidate of candidates) {
+          const lumDiff = Math.abs(targetLum - candidate.lum);
+          if (lumDiff <= lumTolerance) {
+            // Score for sorting (lower = better match)
+            const colorDiff = Math.sqrt(
+              (targetR - candidate.r) ** 2 +
+              (targetG - candidate.g) ** 2 +
+              (targetB - candidate.b) ** 2
+            );
+            goodCandidates.push({ ...candidate, score: lumDiff * 2 + colorDiff });
+          }
+        }
+      }
+
+      if (goodCandidates.length === 0) {
+        // Fallback: random pixel from source
+        const x = Math.floor(Math.random() * sourceWidth);
+        const y = Math.floor(Math.random() * sourceHeight);
+        const i = (y * sourceWidth + x) * 4;
+        return {
+          r: sourceData[i], g: sourceData[i + 1], b: sourceData[i + 2],
+          x, y,
+          lum: getLuminance(sourceData[i], sourceData[i + 1], sourceData[i + 2])
+        };
+      }
+
+      // Sort by score (best matches first)
+      goodCandidates.sort((a, b) => a.score - b.score);
+
+      // Color preservation determines how deep into the candidate pool we pick
+      // 0 = always best, 1 = random from all good matches
+      const poolSize = Math.max(1, Math.floor(goodCandidates.length * colorPreservation));
+      const randomIndex = Math.floor(Math.random() * poolSize);
+
+      return goodCandidates[randomIndex];
+    }
+
+    // Main message handler
+    self.onmessage = function(e) {
+      const { avatarData, avatarWidth, avatarHeight, sourceData, sourceWidth, sourceHeight, step, displayWidth, displayHeight, colorPreservation } = e.data;
+
+      // Build color map
+      self.postMessage({ type: 'progress', stage: 'Building color map...', percent: 0 });
+      const colorMap = buildColorMap(sourceData, sourceWidth, sourceHeight);
+
+      // Process avatar pixels
+      const pixelData = [];
+      let totalPixels = 0;
+
+      // Count total first
+      for (let ty = 0; ty < avatarHeight; ty += step) {
+        for (let tx = 0; tx < avatarWidth; tx += step) {
+          const idx = (ty * avatarWidth + tx) * 4;
+          if (avatarData[idx + 3] >= 10) totalPixels++;
+        }
+      }
+
+      let processed = 0;
+      let lastProgress = 0;
+
+      for (let ty = 0; ty < avatarHeight; ty += step) {
+        for (let tx = 0; tx < avatarWidth; tx += step) {
+          const idx = (ty * avatarWidth + tx) * 4;
+          const r = avatarData[idx];
+          const g = avatarData[idx + 1];
+          const b = avatarData[idx + 2];
+          const a = avatarData[idx + 3];
+
+          if (a < 10) continue;
+
+          const match = findBestMatch(r, g, b, colorMap, sourceData, sourceWidth, sourceHeight, colorPreservation);
+
+          const sourceX = (match.x / sourceWidth) * displayWidth;
+          const sourceY = (match.y / sourceHeight) * displayHeight;
+
+          pixelData.push({
+            sourceX, sourceY,
+            targetX: tx, targetY: ty,
+            r: match.r, g: match.g, b: match.b,
+            displaySourceX: Math.floor(sourceX),
+            displaySourceY: Math.floor(sourceY),
+          });
+
+          processed++;
+          const progress = Math.floor((processed / totalPixels) * 100);
+          if (progress > lastProgress) {
+            lastProgress = progress;
+            self.postMessage({ type: 'progress', stage: 'Matching pixels...', percent: progress });
+          }
+        }
+      }
+
+      // Shuffle
+      for (let i = pixelData.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [pixelData[i], pixelData[j]] = [pixelData[j], pixelData[i]];
+      }
+
+      self.postMessage({ type: 'complete', pixelData });
+    };
+  `;
+
+  const blob = new Blob([workerCode], { type: 'application/javascript' });
+  return new Worker(URL.createObjectURL(blob));
 }
 
 /**
@@ -268,7 +449,13 @@ class Day13Demo extends Game {
     this.avatarImageData = null;
     this.flyingPixels = [];
     this.isAnimating = false;
+    this.isProcessing = false;
     this.landedPixels = [];  // Pixels that have arrived
+
+    // Layering - persistent result canvas
+    this.resultCanvas = null;
+    this.resultCtx = null;
+    this.layerCount = 0;  // Track how many transforms have been applied
   }
 
   /**
@@ -336,9 +523,15 @@ class Day13Demo extends Game {
       }
     });
 
-    // Click to upload
+    // Click to upload - with debounce to prevent repeated triggers
+    this.isPickingFile = false;
+
     this.canvas.addEventListener('click', async (e) => {
-      if (this.isAnimating) return;
+      // Guard against repeated triggers
+      if (this.isAnimating || this.isProcessing || this.isPickingFile) return;
+
+      // Don't open picker if already have an image loaded
+      if (this.processImageData) return;
 
       const rect = this.canvas.getBoundingClientRect();
       const x = e.clientX - rect.left;
@@ -351,14 +544,29 @@ class Day13Demo extends Game {
         x >= boxLeft && x <= boxLeft + this.boxSize &&
         y >= boxTop && y <= boxTop + this.boxSize
       ) {
+        this.isPickingFile = true;
+
         const input = document.createElement('input');
         input.type = 'file';
         input.accept = 'image/*';
-        input.onchange = async (e) => {
-          if (e.target.files.length > 0) {
-            await this.loadUploadedImage(e.target.files[0]);
+
+        input.onchange = async (changeEvent) => {
+          if (changeEvent.target.files.length > 0) {
+            await this.loadUploadedImage(changeEvent.target.files[0]);
           }
+          this.isPickingFile = false;
         };
+
+        // Also reset flag if user cancels
+        input.addEventListener('cancel', () => {
+          this.isPickingFile = false;
+        });
+
+        // Fallback: reset after timeout in case events don't fire
+        setTimeout(() => {
+          this.isPickingFile = false;
+        }, 10000);
+
         input.click();
       }
     });
@@ -373,34 +581,14 @@ class Day13Demo extends Game {
         img.src = URL.createObjectURL(file);
       });
 
-      // Scale if too large
-      let width = img.width;
-      let height = img.height;
-      const maxDim = Math.max(width, height);
-      if (maxDim > CONFIG.maxImageSize) {
-        const scale = CONFIG.maxImageSize / maxDim;
-        width = Math.floor(width * scale);
-        height = Math.floor(height * scale);
-      }
-
-      // Create ImageData for processing
-      const tempCanvas = document.createElement('canvas');
-      tempCanvas.width = width;
-      tempCanvas.height = height;
-      const tempCtx = tempCanvas.getContext('2d');
-      tempCtx.drawImage(img, 0, 0, width, height);
-      this.uploadedImageData = tempCtx.getImageData(0, 0, width, height);
-      this.uploadedWidth = width;
-      this.uploadedHeight = height;
-
-      // Scale to fit box for display
+      // Scale to fit box for DISPLAY (preview)
       const padding = 10;
       const availableSize = this.boxSize - padding * 2;
-      const displayScale = Math.min(availableSize / width, availableSize / height);
-      const displayWidth = Math.floor(width * displayScale);
-      const displayHeight = Math.floor(height * displayScale);
+      const displayScale = Math.min(availableSize / img.width, availableSize / img.height);
+      const displayWidth = Math.floor(img.width * displayScale);
+      const displayHeight = Math.floor(img.height * displayScale);
 
-      // Create display ImageData
+      // Create display ImageData (full quality preview)
       const displayCanvas = document.createElement('canvas');
       displayCanvas.width = displayWidth;
       displayCanvas.height = displayHeight;
@@ -408,11 +596,26 @@ class Day13Demo extends Game {
       displayCtx.drawImage(img, 0, 0, displayWidth, displayHeight);
       const displayImageData = displayCtx.getImageData(0, 0, displayWidth, displayHeight);
 
-      // Store display dimensions for pixel mapping
       this.displayWidth = displayWidth;
       this.displayHeight = displayHeight;
-
       this.leftBox.setImage(displayImageData, displayWidth, displayHeight);
+
+      // Create DOWNSAMPLED version for processing (much smaller = faster)
+      const maxProcessDim = CONFIG.processResolution;
+      const processScale = Math.min(maxProcessDim / img.width, maxProcessDim / img.height, 1);
+      const processWidth = Math.floor(img.width * processScale);
+      const processHeight = Math.floor(img.height * processScale);
+
+      const processCanvas = document.createElement('canvas');
+      processCanvas.width = processWidth;
+      processCanvas.height = processHeight;
+      const processCtx = processCanvas.getContext('2d');
+      processCtx.drawImage(img, 0, 0, processWidth, processHeight);
+      this.processImageData = processCtx.getImageData(0, 0, processWidth, processHeight);
+      this.processWidth = processWidth;
+      this.processHeight = processHeight;
+
+      console.log(`[Day13] Display: ${displayWidth}x${displayHeight}, Process: ${processWidth}x${processHeight}`);
 
       // Reset animation state
       this.flyingPixels = [];
@@ -430,33 +633,80 @@ class Day13Demo extends Game {
    * Start the pixel transformation animation
    */
   startTransform() {
-    if (!this.uploadedImageData || !this.avatarImageData || this.isAnimating) {
-      console.warn('[Day13] Cannot transform - missing data or already animating');
+    if (!this.processImageData || !this.avatarImageData || this.isAnimating || this.isProcessing) {
+      console.warn('[Day13] Cannot transform - missing data or already processing');
       return;
     }
 
-    this.isAnimating = true;
-    this.flyingPixels = [];
-    this.landedPixels = [];
-    this.rightBox.labelText = '';
-    this.rightBox.clearImage();
+    this.isProcessing = true;
+    this.transformButton.label.text = 'Processing 0%';
+
+    // Track layer count and determine opacity for this layer
+    this.layerCount++;
+    this.currentLayerOpacity = this.layerCount === 1 ? 1.0 : CONFIG.layerOpacity;
+
+    // Create result canvas if it doesn't exist
+    if (!this.resultCanvas) {
+      this.resultCanvas = document.createElement('canvas');
+      this.resultCanvas.width = this.avatarWidth;
+      this.resultCanvas.height = this.avatarHeight;
+      this.resultCtx = this.resultCanvas.getContext('2d');
+    }
 
     // Create a canvas to track the "dissolving" source image
     this.sourceCanvas = document.createElement('canvas');
     this.sourceCanvas.width = this.displayWidth;
     this.sourceCanvas.height = this.displayHeight;
     this.sourceCtx = this.sourceCanvas.getContext('2d');
-    // Copy the displayed image to our tracking canvas
     this.sourceCtx.drawImage(this.leftBox.image.shape._buffer || this.leftBox.image.shape._bitmap, 0, 0);
     this.sourceImageData = this.sourceCtx.getImageData(0, 0, this.displayWidth, this.displayHeight);
 
-    // Build color map from uploaded image
-    const colorMap = this.buildColorMap(this.uploadedImageData);
+    // Create worker and send data
+    const worker = createMatchingWorker();
 
-    // Sample avatar pixels and collect pixel data first
-    const avatarData = this.avatarImageData.data;
-    const step = CONFIG.pixelSampleStep;
-    const pixelData = [];
+    worker.onmessage = (e) => {
+      const { type, stage, percent, pixelData } = e.data;
+
+      if (type === 'progress') {
+        this.transformButton.label.text = `${stage} ${percent}%`;
+      } else if (type === 'complete') {
+        worker.terminate();
+        this.onMatchingComplete(pixelData);
+      }
+    };
+
+    worker.onerror = (e) => {
+      console.error('[Day13] Worker error:', e);
+      worker.terminate();
+      this.isProcessing = false;
+      this.transformButton.label.text = 'Transform';
+    };
+
+    // Send DOWNSAMPLED data to worker (much faster processing)
+    worker.postMessage({
+      avatarData: Array.from(this.avatarImageData.data),
+      avatarWidth: this.avatarWidth,
+      avatarHeight: this.avatarHeight,
+      sourceData: Array.from(this.processImageData.data),  // Use downsampled!
+      sourceWidth: this.processWidth,
+      sourceHeight: this.processHeight,
+      step: CONFIG.pixelSampleStep,
+      displayWidth: this.displayWidth,
+      displayHeight: this.displayHeight,
+      colorPreservation: CONFIG.colorPreservation,
+    });
+  }
+
+  /**
+   * Called when worker completes matching - create flying pixels
+   */
+  onMatchingComplete(pixelData) {
+    this.isProcessing = false;
+    this.isAnimating = true;
+    this.flyingPixels = [];
+    this.landedPixels = [];
+    this.rightBox.labelText = '';
+    this.rightBox.clearImage();
 
     // Calculate offsets for centering images in boxes
     const leftOffsetX = this.leftBoxX - this.displayWidth / 2;
@@ -464,55 +714,24 @@ class Day13Demo extends Game {
     const rightOffsetX = this.rightBoxX - this.avatarWidth / 2;
     const rightOffsetY = this.boxCenterY - this.avatarHeight / 2;
 
-    for (let ty = 0; ty < this.avatarHeight; ty += step) {
-      for (let tx = 0; tx < this.avatarWidth; tx += step) {
-        const idx = (ty * this.avatarWidth + tx) * 4;
-        const r = avatarData[idx];
-        const g = avatarData[idx + 1];
-        const b = avatarData[idx + 2];
-        const a = avatarData[idx + 3];
-
-        if (a < 10) continue;  // Skip transparent
-
-        // Find best matching pixel from uploaded image
-        const match = this.findBestMatch(r, g, b, colorMap);
-
-        // Source position (in uploaded image, scaled to display size)
-        const sourceX = (match.x / this.uploadedWidth) * this.displayWidth;
-        const sourceY = (match.y / this.uploadedHeight) * this.displayHeight;
-
-        // Screen positions
-        const screenSourceX = leftOffsetX + sourceX;
-        const screenSourceY = leftOffsetY + sourceY;
-        const screenTargetX = rightOffsetX + tx;
-        const screenTargetY = rightOffsetY + ty;
-
-        const color = `rgb(${match.r},${match.g},${match.b})`;
-
-        pixelData.push({
-          screenSourceX, screenSourceY,
-          screenTargetX, screenTargetY,
-          color,
-          // Source pixel position in display image coords (for erasing)
-          displaySourceX: Math.floor(sourceX),
-          displaySourceY: Math.floor(sourceY),
-        });
-      }
-    }
-
-    // Shuffle the pixel data for random order
-    shuffleArray(pixelData);
-
-    // Create flying pixels with staggered delays based on shuffled order
+    // Create flying pixels with staggered delays
     for (let i = 0; i < pixelData.length; i++) {
       const p = pixelData[i];
       const delay = i * CONFIG.flightStagger;
 
+      const screenSourceX = leftOffsetX + p.sourceX;
+      const screenSourceY = leftOffsetY + p.sourceY;
+      const screenTargetX = rightOffsetX + p.targetX;
+      const screenTargetY = rightOffsetY + p.targetY;
+
+      const color = `rgb(${p.r},${p.g},${p.b})`;
+
       this.flyingPixels.push(new FlyingPixel(
-        p.screenSourceX, p.screenSourceY,
-        p.screenTargetX, p.screenTargetY,
-        p.color, delay,
-        { x: p.displaySourceX, y: p.displaySourceY }
+        screenSourceX, screenSourceY,
+        screenTargetX, screenTargetY,
+        color, delay,
+        { x: p.displaySourceX, y: p.displaySourceY },
+        this.currentLayerOpacity
       ));
     }
 
@@ -708,10 +927,50 @@ class Day13Demo extends Game {
 
     // Check if animation is complete
     if (allArrived) {
+      this.rasterizePixels();
       this.isAnimating = false;
       this.transformButton.label.text = 'Transform';
-      console.log('[Day13] Transform complete!');
+      console.log('[Day13] Transform complete! Layer', this.layerCount);
     }
+  }
+
+  /**
+   * Rasterize flying pixels to the result canvas and clear them
+   */
+  rasterizePixels() {
+    if (!this.resultCanvas || this.flyingPixels.length === 0) return;
+
+    const rightOffsetX = this.rightBoxX - this.avatarWidth / 2;
+    const rightOffsetY = this.boxCenterY - this.avatarHeight / 2;
+
+    // Draw each pixel to the result canvas with layer opacity
+    this.resultCtx.globalAlpha = this.currentLayerOpacity;
+
+    for (const pixel of this.flyingPixels) {
+      // Convert screen position to result canvas position
+      const rx = pixel.tx - rightOffsetX;
+      const ry = pixel.ty - rightOffsetY;
+
+      this.resultCtx.fillStyle = pixel.color;
+      this.resultCtx.fillRect(
+        rx - CONFIG.pixelSize / 2,
+        ry - CONFIG.pixelSize / 2,
+        CONFIG.pixelSize,
+        CONFIG.pixelSize
+      );
+    }
+
+    this.resultCtx.globalAlpha = 1;
+
+    // Clear flying pixels - they're now rasterized
+    this.flyingPixels = [];
+
+    // Reset left box - image was consumed, prompt for new upload
+    this.leftBox.clearImage();
+    this.leftBox.labelText = 'Drop Image Here';
+    this.processImageData = null;  // Clear processed data
+
+    console.log('[Day13] Rasterized layer', this.layerCount, 'to result canvas');
   }
 
   render() {
@@ -734,6 +993,13 @@ class Day13Demo extends Game {
       const leftOffsetX = this.leftBoxX - this.displayWidth / 2;
       const leftOffsetY = this.boxCenterY - this.displayHeight / 2;
       ctx.drawImage(this.sourceCanvas, leftOffsetX, leftOffsetY);
+    }
+
+    // Draw accumulated result canvas in right box (shifted 1px for border)
+    if (this.resultCanvas && this.layerCount > 0) {
+      const rightOffsetX = this.rightBoxX - this.avatarWidth / 2 + 1;
+      const rightOffsetY = this.boxCenterY - this.avatarHeight / 2 + 1;
+      ctx.drawImage(this.resultCanvas, rightOffsetX, rightOffsetY, this.avatarWidth - 2, this.avatarHeight - 2);
     }
 
     // Render flying pixels
