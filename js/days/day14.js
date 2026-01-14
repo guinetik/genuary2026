@@ -1,666 +1,1384 @@
 /**
  * Day 14: Everything fits perfectly
  *
- * Interactive Tangram puzzle - the classic 7-piece Chinese dissection puzzle.
- * Click to cycle through configurations: cat, swan, rabbit, house, boat, runner.
- * Pieces slide smoothly into place with satisfying precision.
+ * Interactive Tangram puzzle with mathematically precise geometry.
+ * See /docs/tangram-geometry.md for detailed documentation.
  */
 
-import { Game, Painter, Easing } from "@guinetik/gcanvas";
+import {
+  Game,
+  Painter,
+  Scene,
+  GameObject,
+  RightTriangle,
+  Square,
+  Parallelogram,
+  Tweenetik,
+  Easing,
+  Button,
+  applyDraggable,
+  StateMachine,
+} from "@guinetik/gcanvas";
+
+// ============================================
+// Tangram Geometry Constants
+// ============================================
+
+const SQRT2 = Math.sqrt(2);
 
 // ============================================
 // Configuration
 // ============================================
 
 const CONFIG = {
-  // Tangram sizing
-  baseSize: 280,          // Base size of the square configuration
-  pieceGap: 2,            // Small gap between pieces for visibility
-
-  // Animation - smooth slide, no spring wobble (pieces "fit perfectly")
-  animDuration: 0.6,
-  staggerDelay: 0.05,     // Delay between each piece starting to move
-
-  // Colors - green terminal aesthetic with piece variety
+  animDuration: 0.8,
+  staggerDelay: 0.1,
   colors: {
-    piece1: 'hsl(135, 70%, 45%)',   // Large triangle 1
-    piece2: 'hsl(145, 70%, 40%)',   // Large triangle 2
-    piece3: 'hsl(125, 70%, 50%)',   // Medium triangle
-    piece4: 'hsl(155, 70%, 35%)',   // Small triangle 1
-    piece5: 'hsl(115, 70%, 55%)',   // Small triangle 2
-    piece6: 'hsl(140, 80%, 45%)',   // Square
-    piece7: 'hsl(130, 60%, 42%)',   // Parallelogram
+    largeTriangle1: "#2196F3", // Blue
+    largeTriangle2: "#E91E63", // Magenta/Pink
+    mediumTriangle: "#9C27B0", // Purple
+    smallTriangle1: "#FFEB3B", // Yellow
+    smallTriangle2: "#4CAF50", // Green
+    square: "#E53935", // Red
+    parallelogram: "#FF9800", // Orange
   },
-  strokeColor: '#0f0',
+  strokeColor: "#FFFFFF",
   strokeWidth: 2,
-  glowColor: 'rgba(0, 255, 100, 0.3)',
-
-  // Visual
   trailAlpha: 0.12,
+  button: {
+    width: 140,
+    height: 40,
+    spacing: 20,
+  },
+};
+
+const TANGRAM = {
+  LARGE_LEG: 1 / SQRT2, // ≈ 0.7071
+  MEDIUM_LEG: 0.5,
+  SMALL_LEG: 1 / (2 * SQRT2), // ≈ 0.3536
+  SQUARE_SIDE: 1 / (2 * SQRT2), // ≈ 0.3536
+  PARA_BASE: 0.5, // Parallelogram base
+  PARA_HEIGHT: 0.25, // Parallelogram height (area = 1/8 = 0.5 * 0.25)
 };
 
 // ============================================
-// Tangram Piece & Configuration Definitions
+// Square Configurations (s₀ through s₅)
 // ============================================
 
-/**
- * CORRECT tangram geometry with proper proportions.
- *
- * In a classic tangram:
- * - 2 large triangles: each 1/4 of the square (legs = side/√2)
- * - 1 medium triangle: 1/8 of the square (legs = side/2)
- * - 2 small triangles: each 1/16 of the square (legs = side/(2√2))
- * - 1 square: 1/8 of the square (side = side/(2√2))
- * - 1 parallelogram: 1/8 of the square
- *
- * All pieces are defined as centered at origin with correct proportions.
- */
-
-// Base unit: when assembled, the tangram square has side = 1
-const SQRT2 = Math.sqrt(2);
-
-// Piece dimensions (relative to assembled square side = 1)
-const LARGE_LEG = 1 / SQRT2;           // ≈ 0.707, hypotenuse = 1
-const MEDIUM_LEG = 0.5;                 // hypotenuse = 0.5 * √2 ≈ 0.707
-const SMALL_LEG = 1 / (2 * SQRT2);     // ≈ 0.354, hypotenuse = 0.5
-const SQUARE_SIDE = 1 / (2 * SQRT2);   // ≈ 0.354, diagonal = 0.5
+const Ll = TANGRAM.LARGE_LEG; // 0.7071
+const Ml = TANGRAM.MEDIUM_LEG; // 0.5
+const Sl = TANGRAM.SMALL_LEG; // 0.3536
 
 /**
- * Right isoceles triangle centered at origin
- * Right angle at bottom-left corner before centering
+ * All 6 canonical square tangram configurations.
+ * Piece order: [large1, large2, medium, small1, small2, square, parallelogram]
  */
-function makeTriangle(leg) {
-  // Original: right angle at origin, legs along +x and +y
-  // (0,0), (leg,0), (0,leg)
-  // Centroid at (leg/3, leg/3)
-  const c = leg / 3;
-  return [
-    { x: -c, y: -c },           // was (0,0)
-    { x: leg - c, y: -c },      // was (leg, 0)
-    { x: -c, y: leg - c },      // was (0, leg)
-  ];
-}
+const SQUARE_CONFIGS = [
+  // s₀ - Two large triangles share vertex at center, pointing to TL and BL corners
+  {
+    name: "s₀",
+    pieces: [
+      trianglePosition(0, 0, Ll, 225), // Large 1 - top, right angle at center
+      trianglePosition(0, 0, Ll, 135), // Large 2 - left, right angle at center
+      trianglePosition(0.5, 0.5, Ml, 180), // Medium - bottom-right corner
+      trianglePosition(0.25, -0.25, Sl, 315), // Small 1 - upper right area
+      trianglePosition(0, 0, Sl, 45), // Small 2 - center
+      { x: 0.25, y: 0, rotation: 45 }, // Square - center-right
+      { x: -0.125, y: 0.375, rotation: 0 }, // Parallelogram - bottom-left
+    ],
+  },
 
-/**
- * Square centered at origin (axis-aligned)
- */
-function makeSquare(side) {
-  const h = side / 2;
-  return [
-    { x: -h, y: -h },
-    { x: h, y: -h },
-    { x: h, y: h },
-    { x: -h, y: h },
-  ];
-}
+  // s₁ - s₀ rotated 45° clockwise
+  {
+    name: "s₁",
+    pieces: [
+      trianglePosition(0, 0, Ll, 45), // Large 1
+      trianglePosition(0, 0, Ll, 135), // Large 2
+      trianglePosition(0.5, -0.5, Ml, 90), // Medium 
+      trianglePosition(0, 0, Sl, 315), // Small 1 
+      trianglePosition(-0.25, -0.25, Sl, 225), // Small 2
+      { x: 0, y: -0.25, rotation: 45 }, // Square
+      { x: 0.375, y: 0.125, rotation: 90 }, // Parallelogram 
+    ],
+  },
 
-/**
- * Parallelogram centered at origin
- * The tangram parallelogram has same area as medium triangle (1/8)
- * It's formed like a slanted rectangle: base = SMALL_LEG * √2, height = SMALL_LEG
- */
-function makeParallelogram() {
-  // Width along x: SMALL_LEG * √2 ≈ 0.5
-  // Height: SMALL_LEG ≈ 0.354
-  // Slant: offset by SMALL_LEG in x as we go up in y
-  const w = SMALL_LEG * SQRT2;  // ≈ 0.5
-  const h = SMALL_LEG;          // ≈ 0.354
-  const slant = h;              // 45° slant
+  /* // s₂ - s₁ mirrored horizontally
+  {
+    name: "s₂",
+    pieces: [
+      trianglePosition(0, 0, Ll, 45), // Large 1
+      trianglePosition(0, 0, Ll, 315), // Large 2
+      trianglePosition(-0.5, -0.5, Ml, 0), // Medium 
+      trianglePosition(0, 0, Sl, 225), // Small 1 
+      trianglePosition(-0.25, 0.25, Sl, 135), // Small 2
+      { x: -0.25, y: 0, rotation: 45 }, // Square
+      { x: 0.125, y: -0.375, rotation: 0 }, // Parallelogram 
+    ],
+  },
 
-  // Centered at origin
-  return [
-    { x: -w/2, y: -h/2 },
-    { x: w/2, y: -h/2 },
-    { x: w/2 + slant, y: h/2 },
-    { x: -w/2 + slant, y: h/2 },
-  ];
-}
+  // s₃ - continuing rotation: medium at bottom-left
+  {
+    name: "s₃",
+    pieces: [
+      trianglePosition(0, 0, Ll, 225), // Large 1
+      trianglePosition(0, 0, Ll, 315), // Large 2
+      trianglePosition(-0.5, 0.5, Ml, 270), // Medium - bottom-left
+      trianglePosition(0, 0, Sl, 135), // Small 1
+      trianglePosition(0.25, 0.25, Sl, 45), // Small 2
+      { x: 0, y: 0.25, rotation: 45 }, // Square - bottom
+      { x: -0.375, y: -0.125, rotation: 90 }, // Parallelogram - left side
+    ],
+  },
 
-// Create the 7 piece shapes (centered at origin)
-const PIECE_SHAPES = {
-  largeTriangle1: { vertices: makeTriangle(LARGE_LEG) },
-  largeTriangle2: { vertices: makeTriangle(LARGE_LEG) },
-  mediumTriangle: { vertices: makeTriangle(MEDIUM_LEG) },
-  smallTriangle1: { vertices: makeTriangle(SMALL_LEG) },
-  smallTriangle2: { vertices: makeTriangle(SMALL_LEG) },
-  square: { vertices: makeSquare(SQUARE_SIDE) },
-  parallelogram: { vertices: makeParallelogram() },
+  // s₄ - continuing rotation: medium at bottom-right again, different angles
+  {
+    name: "s₄",
+    pieces: [
+      trianglePosition(0, 0, Ll, 135), // Large 1
+      trianglePosition(0, 0, Ll, 225), // Large 2
+      trianglePosition(0.5, 0.5, Ml, 180),
+      trianglePosition(0, 0, Sl, 45), // Small 1
+      trianglePosition(0.25, -0.25, Sl, 315), // Small 2
+      { x: 0.25, y: 0, rotation: 45 }, // Square - right
+      { x: -0.125, y: 0.375, rotation: 0 }, // Parallelogram - left side
+    ],
+  },
+
+  // s₅ - final variation
+  {
+    name: "s₅",
+    pieces: [
+      trianglePosition(0, 0, Ll, 45), // Large 1
+      trianglePosition(0, 0, Ll, 315), // Large 2
+      trianglePosition(-0.5, -0.5, Ml, 0), // Medium - top-left
+      trianglePosition(-0.25, 0.25, Sl, 135), // Small 1
+      trianglePosition(0, 0, Sl, 225), // Small 2
+      { x: -0.25, y: 0, rotation: 45 }, // Square
+      { x: 0.125, y: -0.375, rotation: 0 }, // Parallelogram - top-right
+    ],
+  }, */
+];
+
+const CAT_CONFIG = {
+  name: "cat",
+  view: { offsetX: -150, offsetY: -50, scale: 0.7 },
+  pieces: [
+    // Large 1: hind legs / base
+    trianglePosition(0.75, 0.375, Ll, 135),
+    // Large 2: tail (angled up/right)
+    trianglePosition(0.957, 0.880, Ll, 180),
+    // Medium: upper body / chest
+    trianglePosition(-0.105, 0.235, Ml, 315),
+    // Small 1: left ear
+    trianglePosition(0, -0.375, Sl, 135),
+    // Small 2: right ear
+    trianglePosition(0, -0.375, Sl, 315),
+    // Square: body core (diamond)
+    { x: 0, y: -0.125, rotation: 45 },
+    // Parallelogram: head (slanted), mirrored to better match the reference
+    { x: 1.34, y: 0.755, rotation: 0},
+  ],
 };
 
+const BEAR_CONFIG = {
+  name: "bear",
+  view: { offsetX: 0, offsetY: -85, scale: 0.9 },
+  pieces: [
+    // Large 1
+    trianglePosition(-1.07, 0.145, Ll, 315),
+    // Large 2
+    trianglePosition(-0.57, -0.352, Ll, 0),
+    // Medium
+    trianglePosition(0.140, 0.146, Ml, 180),
+    // Small 1
+    trianglePosition(0.5, 0, Sl, 270),
+    // Small 2
+    trianglePosition(-0.57, 0.65, Sl, 135),
+    // Square
+    { x: 0.32, y: -0.175, rotation: 0 },
+    // Parallelogram: 
+    { x: 0.14, y: 0.325, rotation: 225},
+  ],
+};
+
+const SHARK_CONFIG = {
+  name: "shark",
+  view: { offsetX: -50, offsetY: -55, scale: 0.8 },
+  pieces: [
+    // Large 1
+    trianglePosition(-0.5, 0, Ll, 45),
+    // Large 2
+    trianglePosition(0.21, 0, Ll, 90),
+    // Medium
+    trianglePosition(0.921, 0, Ml, 270),
+    // Small 1
+    trianglePosition(-0.25, 0.75, Sl, 225),
+    // Small 2
+    trianglePosition(0.3, 0, Sl, 180),
+    // Square
+    { x: 0.388, y: 0.177, rotation: 0 },
+    // Parallelogram: 
+    { x: 0.74, y: 0, rotation: 135 },
+  ],
+};
+
+const CAMEL_CONFIG = {
+  name: "camel",
+  view: { offsetX: -175, offsetY: -50, scale: 0.75 },
+  pieces: [
+    // Large 1
+    { x: 0.411, y: 0.413, rotation: 135 },
+    // Large 2
+    { x: 0.963, y: 0.396, rotation: 90 },
+    // Medium
+    { x: 0.845, y: 0.042, rotation: 45 },
+    // Small 1
+    { x: 0.160, y: -0.338, rotation: 315 },
+    // Small 2
+    { x: -0.006, y: -0.504, rotation: 225 },
+    // Square
+    { x: 0.492, y: -0.089, rotation: 45 },
+    // Parallelogram
+    { x: 0.117, y: 0.036, rotation: 90 },
+  ],
+};
+
+const HOUSE_CONFIG = {
+  name: "house",
+  view: { offsetX: 0, offsetY: 0, scale: 0.90 },
+  pieces: [
+    // Large 1
+    { x: 0.222, y: -0.026, rotation: 45 },
+    // Large 2
+    { x: -0.024, y: 0.473, rotation: 45 },
+    // Medium
+    { x: -0.358, y: 0.307, rotation: 0 },
+    // Small 1
+    { x: 0.392, y: 0.390, rotation: 315 },
+    // Small 2
+    { x: 0.227, y: 0.225, rotation: 225 },
+    // Square
+    { x: -0.206, y: -0.287, rotation: 0 },
+    // Parallelogram
+    { x: -0.398, y: 0.016, rotation: 0 },
+  ],
+}
+
+const HORSERIDER_CONFIG = {
+  name: "horserider",
+  view: { offsetX: -50, offsetY: -55, scale: 0.70 },
+  pieces: [
+    // Large 1
+    { x: 0.034, y: 0.617, rotation: 0 },
+    // Large 2
+    { x: 0.647, y: 0.481, rotation: 180 },
+    // Medium
+    { x: 0.172, y: 0.214, rotation: 270 },
+    // Small 1
+    { x: 1.000, y: 0.244, rotation: 270 },
+    // Small 2
+    { x: 0.765, y: 0.833, rotation: 90 },
+    // Square
+    { x: 0.006, y: -0.369, rotation: 45 },
+    // Parallelogram
+    { x: -0.58, y: 0.507, rotation: 0 },
+  ],
+}
+
+const BOAT_CONFIG = {
+  name: "boat",
+  view: { offsetX: 0, offsetY: 0, scale: 0.8 },
+  pieces: [
+    // Large 1
+    { x: -0.222, y: 0.228, rotation: 45 },
+    // Large 2
+    { x: -0.555, y: -0.104, rotation: 135 },
+    // Medium
+    { x: -0.431, y: 0.511, rotation: 225 },
+    // Small 1
+    { x: -0.194, y: 0.629, rotation: 180 },
+    // Small 2
+    { x: 0.513, y: 0.631, rotation: 180 },
+    // Square
+    { x: 0.100, y: 0.571, rotation: 0 },
+    // Parallelogram
+    { x: 0.455, y: 0.395, rotation: 315 },
+  ],
+}
+
+const GOOSE_CONFIG = {
+  name: "goose",
+  view: { offsetX: 0, offsetY: -70, scale: 0.72 },
+  pieces: [
+    // Large 1
+    { x: 0.403, y: 0.447, rotation: 225 },
+    // Large 2
+    { x: 0.138, y: 0.751, rotation: 270 },
+    // Medium
+    { x: -0.214, y: 0.633, rotation: 315 },
+    // Small 1
+    { x: -0.317, y: -0.385, rotation: 180 },
+    // Small 2
+    { x: -0.367, y: 0.383, rotation: 135 },
+    // Square
+    { x: -0.200, y: 0.132, rotation: 45 },
+    // Parallelogram
+    { x: -0.074, y: -0.244, rotation: 90 },
+  ],
+};
+
+const RABBIT_CONFIG = {
+  name: "rabbit",
+  view: { offsetX: 0, offsetY: -100, scale: 0.60 },
+  pieces: [
+    // Large 1
+    { x: -0.306, y: 0.483, rotation: 315 },
+    // Large 2
+    { x: 0.094, y: 0.954, rotation: 270 },
+    // Medium
+    { x: 0.026, y: 0.315, rotation: 270 },
+    // Small 1
+    { x: 0.595, y: -0.136, rotation: 180 },
+    // Small 2
+    { x: 0.242, y: 0.599, rotation: 90 },
+    // Square
+    { x: 0.110, y: -0.018, rotation: 45 },
+    // Parallelogram
+    { x: -0.242, y: -0.445, rotation: 45 },
+  ],
+}
+
+const ALL_CONFIGS = [
+  ...SQUARE_CONFIGS,
+  RABBIT_CONFIG,
+  GOOSE_CONFIG,
+  BOAT_CONFIG,
+  HORSERIDER_CONFIG,
+  HOUSE_CONFIG,
+  CAMEL_CONFIG,
+  CAT_CONFIG,
+  BEAR_CONFIG,
+  SHARK_CONFIG,
+];
+
+/**
+ * Starting configuration for design mode.
+ * Set to null to scatter pieces, or paste a config to start from it.
+ */
+const DESIGN_START_CONFIG = null; // Set to a config like HOUSE_CONFIG to start from it
+
+/**
+ * Default framing for configurations (centered, no scaling).
+ * @type {{offsetX:number, offsetY:number, scale:number}}
+ */
+const DEFAULT_VIEW = { offsetX: 0, offsetY: 0, scale: 1 };
+
 // ============================================
-// Tangram Configurations
+// Geometry Utilities
 // ============================================
 
 /**
- * Configurations place each piece's CENTER at specific coordinates.
- * Pieces are rotated in 45° increments (standard tangram rotations).
- *
- * Coordinate system: centered at (0,0), range roughly -0.5 to 0.5
- * The assembled tangram square has side = 1, so it spans -0.5 to 0.5
+ * Rotate a point around the origin.
+ * @param {number} x Local x coordinate
+ * @param {number} y Local y coordinate
+ * @param {number} angleDeg Rotation angle in degrees (clockwise)
+ * @returns {{x:number,y:number}} Rotated point
  */
-
-const PI = Math.PI;
-const R0 = 0;
-const R45 = PI / 4;
-const R90 = PI / 2;
-const R135 = 3 * PI / 4;
-const R180 = PI;
-const R225 = 5 * PI / 4;
-const R270 = 3 * PI / 2;
-const R315 = 7 * PI / 4;
+function rotatePoint(x, y, angleDeg) {
+  const rad = (angleDeg * Math.PI) / 180;
+  return {
+    x: x * Math.cos(rad) - y * Math.sin(rad),
+    y: x * Math.sin(rad) + y * Math.cos(rad),
+  };
+}
 
 /**
- * SQUARE configuration - the classic tangram arrangement
+ * Calculate position for a RightTriangle given where its right angle should be.
+ * Assumes the `RightTriangle` shape is defined with its right angle at local (0,0)
+ * and legs extending along +X and +Y; the `GameObject` origin is treated as the
+ * centroid, so we offset by `(-leg/3, -leg/3)` before rotating.
  *
- * Layout in unit square (0,0) to (1,1):
- * - Large Triangle 1: fills bottom half, right angle at center
- * - Large Triangle 2: fills left half, right angle at center
- * - Medium Triangle: top-right corner
- * - Small Triangle 1: small piece near center
- * - Small Triangle 2: another small piece
- * - Square: rotated 45°, in the middle area
- * - Parallelogram: fills remaining gap
- *
- * Piece positions are centroids, adjusted to center the whole at origin.
+ * @param {number} cornerX Normalized x where the right angle should land
+ * @param {number} cornerY Normalized y where the right angle should land
+ * @param {number} leg Normalized leg length for the triangle
+ * @param {number} rotationDeg Rotation angle in degrees (clockwise)
+ * @returns {{x:number,y:number,rotation:number}} Transform for the piece
  */
+function trianglePosition(cornerX, cornerY, leg, rotationDeg) {
+  const localCorner = { x: -leg / 3, y: -leg / 3 };
+  const rotated = rotatePoint(localCorner.x, localCorner.y, rotationDeg);
+  return {
+    x: cornerX - rotated.x,
+    y: cornerY - rotated.y,
+    rotation: rotationDeg,
+  };
+}
 
 /**
- * SQUARE configuration - mathematically derived from classic tangram.
- *
- * Classic tangram dissection (unit square centered at origin, -0.5 to 0.5):
- *
- * Large Triangle 1: vertices (-0.5,-0.5), (0.5,-0.5), (0,0)
- *   - Bottom half, right angle at center (0,0)
- *   - Centroid: (0, -1/3)
- *
- * Large Triangle 2: vertices (-0.5,-0.5), (-0.5,0.5), (0,0)
- *   - Left half, right angle at center (0,0)
- *   - Centroid: (-1/3, 0)
- *
- * Medium Triangle: vertices (0,0.5), (0.5,0.5), (0.5,0)
- *   - Top-right corner, right angle at (0.5,0.5)
- *   - Centroid: (1/3, 1/3)
- *
- * Remaining pieces fill the center-right area...
+ * Resolve the desired Scene framing for a given configuration.
+ * @param {{name:string, view?:{offsetX:number, offsetY:number, scale:number}}} config
+ * @returns {{offsetX:number, offsetY:number, scale:number}}
  */
+function getViewForConfig(config) {
+  return config.view ?? DEFAULT_VIEW;
+}
 
-// The key insight: my makeTriangle() creates a triangle with right angle
-// at the centroid-adjusted position, legs along +x and +y before rotation.
-//
-// For each piece placement, I need:
-// 1. The centroid position in the assembled square
-// 2. The rotation to orient the right angle correctly
+/**
+ * Snap an angle to the nearest increment (default 45°).
+ * @param {number} angleDeg
+ * @param {number} stepDeg
+ * @returns {number}
+ */
+function snapAngle(angleDeg, stepDeg = 45) {
+  const snapped = Math.round(angleDeg / stepDeg) * stepDeg;
+  // Normalize to [0, 360)
+  return ((snapped % 360) + 360) % 360;
+}
 
-const CONFIGURATIONS = {
-  // SQUARE - classic tangram square arrangement
-  //
-  // After LT1 + LT2: remaining region is quadrilateral (0,0)-(0.5,-0.5)-(0.5,0.5)-(-0.5,0.5)
-  // After MT: remaining is pentagon that needs: 2 small tris, 1 square, 1 parallelogram
-  //
-  // Key dimensions:
-  // - Small triangle leg ≈ 0.354, hypotenuse = 0.5
-  // - Square side ≈ 0.354, diagonal = 0.5
-  // - Parallelogram: base ≈ 0.5, height ≈ 0.354
-  //
-  square: {
-    name: 'Square',
-    pieces: [
-      // Large Triangle 1: bottom-left to bottom-right to center
-      // Centroid: (0, -0.333), right angle UP (90°) → R225
-      { x: 0, y: -0.333, rotation: R225 },
+// ============================================
+// TangramPiece
+// ============================================
 
-      // Large Triangle 2: bottom-left to top-left to center
-      // Centroid: (-0.333, 0), right angle RIGHT (0°) → R135
-      { x: -0.333, y: 0, rotation: R135 },
+class TangramPiece extends GameObject {
+  constructor(game, shape, options = {}) {
+    super(game, options);
+    this.shape = shape;
+    this.baseSize = options.baseSize || 100;
+    this.scaleX = 1;
+    this.scaleY = 1;
+    this.interactive = true;
 
-      // Medium Triangle: top-right corner
-      // Centroid: (0.333, 0.333), right angle at 45° → R180
-      { x: 0.333, y: 0.333, rotation: R180 },
+    // Calculate hit box size and local vertices
+    this._calculateHitSize();
+    this._calculateLocalVertices();
+  }
 
-      // Small Triangle 1: fits between center and top-left area
-      // Right angle should point toward bottom-right (315°) → R315+135 = R450 = R90
-      { x: -0.167, y: 0.333, rotation: R90 },
-
-      // Small Triangle 2: fits in bottom-right area
-      // Right angle should point toward top-left (135°) → R135+135 = R270
-      { x: 0.333, y: -0.167, rotation: R270 },
-
-      // Square: center of remaining region, diamond orientation
-      // Fits between the triangles
-      { x: 0.125, y: 0.125, rotation: R45 },
-
-      // Parallelogram: along the diagonal from center toward right
-      { x: 0.25, y: 0, rotation: R45 },
-    ],
-  },
-
-  // CAT - classic tangram cat figure
-  cat: {
-    name: 'Cat',
-    pieces: [
-      // Large triangles form the body
-      { x: -0.15, y: 0.15, rotation: R225 },
-      { x: 0.15, y: 0.15, rotation: R315 },
-      // Medium triangle is the head
-      { x: 0, y: -0.2, rotation: R180 },
-      // Small triangles are ears
-      { x: -0.15, y: -0.35, rotation: R135 },
-      { x: 0.15, y: -0.35, rotation: R225 },
-      // Square is neck
-      { x: 0, y: 0, rotation: R45 },
-      // Parallelogram is tail
-      { x: 0.35, y: 0.25, rotation: R45 },
-    ],
-  },
-
-  // HOUSE - classic tangram house
-  house: {
-    name: 'House',
-    pieces: [
-      // Large triangle is the roof
-      { x: 0, y: -0.3, rotation: R180 },
-      // Large triangle is left wall
-      { x: -0.2, y: 0.15, rotation: R90 },
-      // Medium triangle fills right side
-      { x: 0.15, y: 0.15, rotation: R270 },
-      // Small triangles at base
-      { x: -0.1, y: 0.35, rotation: R0 },
-      { x: 0.1, y: 0.35, rotation: R180 },
-      // Square is window/door
-      { x: 0, y: 0.1, rotation: R0 },
-      // Parallelogram at foundation
-      { x: 0, y: 0.45, rotation: R0 },
-    ],
-  },
-
-  // BOAT / SAILBOAT
-  boat: {
-    name: 'Boat',
-    pieces: [
-      // Large triangles form hull and sail
-      { x: 0, y: 0.2, rotation: R180 },
-      { x: -0.1, y: -0.15, rotation: R90 },
-      // Medium triangle is jib sail
-      { x: 0.15, y: -0.2, rotation: R270 },
-      // Small triangles at bow and stern
-      { x: -0.3, y: 0.25, rotation: R45 },
-      { x: 0.3, y: 0.25, rotation: R135 },
-      // Square in center
-      { x: 0, y: 0.05, rotation: R45 },
-      // Parallelogram as deck
-      { x: 0, y: 0.35, rotation: R0 },
-    ],
-  },
-
-  // SWAN / BIRD
-  swan: {
-    name: 'Swan',
-    pieces: [
-      // Large triangles form body
-      { x: 0.1, y: 0.1, rotation: R225 },
-      { x: -0.15, y: 0.2, rotation: R135 },
-      // Medium triangle is tail
-      { x: -0.35, y: 0.15, rotation: R90 },
-      // Small triangles
-      { x: 0.2, y: -0.15, rotation: R270 },
-      { x: 0.35, y: -0.05, rotation: R225 },
+  /**
+   * Calculate the hit box size based on the shape dimensions.
+   * @private
+   */
+  _calculateHitSize() {
+    const shape = this.shape;
+    if (shape.leg !== undefined) {
+      // RightTriangle - use leg size
+      this.width = shape.leg;
+      this.height = shape.leg;
+    } else if (shape.side !== undefined) {
       // Square
-      { x: 0, y: -0.1, rotation: R45 },
-      // Parallelogram is neck
-      { x: 0.15, y: -0.35, rotation: R90 },
-    ],
-  },
-
-  // RABBIT
-  rabbit: {
-    name: 'Rabbit',
-    pieces: [
-      // Large triangles form body
-      { x: 0, y: 0.15, rotation: R180 },
-      { x: -0.2, y: 0, rotation: R90 },
-      // Medium triangle
-      { x: 0.2, y: 0.1, rotation: R270 },
-      // Small triangles are ears
-      { x: -0.1, y: -0.35, rotation: R0 },
-      { x: 0.1, y: -0.35, rotation: R180 },
-      // Square is head
-      { x: 0, y: -0.15, rotation: R0 },
-      // Parallelogram
-      { x: 0.15, y: 0.35, rotation: R45 },
-    ],
-  },
-};
-
-const CONFIG_ORDER = ['square', 'cat', 'house', 'boat', 'swan', 'rabbit'];
-
-// ============================================
-// TangramPiece Class
-// ============================================
-
-class TangramPiece {
-  constructor(shapeKey, colorKey, index) {
-    this.shapeKey = shapeKey;
-    this.shape = PIECE_SHAPES[shapeKey];
-    this.color = CONFIG.colors[colorKey];
-    this.index = index;
-
-    // Current state
-    this.x = 0;
-    this.y = 0;
-    this.rotation = 0;
-
-    // Animation state
-    this.startX = 0;
-    this.startY = 0;
-    this.startRotation = 0;
-    this.targetX = 0;
-    this.targetY = 0;
-    this.targetRotation = 0;
-    this.animTime = 0;
-    this.animating = false;
-    this.delay = 0;
+      this.width = shape.side;
+      this.height = shape.side;
+    } else if (shape.width !== undefined) {
+      // Parallelogram or Rectangle
+      this.width = shape.width + (shape.slant || 0);
+      this.height = shape.height || shape.width;
+    } else {
+      // Fallback
+      this.width = 50;
+      this.height = 50;
+    }
   }
 
   /**
-   * Start animating to a new position
+   * Calculate local vertices for snapping (relative to piece center).
+   * @private
    */
+  _calculateLocalVertices() {
+    const shape = this.shape;
+    
+    if (shape.leg !== undefined) {
+      // RightTriangle: right angle at origin, legs along +X and +Y
+      // Centroid is at (leg/3, leg/3), so local coords relative to centroid:
+      const leg = shape.leg;
+      const cx = leg / 3;
+      const cy = leg / 3;
+      this._localVertices = [
+        { x: -cx, y: -cy },           // Right angle vertex
+        { x: leg - cx, y: -cy },      // End of X leg
+        { x: -cx, y: leg - cy },      // End of Y leg
+      ];
+    } else if (shape.side !== undefined) {
+      // Square: centered
+      const half = shape.side / 2;
+      this._localVertices = [
+        { x: -half, y: -half },
+        { x: half, y: -half },
+        { x: half, y: half },
+        { x: -half, y: half },
+      ];
+    } else if (shape.width !== undefined) {
+      // Parallelogram: slanted shape
+      const w = shape.width;
+      const h = shape.height;
+      const s = shape.slant || 0;
+      // Centered parallelogram
+      this._localVertices = [
+        { x: -w/2, y: h/2 },           // Bottom-left
+        { x: w/2, y: h/2 },            // Bottom-right
+        { x: w/2 + s, y: -h/2 },       // Top-right
+        { x: -w/2 + s, y: -h/2 },      // Top-left
+      ];
+    } else {
+      this._localVertices = [];
+    }
+  }
+
+  /**
+   * Get world-space vertices (transformed by position and rotation).
+   * @returns {Array<{x: number, y: number}>}
+   */
+  getWorldVertices() {
+    // Use tracked degrees if available, otherwise rotation is already in radians
+    const rad = this._rotationDeg !== undefined 
+      ? (this._rotationDeg * Math.PI) / 180 
+      : this.rotation; // rotation from engine is in radians
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
+    
+    return this._localVertices.map(v => {
+      // Rotate then translate
+      return {
+        x: this.x + v.x * cos - v.y * sin,
+        y: this.y + v.x * sin + v.y * cos,
+      };
+    });
+  }
+
+  /**
+   * Get bounding box for hit testing.
+   * @returns {{x: number, y: number, width: number, height: number}}
+   */
+  getBounds() {
+    const w = this.width * Math.abs(this.scaleX);
+    const h = this.height * Math.abs(this.scaleY);
+    return {
+      x: this.x,
+      y: this.y,
+      width: w,
+      height: h,
+    };
+  }
+
   animateTo(target, delay = 0) {
-    this.startX = this.x;
-    this.startY = this.y;
-    this.startRotation = this.rotation;
-
-    this.targetX = target.x;
-    this.targetY = target.y;
-    this.targetRotation = target.rotation;
-
-    this.delay = delay;
-    this.animTime = 0;
-    this.animating = true;
+    Tweenetik.killTarget(this);
+    Tweenetik.to(
+      this,
+      {
+        x: target.x * this.baseSize,
+        y: target.y * this.baseSize,
+        rotation: target.rotation,
+        scaleX: target.scaleX ?? 1,
+        scaleY: target.scaleY ?? 1,
+      },
+      CONFIG.animDuration,
+      Easing.easeOutBack,
+      { delay }
+    );
   }
 
-  /**
-   * Update animation - smooth easing, no wobble
-   */
-  update(dt) {
-    if (!this.animating) return;
-
-    this.animTime += dt;
-
-    // Wait for delay
-    if (this.animTime < this.delay) return;
-
-    const elapsed = this.animTime - this.delay;
-    const duration = CONFIG.animDuration;
-
-    // Calculate progress with smooth easing
-    const rawT = Math.min(1, elapsed / duration);
-    const t = Easing.easeInOutCubic(rawT);
-
-    // Interpolate position
-    this.x = this.startX + (this.targetX - this.startX) * t;
-    this.y = this.startY + (this.targetY - this.startY) * t;
-
-    // Interpolate rotation (shortest path)
-    let rotDiff = this.targetRotation - this.startRotation;
-    while (rotDiff > Math.PI) rotDiff -= Math.PI * 2;
-    while (rotDiff < -Math.PI) rotDiff += Math.PI * 2;
-    this.rotation = this.startRotation + rotDiff * t;
-
-    // Check if animation is complete
-    if (rawT >= 1) {
-      this.x = this.targetX;
-      this.y = this.targetY;
-      this.rotation = this.targetRotation;
-      this.animating = false;
-    }
+  setPosition(target) {
+    this.x = target.x * this.baseSize;
+    this.y = target.y * this.baseSize;
+    this.rotation = target.rotation;
+    this.scaleX = target.scaleX ?? 1;
+    this.scaleY = target.scaleY ?? 1;
   }
 
-  /**
-   * Draw the piece
-   */
-  draw(ctx, baseSize, centerX, centerY) {
-    ctx.save();
-
-    // Transform to piece position (positions are in unit coords, scale by baseSize)
-    const px = centerX + this.x * baseSize;
-    const py = centerY + this.y * baseSize;
-
-    ctx.translate(px, py);
-    ctx.rotate(this.rotation);
-
-    // Build path from vertices (vertices are already centered at origin)
-    ctx.beginPath();
-    const vertices = this.shape.vertices;
-
-    ctx.moveTo(vertices[0].x * baseSize, vertices[0].y * baseSize);
-
-    for (let i = 1; i < vertices.length; i++) {
-      ctx.lineTo(vertices[i].x * baseSize, vertices[i].y * baseSize);
-    }
-
-    ctx.closePath();
-
-    // Fill
-    ctx.fillStyle = this.color;
-    ctx.fill();
-
-    // Stroke
-    ctx.strokeStyle = CONFIG.strokeColor;
-    ctx.lineWidth = CONFIG.strokeWidth;
-    ctx.lineJoin = 'round';
-    ctx.stroke();
-
-    ctx.restore();
-  }
-
-  /**
-   * Draw glow effect
-   */
-  drawGlow(ctx, baseSize, centerX, centerY) {
-    ctx.save();
-
-    const px = centerX + this.x * baseSize;
-    const py = centerY + this.y * baseSize;
-
-    ctx.translate(px, py);
-    ctx.rotate(this.rotation);
-
-    // Build path
-    ctx.beginPath();
-    const vertices = this.shape.vertices;
-
-    ctx.moveTo(vertices[0].x * baseSize, vertices[0].y * baseSize);
-
-    for (let i = 1; i < vertices.length; i++) {
-      ctx.lineTo(vertices[i].x * baseSize, vertices[i].y * baseSize);
-    }
-
-    ctx.closePath();
-
-    // Glow
-    ctx.shadowColor = CONFIG.glowColor;
-    ctx.shadowBlur = 20;
-    ctx.strokeStyle = CONFIG.strokeColor;
-    ctx.lineWidth = 3;
-    ctx.stroke();
-
-    ctx.restore();
+  draw() {
+    super.draw();
+    this.shape.draw();
   }
 }
 
 // ============================================
-// Main Demo Class
+// Main Demo
 // ============================================
 
 class TangramDemo extends Game {
   constructor(canvas) {
     super(canvas);
-    this.backgroundColor = "#000";
+    this.configIndex = 0;
+    this.draggingPiece = null;
+    this.selectedPiece = null; // Persists after mouse release
+    this._onKeyDown = null;
+    this._onCanvasClick = null;
+    this._dragCleanups = [];
   }
 
   init() {
     super.init();
     Painter.init(this.ctx);
 
-    // Create the 7 tangram pieces
-    this.pieces = [
-      new TangramPiece('largeTriangle1', 'piece1', 0),
-      new TangramPiece('largeTriangle2', 'piece2', 1),
-      new TangramPiece('mediumTriangle', 'piece3', 2),
-      new TangramPiece('smallTriangle1', 'piece4', 3),
-      new TangramPiece('smallTriangle2', 'piece5', 4),
-      new TangramPiece('square', 'piece6', 5),
-      new TangramPiece('parallelogram', 'piece7', 6),
-    ];
+    this.baseSize = Math.min(this.width, this.height) * 0.8;
 
-    // Current configuration
-    this.currentConfigIndex = 0;
-    this.configName = CONFIG_ORDER[0];
+    // Create main scene for tangram pieces
+    this.scene = new Scene(this, {
+      x: this.width / 2,
+      y: this.height / 2,
+    });
 
-    // Apply initial configuration
-    this.applyConfiguration(CONFIG_ORDER[0], false);
+    this.pieces = this.createPieces();
+    for (const piece of this.pieces) {
+      this.scene.add(piece);
+    }
+    this.pipeline.add(this.scene);
 
-    // UI hint
-    this.showHint = true;
-    this.hintOpacity = 1;
+    // Create UI buttons first (before state machine, since menu state uses them)
+    this.createButtons();
 
-    // Click to change configuration
-    this.canvas.addEventListener('click', () => this.nextConfiguration());
+    // Initialize state machine (will enter "menu" state)
+    this.initStateMachine();
 
-    // Touch support
-    this.canvas.addEventListener('touchend', (e) => {
-      e.preventDefault();
-      this.nextConfiguration();
+    // Setup keyboard handler
+    this.initKeyboardHandler();
+
+    // Keep focus on the canvas
+    this.canvas.tabIndex = 0;
+    this.canvas.style.outline = "none";
+    this.canvas.addEventListener("pointerdown", () => this.canvas.focus());
+    this.canvas.focus();
+  }
+
+  /**
+   * Initialize the state machine with menu, showcase, and design states.
+   */
+  initStateMachine() {
+    this.fsm = new StateMachine({
+      initial: "menu",
+      context: this,
+      states: {
+        menu: {
+          enter: () => {
+            this.showButtons(true);
+            this.removeCanvasClickHandler();
+            this.disableDragging();
+            // Position pieces in first config
+            this.configuration = ALL_CONFIGS[0];
+            this.applyConfiguration(false);
+          },
+          exit: () => {
+            this.showButtons(false);
+          },
+        },
+        showcase: {
+          enter: () => {
+            this.configIndex = 0;
+            this.configuration = ALL_CONFIGS[0];
+            this.applyConfiguration(false);
+            this.assignDistinctColors();
+            
+            // Click cycles to next shape with new colors
+            this.setupCanvasClickHandler(() => this.toggleShowcase());
+            this.disableDragging();
+          },
+          exit: () => {
+            this.removeCanvasClickHandler();
+          },
+        },
+        design: {
+          enter: () => {
+            // Kill any active tweens on pieces
+            for (const piece of this.pieces) {
+              Tweenetik.killTarget(piece);
+            }
+            Tweenetik.killTarget(this.scene);
+            
+            // Reset scene position
+            this.scene.x = this.width / 2;
+            this.scene.y = this.height / 2;
+            
+            // Load starting config or scatter pieces
+            if (DESIGN_START_CONFIG) {
+              this.loadDesignConfig(DESIGN_START_CONFIG);
+              console.log(`[Design Mode] Loaded config: ${DESIGN_START_CONFIG.name}`);
+            } else {
+              this.scene.scaleX = 1;
+              this.scene.scaleY = 1;
+              this._designScale = 1;
+              this.scatterPieces();
+            }
+            
+            this.enableDragging();
+            this.enableWheelZoom();
+            console.log("[Design Mode] Q/E to rotate, Mouse wheel to zoom, P to print config");
+          },
+          exit: () => {
+            this.disableDragging();
+            this.disableWheelZoom();
+          },
+        },
+      },
     });
   }
 
   /**
-   * Apply a configuration to all pieces
+   * Create mode selection buttons.
    */
-  applyConfiguration(configKey, animate = true) {
-    const config = CONFIGURATIONS[configKey];
-    if (!config) return;
+  createButtons() {
+    const { width, height, spacing } = CONFIG.button;
+    const centerX = this.width / 2;
+    const centerY = this.height / 2;
 
-    this.configName = config.name;
+    this.showcaseBtn = new Button(this, {
+      x: centerX - width / 2 - spacing / 2,
+      y: centerY,
+      width,
+      height,
+      text: "Showcase",
+      onClick: () => this.fsm.setState("showcase"),
+    });
 
-    for (let i = 0; i < this.pieces.length; i++) {
-      const piece = this.pieces[i];
-      const target = config.pieces[i];
+    this.designBtn = new Button(this, {
+      x: centerX + width / 2 + spacing / 2,
+      y: centerY,
+      width,
+      height,
+      text: "Design",
+      onClick: () => this.fsm.setState("design"),
+    });
 
-      if (animate) {
-        // Stagger the animation start
-        const delay = i * CONFIG.staggerDelay;
-        piece.animateTo(target, delay);
-      } else {
-        // Instant apply
-        piece.x = target.x;
-        piece.y = target.y;
-        piece.rotation = target.rotation;
-      }
-    }
+    this.backBtn = new Button(this, {
+      x: 80,
+      y: 30,
+      width: 100,
+      height: 30,
+      text: "← Back",
+      onClick: () => this.fsm.setState("menu"),
+    });
 
+    this.pipeline.add(this.showcaseBtn);
+    this.pipeline.add(this.designBtn);
+    this.pipeline.add(this.backBtn);
   }
 
   /**
-   * Switch to next configuration
+   * Show or hide buttons based on current mode.
+   * @param {boolean} showMenu - If true, show menu buttons; otherwise show back button
+   */
+  showButtons(showMenu) {
+    if (!this.showcaseBtn) return; // Guard against early calls
+    this.showcaseBtn.visible = showMenu;
+    this.designBtn.visible = showMenu;
+    this.backBtn.visible = !showMenu;
+    this.showcaseBtn.interactive = showMenu;
+    this.designBtn.interactive = showMenu;
+    this.backBtn.interactive = !showMenu;
+  }
+
+  /**
+   * Setup keyboard handler for Q/E rotation and P to print.
+   */
+  initKeyboardHandler() {
+    const STEP_DEG = 45; // Degrees per step
+
+    this._onKeyDown = (e) => {
+      const key = e.key.toLowerCase();
+
+      // Q/E work in design mode on selected piece (persists after release)
+      if (this.fsm.is("design") && this.selectedPiece) {
+        if (key === "q" || key === "e") {
+          e.preventDefault();
+          e.stopPropagation();
+          
+          // Track rotation in degrees on our own property
+          if (this.selectedPiece._rotationDeg === undefined) {
+            this.selectedPiece._rotationDeg = 0;
+          }
+          
+          const delta = key === "q" ? -STEP_DEG : STEP_DEG;
+          this.selectedPiece._rotationDeg += delta;
+          
+          // Engine takes degrees directly (converts to radians internally)
+          console.log(`[Rotate] ${key.toUpperCase()}: ${this.selectedPiece._rotationDeg - delta}° -> ${this.selectedPiece._rotationDeg}°`);
+          this.selectedPiece.rotation = this.selectedPiece._rotationDeg;
+          return;
+        }
+      }
+
+      // P to print config (design mode only)
+      if (key === "p" && this.fsm.is("design")) {
+        e.preventDefault();
+        e.stopPropagation();
+        this.printConfiguration();
+        return;
+      }
+
+      // ESC to go back to menu
+      if (key === "escape" && !this.fsm.is("menu")) {
+        e.preventDefault();
+        this.fsm.setState("menu");
+      }
+    };
+
+    window.addEventListener("keydown", this._onKeyDown, { capture: true });
+  }
+
+  /**
+   * Setup canvas click handler for showcase mode.
+   * @param {Function} handler - Click handler function
+   */
+  setupCanvasClickHandler(handler) {
+    this.removeCanvasClickHandler();
+    this._onCanvasClick = handler;
+    this.canvas.addEventListener("click", this._onCanvasClick);
+  }
+
+  /**
+   * Remove canvas click handler.
+   */
+  removeCanvasClickHandler() {
+    if (this._onCanvasClick) {
+      this.canvas.removeEventListener("click", this._onCanvasClick);
+      this._onCanvasClick = null;
+    }
+  }
+
+  /**
+   * Enable dragging on all pieces.
+   * Custom implementation to handle scene-local coordinates.
+   */
+  enableDragging() {
+    this.disableDragging(); // Clean up first
+
+    for (const piece of this.pieces) {
+      piece.interactive = true;
+
+      // Store drag state on piece
+      piece._dragOffset = { x: 0, y: 0 };
+      piece._isDragging = false;
+
+      // Input down handler - start drag and select
+      const onInputDown = (e) => {
+        piece._isDragging = true;
+        this.draggingPiece = piece;
+        
+        // Select this piece (persists after mouse release)
+        this.selectPiece(piece);
+
+        // Calculate offset in scene-local coordinates (accounting for scale)
+        const scale = this.scene.scaleX || 1;
+        const localX = (e.x - this.scene.x) / scale;
+        const localY = (e.y - this.scene.y) / scale;
+        piece._dragOffset.x = piece.x - localX;
+        piece._dragOffset.y = piece.y - localY;
+      };
+
+      // Input move handler - update position
+      const onInputMove = (e) => {
+        if (!piece._isDragging) return;
+
+        // Convert to scene-local coordinates (accounting for scale)
+        const scale = this.scene.scaleX || 1;
+        const localX = (e.x - this.scene.x) / scale;
+        const localY = (e.y - this.scene.y) / scale;
+        piece.x = localX + piece._dragOffset.x;
+        piece.y = localY + piece._dragOffset.y;
+      };
+
+      // Input up handler - end drag, snap if nearby, keep selected
+      const onInputUp = () => {
+        if (!piece._isDragging) return;
+        piece._isDragging = false;
+        this.draggingPiece = null;
+        
+        // Try to snap to nearby pieces
+        this.snapPieceToNearby(piece);
+      };
+
+      // Bind handlers
+      piece.on("inputdown", onInputDown);
+      this.events.on("inputmove", onInputMove);
+      this.events.on("inputup", onInputUp);
+
+      // Store cleanup function
+      this._dragCleanups.push(() => {
+        piece.off("inputdown", onInputDown);
+        this.events.off("inputmove", onInputMove);
+        this.events.off("inputup", onInputUp);
+        delete piece._dragOffset;
+        delete piece._isDragging;
+      });
+    }
+
+    // Add canvas click handler to deselect when clicking empty space
+    this._clickedPiece = false;
+    
+    this._onDesignCanvasDown = () => {
+      // Will be set to true by piece inputdown if a piece is clicked
+      this._clickedPiece = false;
+    };
+    
+    this._onDesignCanvasUp = () => {
+      // If no piece was clicked, deselect
+      if (!this._clickedPiece && !this.draggingPiece) {
+        this.deselectPiece();
+      }
+    };
+    
+    // Mark that a piece was clicked (called before canvas handler)
+    for (const piece of this.pieces) {
+      const markClicked = () => { this._clickedPiece = true; };
+      piece.on("inputdown", markClicked);
+      this._dragCleanups.push(() => piece.off("inputdown", markClicked));
+    }
+    
+    this.events.on("inputdown", this._onDesignCanvasDown);
+    this.events.on("inputup", this._onDesignCanvasUp);
+    
+    this._dragCleanups.push(() => {
+      this.events.off("inputdown", this._onDesignCanvasDown);
+      this.events.off("inputup", this._onDesignCanvasUp);
+    });
+  }
+
+  /**
+   * Select a piece for rotation.
+   * @param {TangramPiece} piece - The piece to select
+   */
+  selectPiece(piece) {
+    // Deselect previous
+    if (this.selectedPiece && this.selectedPiece !== piece) {
+      this.restorePieceStroke(this.selectedPiece);
+    }
+    
+    // Select new piece
+    this.selectedPiece = piece;
+    this.scene.bringToFront(piece);
+    
+    // Store original stroke and change to green
+    if (!piece._originalStroke) {
+      piece._originalStroke = piece.shape.stroke;
+      piece._originalLineWidth = piece.shape.lineWidth;
+    }
+    piece.shape.stroke = "#0f0";
+    piece.shape.lineWidth = 4;
+  }
+
+  /**
+   * Restore a piece's original stroke color.
+   * @param {TangramPiece} piece - The piece to restore
+   */
+  restorePieceStroke(piece) {
+    if (piece._originalStroke !== undefined) {
+      piece.shape.stroke = piece._originalStroke;
+      piece.shape.lineWidth = piece._originalLineWidth;
+    }
+  }
+
+  /**
+   * Deselect the current piece.
+   */
+  deselectPiece() {
+    if (this.selectedPiece) {
+      this.restorePieceStroke(this.selectedPiece);
+      this.selectedPiece = null;
+    }
+  }
+
+  /**
+   * Disable dragging on all pieces.
+   */
+  disableDragging() {
+    for (const cleanup of this._dragCleanups) {
+      if (typeof cleanup === "function") {
+        cleanup();
+      }
+    }
+    this._dragCleanups = [];
+    this.draggingPiece = null;
+    this.deselectPiece();
+  }
+
+  /**
+   * Enable mouse wheel zoom for the scene.
+   */
+  enableWheelZoom() {
+    this._onWheel = (e) => {
+      e.preventDefault();
+      
+      const zoomSpeed = 0.05;
+      const delta = e.deltaY > 0 ? -zoomSpeed : zoomSpeed;
+      
+      // Update scale, capping between 0.3 and 1.0
+      this._designScale = Math.max(0.3, Math.min(1.0, this._designScale + delta));
+      
+      this.scene.scaleX = this._designScale;
+      this.scene.scaleY = this._designScale;
+    };
+    
+    this.canvas.addEventListener("wheel", this._onWheel, { passive: false });
+  }
+
+  /**
+   * Disable mouse wheel zoom.
+   */
+  disableWheelZoom() {
+    if (this._onWheel) {
+      this.canvas.removeEventListener("wheel", this._onWheel);
+      this._onWheel = null;
+    }
+  }
+
+  /**
+   * Snap a piece to nearby pieces if close enough.
+   * @param {TangramPiece} piece - The piece to snap
+   */
+  snapPieceToNearby(piece) {
+    const SNAP_THRESHOLD = 25; // Pixels threshold for snapping
+    
+    const pieceVerts = piece.getWorldVertices();
+    if (pieceVerts.length === 0) return;
+    
+    let bestSnap = null;
+    let bestDist = SNAP_THRESHOLD;
+    
+    // Check all other pieces
+    for (const other of this.pieces) {
+      if (other === piece) continue;
+      
+      const otherVerts = other.getWorldVertices();
+      
+      // Find closest vertex pair
+      for (const pv of pieceVerts) {
+        for (const ov of otherVerts) {
+          const dx = ov.x - pv.x;
+          const dy = ov.y - pv.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          
+          if (dist < bestDist) {
+            bestDist = dist;
+            bestSnap = { dx, dy };
+          }
+        }
+      }
+    }
+    
+    // Apply snap if found
+    if (bestSnap) {
+      piece.x += bestSnap.dx;
+      piece.y += bestSnap.dy;
+      console.log(`[Snap] Snapped piece by (${bestSnap.dx.toFixed(1)}, ${bestSnap.dy.toFixed(1)})`);
+    }
+  }
+
+  /**
+   * Scatter pieces randomly for design mode.
+   */
+  scatterPieces() {
+    const spacing = this.baseSize * 0.25;
+    const cols = 4;
+    const startX = -spacing * 1.5;
+    const startY = -spacing;
+
+    for (let i = 0; i < this.pieces.length; i++) {
+      const piece = this.pieces[i];
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      piece.x = startX + col * spacing;
+      piece.y = startY + row * spacing;
+      piece.rotation = 0;
+      piece._rotationDeg = 0; // Track rotation in degrees
+      piece.scaleX = piece.scaleY = 1;
+    }
+  }
+
+  /**
+   * Load a configuration as the starting point for design mode.
+   * @param {Object} config - The configuration to load
+   */
+  loadDesignConfig(config) {
+    // Apply view scale
+    const view = config.view ?? { offsetX: 0, offsetY: 0, scale: 1 };
+    this._designScale = view.scale;
+    this.scene.scaleX = view.scale;
+    this.scene.scaleY = view.scale;
+
+    // Apply piece positions
+    for (let i = 0; i < this.pieces.length; i++) {
+      const piece = this.pieces[i];
+      const target = config.pieces[i];
+      
+      piece.x = target.x * this.baseSize;
+      piece.y = target.y * this.baseSize;
+      piece.rotation = target.rotation; // Degrees for engine
+      piece._rotationDeg = target.rotation; // Track in degrees
+      piece.scaleX = target.scaleX ?? 1;
+      piece.scaleY = target.scaleY ?? 1;
+    }
+  }
+
+  /**
+   * Print current piece configuration to console (for copy-pasting).
+   */
+  printConfiguration() {
+    const pieceNames = [
+      "Large 1",
+      "Large 2",
+      "Medium",
+      "Small 1",
+      "Small 2",
+      "Square",
+      "Parallelogram",
+    ];
+
+    console.log("\n=== TANGRAM CONFIGURATION ===");
+    console.log("Copy this into ALL_CONFIGS:\n");
+
+    const currentScale = this._designScale ?? 1;
+    const configStr = `{
+  name: "custom",
+  view: { offsetX: 0, offsetY: 0, scale: ${currentScale.toFixed(2)} },
+  pieces: [
+${this.pieces
+  .map((p, i) => {
+    const x = (p.x / this.baseSize).toFixed(3);
+    const y = (p.y / this.baseSize).toFixed(3);
+    // Use our tracked rotation in degrees, or convert from radians
+    const rotDeg = p._rotationDeg !== undefined 
+      ? p._rotationDeg 
+      : (p.rotation * 180 / Math.PI);
+    const rot = snapAngle(rotDeg, 45);
+    // Output raw position (don't use trianglePosition - it expects corner, not centroid)
+    return `    // ${pieceNames[i]}\n    { x: ${x}, y: ${y}, rotation: ${rot} },`;
+  })
+  .join("\n")}
+  ],
+}`;
+
+    console.log(configStr);
+    console.log("\n=============================\n");
+  }
+
+  /**
+   * Apply scene framing (position + scale) for the current configuration.
+   * @param {boolean} animate Whether to tween into the framing
+   */
+  applySceneView(animate = true) {
+    const view = getViewForConfig(this.configuration);
+    const target = {
+      x: this.width / 2 + view.offsetX,
+      y: this.height / 2 + view.offsetY,
+      scaleX: view.scale,
+      scaleY: view.scale,
+    };
+
+    Tweenetik.killTarget(this.scene);
+    if (animate) {
+      Tweenetik.to(this.scene, target, CONFIG.animDuration, Easing.easeOutBack);
+    } else {
+      this.scene.x = target.x;
+      this.scene.y = target.y;
+      this.scene.scaleX = target.scaleX;
+      this.scene.scaleY = target.scaleY;
+    }
+  }
+
+  /**
+   * Cycle to next shape and assign new distinct colors.
+   */
+  toggleShowcase() {
+    this.nextConfiguration();
+    this.assignDistinctColors();
+  }
+  
+  /**
+   * Generate distinct colors for all 7 pieces (no duplicates).
+   * Uses evenly spaced hues around the color wheel.
+   */
+  assignDistinctColors() {
+    // 7 distinct hues evenly spaced (360 / 7 ≈ 51°)
+    const baseHues = [0, 30, 60, 120, 180, 240, 300]; // Red, Orange, Yellow, Green, Cyan, Blue, Magenta
+    
+    // Shuffle the hues
+    const hues = [...baseHues];
+    for (let i = hues.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [hues[i], hues[j]] = [hues[j], hues[i]];
+    }
+    
+    // Apply to pieces
+    for (let i = 0; i < this.pieces.length; i++) {
+      const hue = hues[i];
+      this.pieces[i].shape.color = `hsl(${hue}, 85%, 55%)`;
+    }
+  }
+
+  /**
+   * Scatter pieces with animation (for showcase mode).
+   * Also randomizes colors.
+   */
+  scatterPiecesAnimated() {
+    // Reset scene view to default
+    const defaultView = { offsetX: 0, offsetY: 0, scale: 1 };
+    this.configuration = { view: defaultView };
+    this.applySceneView(true);
+
+    // Scatter each piece with animation and random colors
+    for (let i = 0; i < this.pieces.length; i++) {
+      const piece = this.pieces[i];
+      Tweenetik.killTarget(piece);
+      
+      // Store original color if not already stored
+      if (!piece._originalColor) {
+        piece._originalColor = piece.shape.color;
+      }
+      
+      // Random position within the scene bounds
+      const targetX = (Math.random() - 0.5) * this.baseSize * 1.2;
+      const targetY = (Math.random() - 0.5) * this.baseSize * 1.2;
+      const targetRotation = Math.floor(Math.random() * 8) * 45; // Random 45° increments
+      
+      // Randomize color using Painter.colors
+      piece.shape.color = Painter.colors.randomColorHSL();
+      
+      Tweenetik.to(
+        piece,
+        { x: targetX, y: targetY, rotation: targetRotation },
+        CONFIG.animDuration,
+        Easing.easeOutBack,
+        { delay: i * CONFIG.staggerDelay }
+      );
+    }
+  }
+  
+  /**
+   * Restore original colors on all pieces.
+   */
+  restoreOriginalColors() {
+    for (const piece of this.pieces) {
+      if (piece._originalColor) {
+        piece.shape.color = piece._originalColor;
+      }
+    }
+  }
+
+  /**
+   * Create all tangram pieces.
+   * @returns {TangramPiece[]} Array of tangram pieces
+   */
+  createPieces() {
+    const size = this.baseSize;
+    const pieces = [];
+
+    const make = (shape) => new TangramPiece(this, shape, { baseSize: size });
+    const opts = (color) => ({
+      color,
+      stroke: CONFIG.strokeColor,
+      lineWidth: CONFIG.strokeWidth,
+      lineJoin: "round",
+    });
+
+    pieces.push(
+      make(
+        new RightTriangle(
+          TANGRAM.LARGE_LEG * size,
+          opts(CONFIG.colors.largeTriangle1)
+        )
+      )
+    );
+    pieces.push(
+      make(
+        new RightTriangle(
+          TANGRAM.LARGE_LEG * size,
+          opts(CONFIG.colors.largeTriangle2)
+        )
+      )
+    );
+    pieces.push(
+      make(
+        new RightTriangle(
+          TANGRAM.MEDIUM_LEG * size,
+          opts(CONFIG.colors.mediumTriangle)
+        )
+      )
+    );
+    pieces.push(
+      make(
+        new RightTriangle(
+          TANGRAM.SMALL_LEG * size,
+          opts(CONFIG.colors.smallTriangle1)
+        )
+      )
+    );
+    pieces.push(
+      make(
+        new RightTriangle(
+          TANGRAM.SMALL_LEG * size,
+          opts(CONFIG.colors.smallTriangle2)
+        )
+      )
+    );
+    pieces.push(
+      make(new Square(TANGRAM.SQUARE_SIDE * size, opts(CONFIG.colors.square)))
+    );
+    pieces.push(
+      make(
+        new Parallelogram({
+          width: TANGRAM.PARA_BASE * size,
+          height: TANGRAM.PARA_HEIGHT * size,
+          slant: TANGRAM.PARA_HEIGHT * size,
+          ...opts(CONFIG.colors.parallelogram),
+        })
+      )
+    );
+
+    return pieces;
+  }
+
+  /**
+   * Apply a configuration to all pieces.
+   * @param {boolean} animate Whether to animate the transition
+   */
+  applyConfiguration(animate = true) {
+    const config = this.configuration;
+    for (let i = 0; i < this.pieces.length; i++) {
+      const target = config.pieces[i];
+      if (animate) {
+        this.pieces[i].animateTo(target, i * CONFIG.staggerDelay);
+      } else {
+        this.pieces[i].setPosition(target);
+      }
+    }
+    this.applySceneView(animate);
+  }
+
+  /**
+   * Pick a random configuration with animation (showcase mode).
    */
   nextConfiguration() {
-    // Hide hint after first click
-    this.showHint = false;
+    const count = ALL_CONFIGS.length;
+    if (count === 0) return;
 
-    this.currentConfigIndex = (this.currentConfigIndex + 1) % CONFIG_ORDER.length;
-    this.applyConfiguration(CONFIG_ORDER[this.currentConfigIndex], true);
+    let nextIndex;
+    if (count === 1) {
+      nextIndex = 0;
+    } else {
+      // Pick a different config than current
+      nextIndex = this.configIndex;
+      while (nextIndex === this.configIndex) {
+        nextIndex = Math.floor(Math.random() * count);
+      }
+    }
+
+    this.configIndex = nextIndex;
+    this.configuration = ALL_CONFIGS[this.configIndex];
+    console.log(`Assembling: ${this.configuration.name}`);
+    this.applyConfiguration(true);
   }
 
   update(dt) {
     super.update(dt);
-
-    // Update all pieces
-    for (const piece of this.pieces) {
-      piece.update(dt);
-    }
-
-    // Fade out hint
-    if (!this.showHint && this.hintOpacity > 0) {
-      this.hintOpacity = Math.max(0, this.hintOpacity - dt * 2);
-    }
+    Tweenetik.updateAll(dt);
+    this.fsm.update(dt);
   }
 
-  render() {
-    const ctx = this.ctx;
-    const w = this.width;
-    const h = this.height;
-
-    // Motion blur trail
-    ctx.fillStyle = `rgba(0, 0, 0, ${CONFIG.trailAlpha})`;
-    ctx.fillRect(0, 0, w, h);
-
-    // Calculate center and size - use 60% of smaller dimension for good coverage
-    const centerX = w / 2;
-    const centerY = h / 2;
-    const baseSize = Math.min(w, h) * 0.6;
-
-    // DEBUG: Draw target square outline (the assembled tangram should fill this)
-    if (this.configName === 'Square') {
-      ctx.save();
-      ctx.strokeStyle = 'rgba(255, 0, 0, 0.3)';
-      ctx.lineWidth = 2;
-      ctx.setLineDash([5, 5]);
-      const half = baseSize * 0.5;
-      ctx.strokeRect(centerX - half, centerY - half, baseSize, baseSize);
-      // Draw crosshairs at center
-      ctx.beginPath();
-      ctx.moveTo(centerX - 20, centerY);
-      ctx.lineTo(centerX + 20, centerY);
-      ctx.moveTo(centerX, centerY - 20);
-      ctx.lineTo(centerX, centerY + 20);
-      ctx.stroke();
-      ctx.restore();
+  stop() {
+    // Cleanup
+    if (this._onKeyDown) {
+      window.removeEventListener("keydown", this._onKeyDown, { capture: true });
     }
-
-    // Draw glow layer first (behind pieces)
-    ctx.globalCompositeOperation = 'lighter';
-    for (const piece of this.pieces) {
-      piece.drawGlow(ctx, baseSize, centerX, centerY);
-    }
-    ctx.globalCompositeOperation = 'source-over';
-
-    // Draw all pieces
-    for (const piece of this.pieces) {
-      piece.draw(ctx, baseSize, centerX, centerY);
-    }
-
-    // Configuration name
-    ctx.save();
-    ctx.font = 'bold 24px "Fira Code", monospace';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'top';
-    ctx.fillStyle = '#0f0';
-    ctx.globalAlpha = 0.8;
-    ctx.fillText(this.configName, centerX, 30);
-    ctx.restore();
-
-    // Click hint
-    if (this.hintOpacity > 0) {
-      ctx.save();
-      ctx.font = '14px "Fira Code", monospace';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'bottom';
-      ctx.fillStyle = '#0f0';
-      ctx.globalAlpha = this.hintOpacity * 0.6;
-      ctx.fillText('[ click to transform ]', centerX, h - 30);
-      ctx.restore();
-    }
-
-    // Piece count indicator
-    ctx.save();
-    ctx.font = '12px "Fira Code", monospace';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'bottom';
-    ctx.fillStyle = '#0f0';
-    ctx.globalAlpha = 0.4;
-    ctx.fillText(`${this.currentConfigIndex + 1}/${CONFIG_ORDER.length}`, 20, h - 20);
-    ctx.restore();
+    this.removeCanvasClickHandler();
+    this.disableDragging();
+    super.stop();
   }
 }
 
