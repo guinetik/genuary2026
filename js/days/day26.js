@@ -3,29 +3,32 @@
  * Prompt: "Split the canvas into a grid and recurse on each cell again and again"
  *
  * Menger Sponge - the classic 3D recursive fractal.
- * A cube subdivided into 3x3x3 grid, removing the center and face-centers,
- * then recursing on each remaining cube.
+ * Built using particles at cube vertices for a wireframe aesthetic.
+ * Particles assemble from chaos into the fractal structure.
  *
  * Controls:
  * - Drag: Rotate camera
- * - Click: Toggle auto-zoom / reset
+ * - Double-click: Scatter and reassemble
  * - Scroll: Manual zoom
  */
 
-import { Game, Camera3D, Cube3D, Painter, Easing } from "@guinetik/gcanvas";
+import { Game, Camera3D, ParticleSystem, Painter, Easing } from "@guinetik/gcanvas";
 
 const CONFIG = {
   background: "#000",
 
   // Menger sponge settings
-  maxDepth: 3, // How many recursion levels (3 = 20^3 = 8000 cubes max)
-  baseSize: 300, // Size of the root cube
+  maxDepth: 3,
+  baseSize: 280,
+
+  // Particle settings
+  particleSize: 2.5,
+  particleShape: "square",
 
   // Colors - terminal green aesthetic
   colors: {
-    cube: "#0a0a0a", // Dark cube faces
-    stroke: "#0f0", // Green wireframe
-    glow: "#0f0", // Glow color
+    primary: "#0f0",
+    stroke: "#0f0",
   },
 
   // Camera
@@ -41,10 +44,10 @@ const CONFIG = {
   // Animation
   animation: {
     autoRotateSpeed: 0.15,
-    zoomSpeed: 0.08,
-    zoomMin: 0.5,
-    zoomMax: 8,
-    buildDelay: 0.015, // Delay between cube appearances
+    attractStrength: 8,
+    damping: 0.92,
+    scatterForce: 800,
+    buildDelay: 0.003, // Stagger per particle
   },
 };
 
@@ -62,7 +65,6 @@ function generateMengerPositions(
   positions = []
 ) {
   if (depth >= maxDepth) {
-    // Leaf node - add this cube
     positions.push({ x: cx, y: cy, z: cz, size, depth });
     return positions;
   }
@@ -70,16 +72,12 @@ function generateMengerPositions(
   const third = size / 3;
   const offset = size / 3;
 
-  // Iterate through 3x3x3 grid
   for (let dx = -1; dx <= 1; dx++) {
     for (let dy = -1; dy <= 1; dy++) {
       for (let dz = -1; dz <= 1; dz++) {
-        // Count how many axes are at center (0)
         const centerCount =
           (dx === 0 ? 1 : 0) + (dy === 0 ? 1 : 0) + (dz === 0 ? 1 : 0);
 
-        // Skip if 2 or more axes are centered (removes center + face centers)
-        // This is the Menger sponge rule: keep only corners and edges
         if (centerCount >= 2) continue;
 
         const nx = cx + dx * offset;
@@ -95,7 +93,24 @@ function generateMengerPositions(
 }
 
 /**
- * Day 26 Demo - Menger Sponge
+ * Generate 8 corner positions for a cube
+ */
+function getCubeCorners(cx, cy, cz, size) {
+  const hs = size / 2;
+  return [
+    { x: cx - hs, y: cy - hs, z: cz - hs },
+    { x: cx + hs, y: cy - hs, z: cz - hs },
+    { x: cx - hs, y: cy + hs, z: cz - hs },
+    { x: cx + hs, y: cy + hs, z: cz - hs },
+    { x: cx - hs, y: cy - hs, z: cz + hs },
+    { x: cx + hs, y: cy - hs, z: cz + hs },
+    { x: cx - hs, y: cy + hs, z: cz + hs },
+    { x: cx + hs, y: cy + hs, z: cz + hs },
+  ];
+}
+
+/**
+ * Day 26 Demo - Menger Sponge with Particle Vertices
  */
 class Day26Demo extends Game {
   constructor(canvas) {
@@ -120,101 +135,245 @@ class Day26Demo extends Game {
 
     // Animation state
     this.time = 0;
+    this.globalRotation = 0;
     this.zoom = 1;
     this.targetZoom = 1;
-    this.autoZoom = true;
-    this.zoomDirection = 1;
-    this.globalRotation = 0;
 
-    // Build state for animated construction
-    this.buildProgress = 0;
-    this.cubesBuilt = 0;
+    // Build state
+    this.buildTime = 0;
+    this.cubesSpawned = 0;
 
-    // Generate Menger sponge positions
-    this.generateSponge();
+    // Generate target positions
+    this.generateTargets();
 
-    // Click to toggle auto-zoom
-    this.canvas.addEventListener("click", () => {
-      this.autoZoom = !this.autoZoom;
-      if (!this.autoZoom) {
-        this.targetZoom = this.zoom;
-      }
+    // Create particle system
+    this.createParticleSystem();
+
+    // Double-click to scatter and reassemble
+    this.canvas.addEventListener("dblclick", () => {
+      this.scatterParticles();
     });
 
-    // Scroll to manual zoom
+    // Scroll to zoom
     this.canvas.addEventListener(
       "wheel",
       (e) => {
         e.preventDefault();
-        this.autoZoom = false;
         const delta = e.deltaY > 0 ? 0.9 : 1.1;
-        this.targetZoom = Math.max(
-          CONFIG.animation.zoomMin,
-          Math.min(CONFIG.animation.zoomMax, this.targetZoom * delta)
-        );
+        this.targetZoom = Math.max(0.3, Math.min(15, this.targetZoom * delta));
       },
       { passive: false }
     );
   }
 
-  generateSponge() {
+  generateTargets() {
     // Calculate responsive base size
     const minDim = Math.min(this.width, this.height);
-    const baseSize = minDim * 0.4;
+    const baseSize = minDim * 0.35;
 
-    // Generate all cube positions
-    const positions = generateMengerPositions(
-      0,
-      0,
-      0,
+    // Generate cube positions
+    const cubePositions = generateMengerPositions(
+      0, 0, 0,
       baseSize,
       0,
       CONFIG.maxDepth
     );
 
     // Sort by depth for build animation (shallow first)
-    positions.sort((a, b) => a.depth - b.depth);
+    cubePositions.sort((a, b) => a.depth - b.depth);
 
-    // Create Cube3D instances
-    this.cubes = positions.map((pos, i) => {
-      // Color varies slightly by depth
-      const depthRatio = pos.depth / CONFIG.maxDepth;
-      const hue = 135; // Green
-      const lightness = 8 + depthRatio * 4;
-
-      const cube = new Cube3D(pos.size * 0.98, {
-        x: pos.x,
-        y: pos.y,
-        z: pos.z,
-        camera: this.camera,
-        faceColors: {
-          front: `hsl(${hue}, 100%, ${lightness}%)`,
-          back: `hsl(${hue}, 100%, ${lightness}%)`,
-          top: `hsl(${hue}, 100%, ${lightness + 2}%)`,
-          bottom: `hsl(${hue}, 100%, ${lightness - 2}%)`,
-          left: `hsl(${hue}, 100%, ${lightness}%)`,
-          right: `hsl(${hue}, 100%, ${lightness}%)`,
-        },
-        stroke: CONFIG.colors.stroke,
-        lineWidth: 1,
-      });
-
+    // Store cubes with their corners
+    this.cubes = cubePositions.map((cube, i) => {
+      const corners = getCubeCorners(cube.x, cube.y, cube.z, cube.size * 0.95);
       return {
-        cube,
-        depth: pos.depth,
-        buildDelay: i * CONFIG.animation.buildDelay,
-        visible: false,
-        scale: 0,
+        ...cube,
+        corners,
+        spawnDelay: i * CONFIG.animation.buildDelay,
+        spawned: false,
       };
     });
 
-    this.buildProgress = 0;
-    this.cubesBuilt = 0;
+    console.log(`Menger Sponge: ${this.cubes.length} cubes, ${this.cubes.length * 8} vertices`);
+  }
+
+  createParticleSystem() {
+    // Custom updater: attract each particle to its target
+    const attractToTarget = (particle, dt) => {
+      if (!particle.alive || !particle.custom.targetX) return;
+
+      // Apply global rotation to target
+      const rotY = this.globalRotation;
+      const cosY = Math.cos(rotY);
+      const sinY = Math.sin(rotY);
+
+      const tx = particle.custom.targetX * cosY - particle.custom.targetZ * sinY;
+      const tz = particle.custom.targetX * sinY + particle.custom.targetZ * cosY;
+      const ty = particle.custom.targetY;
+
+      // Apply zoom
+      const targetX = tx * this.zoom;
+      const targetY = ty * this.zoom;
+      const targetZ = tz * this.zoom;
+
+      // Spring attraction
+      const dx = targetX - particle.x;
+      const dy = targetY - particle.y;
+      const dz = targetZ - particle.z;
+
+      const strength = CONFIG.animation.attractStrength;
+      particle.vx += dx * strength * dt;
+      particle.vy += dy * strength * dt;
+      particle.vz += dz * strength * dt;
+
+      // Damping
+      const damping = CONFIG.animation.damping;
+      particle.vx *= damping;
+      particle.vy *= damping;
+      particle.vz *= damping;
+
+      // Apply velocity
+      particle.x += particle.vx * dt;
+      particle.y += particle.vy * dt;
+      particle.z += particle.vz * dt;
+
+      // Check if settled based on velocity (not distance, since target rotates)
+      const speed = Math.sqrt(particle.vx ** 2 + particle.vy ** 2 + particle.vz ** 2);
+
+      if (!particle.custom.settled && speed < 50) {
+        // Lock as settled
+        particle.custom.settled = true;
+        // Set to green based on depth
+        const depthRatio = particle.custom.depth / CONFIG.maxDepth;
+        const lightness = 40 + depthRatio * 20;
+        const rgb = this.hslToRgb(135 / 360, 1, lightness / 100);
+        particle.color.r = rgb.r;
+        particle.color.g = rgb.g;
+        particle.color.b = rgb.b;
+      } else if (!particle.custom.settled) {
+        // Still flying: white/bright
+        particle.color.r = 255;
+        particle.color.g = 255;
+        particle.color.b = 255;
+      }
+      // If settled, color stays locked
+    };
+
+    this.particles = new ParticleSystem(this, {
+      camera: this.camera,
+      depthSort: true,
+      maxParticles: 70000,
+      blendMode: "source-over",
+      updaters: [attractToTarget],
+    });
+
+    this.pipeline.add(this.particles);
+  }
+
+  /**
+   * Convert HSL to RGB
+   */
+  hslToRgb(h, s, l) {
+    let r, g, b;
+    if (s === 0) {
+      r = g = b = l;
+    } else {
+      const hue2rgb = (p, q, t) => {
+        if (t < 0) t += 1;
+        if (t > 1) t -= 1;
+        if (t < 1/6) return p + (q - p) * 6 * t;
+        if (t < 1/2) return q;
+        if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+        return p;
+      };
+      const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+      const p = 2 * l - q;
+      r = hue2rgb(p, q, h + 1/3);
+      g = hue2rgb(p, q, h);
+      b = hue2rgb(p, q, h - 1/3);
+    }
+    return { r: Math.round(r * 255), g: Math.round(g * 255), b: Math.round(b * 255) };
+  }
+
+  /**
+   * Spawn particles for a single cube (8 corner vertices)
+   */
+  spawnCube(cube) {
+    const spawnRadius = Math.max(this.width, this.height) * 0.8;
+
+    for (const corner of cube.corners) {
+      // Random spawn position (spherical distribution)
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(2 * Math.random() - 1);
+      const r = spawnRadius * (0.3 + Math.random() * 0.7);
+
+      const spawnX = r * Math.sin(phi) * Math.cos(theta);
+      const spawnY = r * Math.sin(phi) * Math.sin(theta);
+      const spawnZ = r * Math.cos(phi);
+
+      // Acquire particle from pool
+      const p = this.particles.acquire();
+
+      // Set position
+      p.x = spawnX;
+      p.y = spawnY;
+      p.z = spawnZ;
+
+      // Set velocity (slight inward bias)
+      p.vx = -spawnX * 0.5;
+      p.vy = -spawnY * 0.5;
+      p.vz = -spawnZ * 0.5;
+
+      // Set appearance
+      p.size = CONFIG.particleSize;
+      p.color.r = 0;
+      p.color.g = 255;
+      p.color.b = 0;
+      p.color.a = 1;
+      p.shape = CONFIG.particleShape;
+
+      // Set lifecycle (infinite)
+      p.age = 0;
+      p.lifetime = Infinity;
+      p.alive = true;
+
+      // Store target in custom data
+      p.custom.targetX = corner.x;
+      p.custom.targetY = corner.y;
+      p.custom.targetZ = corner.z;
+      p.custom.depth = cube.depth;
+      p.custom.cubeSize = cube.size;
+
+      // Add to active particles
+      this.particles.particles.push(p);
+    }
+
+    cube.spawned = true;
+    this.cubesSpawned++;
+  }
+
+  scatterParticles() {
+    // Scatter all particles outward
+    for (const particle of this.particles.particles) {
+      if (!particle.alive) continue;
+
+      // Reset settled state so they turn white while flying
+      particle.custom.settled = false;
+
+      // Random scatter direction
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(2 * Math.random() - 1);
+      const force = CONFIG.animation.scatterForce * (0.5 + Math.random());
+
+      particle.vx += force * Math.sin(phi) * Math.cos(theta);
+      particle.vy += force * Math.sin(phi) * Math.sin(theta);
+      particle.vz += force * Math.cos(phi);
+    }
   }
 
   update(dt) {
     super.update(dt);
     this.time += dt;
+    this.buildTime += dt;
 
     // Update camera
     this.camera.update(dt);
@@ -222,271 +381,76 @@ class Day26Demo extends Game {
     // Global rotation
     this.globalRotation += CONFIG.animation.autoRotateSpeed * dt;
 
-    // Auto zoom oscillation
-    if (this.autoZoom) {
-      this.targetZoom += this.zoomDirection * CONFIG.animation.zoomSpeed * dt;
+    // Smooth zoom (faster response)
+    this.zoom += (this.targetZoom - this.zoom) * 0.15;
 
-      if (this.targetZoom >= CONFIG.animation.zoomMax) {
-        this.zoomDirection = -1;
-      } else if (this.targetZoom <= CONFIG.animation.zoomMin) {
-        this.zoomDirection = 1;
+    // Spawn cubes over time
+    for (const cube of this.cubes) {
+      if (!cube.spawned && this.buildTime >= cube.spawnDelay) {
+        this.spawnCube(cube);
       }
-    }
-
-    // Smooth zoom interpolation
-    this.zoom += (this.targetZoom - this.zoom) * 0.05;
-
-    // Build animation - reveal cubes over time
-    this.buildProgress += dt;
-
-    for (const cubeData of this.cubes) {
-      if (!cubeData.visible && this.buildProgress > cubeData.buildDelay) {
-        cubeData.visible = true;
-        this.cubesBuilt++;
-      }
-
-      // Scale animation for newly visible cubes
-      if (cubeData.visible && cubeData.scale < 1) {
-        cubeData.scale = Math.min(1, cubeData.scale + dt * 3);
-      }
-
-      // Update cube rotation
-      cubeData.cube.selfRotationY = this.globalRotation;
     }
   }
 
   render() {
-    // Clear with motion blur trail
-    this.ctx.fillStyle = "rgba(0, 0, 0, 0.15)";
+    // Clear (no motion blur for cleaner look)
+    this.ctx.fillStyle = CONFIG.background;
     this.ctx.fillRect(0, 0, this.width, this.height);
 
-    const ctx = this.ctx;
-    const centerX = this.width / 2;
-    const centerY = this.height / 2;
-
-    // Collect all faces for global depth sorting
-    const allFaces = [];
-
-    for (const cubeData of this.cubes) {
-      if (!cubeData.visible) continue;
-
-      const cube = cubeData.cube;
-      const scale = cubeData.scale * this.zoom;
-
-      // Apply zoom to cube position
-      const scaledX = cube.x * this.zoom;
-      const scaledY = cube.y * this.zoom;
-      const scaledZ = cube.z * this.zoom;
-      const scaledSize = (cube.size * scale) / this.zoom;
-
-      // Get cube faces
-      const faces = this.getCubeFaces(
-        scaledX,
-        scaledY,
-        scaledZ,
-        scaledSize,
-        cube
-      );
-      allFaces.push(...faces);
-    }
-
-    // Sort by depth (back to front)
-    allFaces.sort((a, b) => b.depth - a.depth);
-
-    // Render all faces
-    ctx.save();
-    ctx.translate(centerX, centerY);
-
-    for (const face of allFaces) {
-      // Draw face
-      ctx.beginPath();
-      ctx.moveTo(face.vertices[0].x, face.vertices[0].y);
-      for (let i = 1; i < face.vertices.length; i++) {
-        ctx.lineTo(face.vertices[i].x, face.vertices[i].y);
-      }
-      ctx.closePath();
-
-      ctx.fillStyle = face.color;
-      ctx.fill();
-
-      // Green wireframe
-      ctx.strokeStyle = CONFIG.colors.stroke;
-      ctx.lineWidth = 0.5;
-      ctx.stroke();
-    }
-
-    ctx.restore();
+    // Particle system renders via pipeline
+    super.render();
 
     // Draw info text
+    const ctx = this.ctx;
     ctx.fillStyle = CONFIG.colors.stroke;
     ctx.font = "12px monospace";
     ctx.textAlign = "left";
+
+    const activeCount = this.particles.particles.filter(p => p.alive).length;
     ctx.fillText(
-      `MENGER SPONGE | Depth: ${CONFIG.maxDepth} | Cubes: ${this.cubesBuilt}/${this.cubes.length}`,
+      `MENGER SPONGE | Depth: ${CONFIG.maxDepth} | Cubes: ${this.cubesSpawned}/${this.cubes.length}`,
       10,
       this.height - 10
     );
 
     ctx.textAlign = "right";
     ctx.fillText(
-      `Zoom: ${this.zoom.toFixed(2)}x | ${this.autoZoom ? "AUTO" : "MANUAL"}`,
+      `Vertices: ${activeCount.toLocaleString()} | Dbl-click to scatter`,
       this.width - 10,
       this.height - 10
     );
   }
 
-  /**
-   * Get projected faces for a cube
-   */
-  getCubeFaces(x, y, z, size, cubeRef) {
-    const hs = size / 2;
-    const faces = [];
-
-    // Face definitions
-    const faceData = [
-      {
-        name: "front",
-        corners: [
-          [-1, -1, -1],
-          [1, -1, -1],
-          [1, 1, -1],
-          [-1, 1, -1],
-        ],
-        normal: [0, 0, -1],
-      },
-      {
-        name: "back",
-        corners: [
-          [1, -1, 1],
-          [-1, -1, 1],
-          [-1, 1, 1],
-          [1, 1, 1],
-        ],
-        normal: [0, 0, 1],
-      },
-      {
-        name: "top",
-        corners: [
-          [-1, -1, 1],
-          [1, -1, 1],
-          [1, -1, -1],
-          [-1, -1, -1],
-        ],
-        normal: [0, -1, 0],
-      },
-      {
-        name: "bottom",
-        corners: [
-          [-1, 1, -1],
-          [1, 1, -1],
-          [1, 1, 1],
-          [-1, 1, 1],
-        ],
-        normal: [0, 1, 0],
-      },
-      {
-        name: "left",
-        corners: [
-          [-1, -1, 1],
-          [-1, -1, -1],
-          [-1, 1, -1],
-          [-1, 1, 1],
-        ],
-        normal: [-1, 0, 0],
-      },
-      {
-        name: "right",
-        corners: [
-          [1, -1, -1],
-          [1, -1, 1],
-          [1, 1, 1],
-          [1, 1, -1],
-        ],
-        normal: [1, 0, 0],
-      },
-    ];
-
-    const rotY = this.globalRotation;
-    const cosY = Math.cos(rotY);
-    const sinY = Math.sin(rotY);
-
-    for (const face of faceData) {
-      // Rotate normal
-      let [nx, ny, nz] = face.normal;
-      const rnx = nx * cosY - nz * sinY;
-      const rnz = nx * sinY + nz * cosY;
-
-      // Apply camera rotation to normal
-      const camCosY = Math.cos(this.camera.rotationY);
-      const camSinY = Math.sin(this.camera.rotationY);
-      const camCosX = Math.cos(this.camera.rotationX);
-      const camSinX = Math.sin(this.camera.rotationX);
-
-      let vnx = rnx * camCosY - rnz * camSinY;
-      let vnz = rnx * camSinY + rnz * camCosY;
-      let vny = ny * camCosX - vnz * camSinX;
-      const vnz2 = ny * camSinX + vnz * camCosX;
-
-      // Backface culling
-      if (vnz2 > 0.01) continue;
-
-      // Transform and project corners
-      const vertices = face.corners.map(([cx, cy, cz]) => {
-        // Scale to size
-        let px = cx * hs;
-        let py = cy * hs;
-        let pz = cz * hs;
-
-        // Apply self rotation
-        const rx = px * cosY - pz * sinY;
-        const rz = px * sinY + pz * cosY;
-        px = rx;
-        pz = rz;
-
-        // Add position
-        px += x;
-        py += y;
-        pz += z;
-
-        // Project through camera
-        return this.camera.project(px, py, pz);
-      });
-
-      // Calculate depth
-      const avgDepth =
-        vertices.reduce((sum, v) => sum + v.z, 0) / vertices.length;
-
-      // Calculate lighting
-      const lightDir = { x: 0.5, y: -0.7, z: -0.5 };
-      const len = Math.sqrt(
-        lightDir.x ** 2 + lightDir.y ** 2 + lightDir.z ** 2
-      );
-      const lx = lightDir.x / len;
-      const ly = lightDir.y / len;
-      const lz = lightDir.z / len;
-      const intensity = Math.max(0, -(vnx * lx + vny * ly + vnz2 * lz));
-      const light = 0.3 + intensity * 0.7;
-
-      // Color with lighting
-      const baseLight = 10;
-      const litLight = Math.round(baseLight + light * 15);
-      const color = `hsl(135, 100%, ${litLight}%)`;
-
-      faces.push({
-        vertices,
-        depth: avgDepth,
-        color,
-        name: face.name,
-      });
-    }
-
-    return faces;
-  }
-
   onResize() {
-    // Regenerate sponge for new size
     if (this.cubes) {
-      this.generateSponge();
+      // Store old spawn states
+      const oldSpawned = this.cubes.map(c => c.spawned);
+      const oldCubesSpawned = this.cubesSpawned;
+
+      // Regenerate for new size
+      this.generateTargets();
+
+      // Restore spawn states
+      for (let i = 0; i < Math.min(oldSpawned.length, this.cubes.length); i++) {
+        this.cubes[i].spawned = oldSpawned[i];
+      }
+      this.cubesSpawned = oldCubesSpawned;
+
+      // Update existing particle targets
+      let particleIndex = 0;
+      for (const cube of this.cubes) {
+        if (!cube.spawned) continue;
+        for (const corner of cube.corners) {
+          const particles = this.particles.particles;
+          if (particleIndex < particles.length && particles[particleIndex].alive) {
+            particles[particleIndex].custom.targetX = corner.x;
+            particles[particleIndex].custom.targetY = corner.y;
+            particles[particleIndex].custom.targetZ = corner.z;
+            particles[particleIndex].custom.depth = cube.depth;
+            particleIndex++;
+          }
+        }
+      }
     }
   }
 }
