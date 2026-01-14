@@ -1,0 +1,18 @@
+esthetic — structures "build themselves" by revealing cubes progressively, like unlocking tech tiers.
+States:
+
+ARRIVAL — Single blocky rocket (built from cube3d) approaches and enters orbit around the star. Empty, frontier feeling. Just the ship and the star.
+DEPLOYMENT — Rocket settles into orbit. Solar panels deploy from the ship. First energy collection begins. Maybe a few small cube satellites separate out.
+CAPITOL — Cubes progressively reveal to form a main station/hub. Use the visibility tracker pattern — geometry already exists, just fade/pop in blocks as if resources are being spent to construct. Station should look like the blocky voxel stations we already have but assembling piece by piece.
+EMPIRE — Multiple annex stations begin forming at different orbital positions. Mining operations visible near the star. The swarm densifies. Full Dyson sphere energy.
+
+Technical approach:
+
+Use existing procedural station generation but add visibility state to each cube. cities are determined at the start. they are just not visible bc all cubes are hidden. 
+State machine controls which phase we're in and triggers the reveal sequences
+Cubes can pop in or fade in — whichever feels better
+Keep the cyan/teal monochromatic palette
+Star remains the glowing white anchor throughout
+
+Vibe references: Dyson Sphere Program intro, Factorio expansion feeling, Civilization wonder-building sequences
+Timing: Auto-advance between states with enough time to appreciate each phase. Maybe 10-20 seconds per state?

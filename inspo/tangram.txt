@@ -1,0 +1,378 @@
+A comparative study on computational methods to
+solve tangram puzzles
+Fernanda Miyuki Yamada
+Center for Mathematics, Computing and Cognition
+Federal University of ABC
+Santo Andre, Brazil
+Email: fernanda.yamada@aluno.ufabc.edu.br
+Harlen Costa Batagelo
+Center for Mathematics, Computing and Cognition
+Federal University of ABC
+Santo Andre, Brazil
+Email: harlen.batagelo@ufabc.edu.br
+Abstract—The tangram is a dissection puzzle composed of
+seven polygonal pieces which can be combined to form different
+patterns. Besides being a recreational puzzle, the tangram relates
+to a more general class of combinatorial NP-hard problems such
+as the bin packing problem and jigsaw puzzles. In this paper, we
+propose a comparative study of current computational methods
+for automatically solving tangram puzzles. In particular, we
+propose to implement and compare four approaches that employ
+strategies based on computational heuristics, genetic algorithms,
+artificial neural networks and algebraic representations. We in-
+tend to identify their similarities, their strengths and weaknesses
+in order to better understand the tangram puzzle problem,
+ultimately leading to an improved computational method for
+solving dissection puzzles.
+I. INTRODUCTION
+The tangram is a geometric puzzle composed by seven
+polygonal pieces: a square, a parallelogram, and five triangles
+of different sizes. In Figure 1, the pieces are presented in their
+initial square configuration.
+Fig. 1. Tangram pieces in the initial configuration.
+The goal of the tangram puzzle is to rearrange the seven
+pieces using rigid body transformations in order to fit them into
+a given pattern composed of simply-connected or multiply-
+connected planar regions [1]. All seven pieces must be used
+and they may not overlap. When the pieces contact each other,
+vertex-to-vertex, vertex-to-edge, and edge-to-edge contacts are
+allowed. The tangram puzzle relates to a more general class
+of combinatorial problems such as the bin packing problem
+and the jigsaw puzzle problem, both of which are known to
+be NP-hard problems.
+In this study, we present preliminary results of a compar-
+ative study of existing computational techniques for solving
+tangram puzzles. Our goal is to identify the advantages and
+weaknesses of each method in order to identify room for
+improvement of techniques for solving dissection puzzles. We
+focus on four approaches which include methods developed
+solely for tangram puzzles, but also methods originally devel-
+oped for jigsaw or edge-matching puzzles that can be extended
+to tangram puzzles. So far, we have implemented and analyzed
+the heuristic approach described by Deutsch & Hayes [2].
+In Section II we present a synthesis of the literature
+of computational tangram solving techniques. A preliminary
+comparison considering what the authors presented in their
+works is presented in Section III. In Section IV we present our
+methodology to conduct the implementation and comparison.
+Preliminary results of our implementation of the heuristic
+method are presented and discussed in Section V.
+II. COMPUTATIONAL METHODS TO SOLVE TANGRAM
+PUZZLES
+Most computational puzzle solving techniques are dedicated
+to jigsaw [3] and edge-matching [4] puzzles. From these
+techniques, we have identified two approaches which include
+extensions to dissection puzzles such as the tangram: one
+based on genetic algorithms [5], and a more recent approach
+based on the solution of systems of polynomial equations
+derived from the pieces of the puzzle [6]. According to our sur-
+vey, only two methods were proposed exclusively for tangram
+puzzles: an approach based on heuristic programming [2] and
+a technique based on neural networks [7]. Since the study of
+these techniques is the main objective of this paper, we present
+a brief overview of these works in the following subsections.
+A. Method based on heuristic programming
+Deutsch & Hayes [2] presented two approaches to solve
+tangram puzzles. The first one is a combinatorial approach, in
+which the algorithm tests various possibilities of positioning
+the pieces and, by trial and error, finds the desired solution.
+Its obvious drawback is the high processing time, since the
+problem deals with a large solution space. In order to tackle
+that, the authors focus on a proposal based on heuristic
+programming. Initially, the algorithm performs attempts to
+partition a desired polygonal pattern into smaller parts called
+sub-puzzles. The algorithm follows the contour of the pattern
+and, in convex corners (from internal angles), generates so-
+called extension lines that determine a possible section of the
+pattern. In Figure 2, extension lines are shown as dashed lines.
+sub-puzzle 1
+sub-puzzle 2
+sub-puzzle 1
+sub-puzzle 2Fig. 2. Example of the pattern partition into sub-puzzles [2].
+In order to separate the pattern into sub-puzzles, the method
+applies ten rules that consider the relation between the edges
+of the pattern and the extension lines with the pieces and the
+composites, which are regions formed by a set of pieces. Two
+of these rules summarize the general idea of the algorithm and
+are presented in the following paragraphs.
+According to the direct-match rule, the method must first
+find pieces entirely described by edges instead of extension
+lines or combinations of edges with extension lines.
+The 21/2 − 31/2 edge-match rule requires that in the case
+of triangular shapes, two sides must be completely defined by
+edges, while the remaining side can be defined by a combi-
+nation of collinear edges and extension lines. In addition, the
+combination should include at least a part of an edge. Also,
+for four-sided pieces, the rule requires that the additional side
+is also fully described by an edge. In the end, it is expected
+to fit the pieces into the formed sub-puzzles. An advantage of
+this approach is its simplicity of implementation.
+The algorithm rearranges the pieces correctly for most
+examples presented in the original paper, but the authors
+present cases in which it is not possible to obtain satisfactory
+results. In addition, the approach is limited to patterns without
+holes and only allows rotations of pieces by angles at multiples
+of 45 degrees.
+B. Method based on neural networks
+Oflazer [7] presents a computational technique to the place-
+ment of tangram pieces based on a non-restricted Boltzmann
+Machine [8]. The pieces are initially laid out on a regular grid.
+Possible positions and rotations are represented by neural units
+that receive excitatory connections (Exc) from input units that
+define the puzzle, and lateral inhibitory (Inh) connections of
+conflicting units. Figure 3 shows a representation of the neuron
+used to define the position and orientation of a tangram piece.
+The sum of the inputs determine the output according to the
+logistic probability function for Boltzmann Machines.
+Oflazer presents tests performed over ten patterns commonly
+used in the tangram puzzle. According to the author, the
+method succeeds and converges in a few hundred iterations.
+However, it limits the rotations of pieces by angles at multiples
+of 45 degrees due to the regular grid.
+C. Method based on genetic algorithm
+Bartonˇek [5] presents an evolutionist approach for solving
+polygonal jigsaw puzzles [3]. This method presents an ex-
+tension for the solution of tangram puzzles in which pieces
+are represented by string codes. In a string code, the edgesΣ = Exc
+Σ = Inh
+Inhibitory
+inputs
+from conflicting
+units
+Excitatory inputs
+grid units defining
+the puzzle
+Output
+Fig. 3. Representation of a neural unit used in the work of Oflazer representing
+a single placement and orientation of a tangram piece [7].
+and angles are represented by integer numbers invariant to
+rigid body transformations, as shown in Figure 4. Based on
+the theory of cluster analysis [9], each piece is assigned to a
+certain group according to the calculated similarity between
+the piece and the other pieces belonging to the same group
+based on its string codes. An evaluation function (fitness)
+determines how many groups the pieces will be divided into.i.fragmen t
+a i1
+d i2
+a i2
+d i3
+a i3
+d i1
+String code of i.fragment :
+di1, ai1, di2, ai2, di3, ai3=
+√2, 45°, 1, 90°, 1, 45°.
+Fig. 4. Tangram piece represented by string codes [5]. The piece i is
+represented by the sequence dij aij , in which dij represents the length of
+the edge and aij represents the angle formed by dij and dij+1.
+D. Method based on algebraic concepts
+Kovalsky et al. [6] present a method for solving jigsaw
+puzzles in terms of algebraic concepts. The puzzle is modeled
+as a system of polynomial equations so that any solution of the
+system is a solution of the puzzle as a complete representation.
+The authors first propose to solve edge-matching puzzles.
+However, they show how to apply their approach to tangram
+puzzles by considering the tangram as an edge-matching
+puzzle in which all pieces have the same color. Figure 5 shows
+an example of the application of this method. In that example,
+the orientation of each piece is fixed. The authors argue that the
+method can be modified to assimilate the solution of puzzles
+with rotations, although limited to a discrete set of rotations.
+III. PRELIMINARY COMPARISON
+A tangram puzzle solving technique must be able to solve
+at least the simplest tangram puzzles which can be fully
+characterized by a set of translations and discrete rotations
+to form a pattern composed of a simply-connected polygon.
+Fig. 5. Example of the technique developed by Kovalsky et al. applied to
+the tangram [6]. In the first row, the pieces in the initial configuration (left),
+the desired pattern (center) and the arrangement obtained (right). The second
+and third rows show the intermediate stages of the solution of the system of
+equations.
+However, it is desired that a tangram puzzle solving technique
+be able to solve more complex tangram puzzles. These may be
+composed of multiply-connected regions, possibly with holes.
+In addition, they may require non-discrete rotations, as well
+as the reflection (flip) operation for the parallelogram. Table I
+summarizes the main aspects and limitations of each approach
+as claimed by their authors.
+TABLE I
+PRELIMINARY COMPARISON OF COMPUTATIONAL METHODS TO SOLVE
+TANGRAM PUZZLES
+Methods
+Discrete
+rotations
+only?
+Allow
+reflection
+operations?
+Solve
+patterns
+with
+holes?
+Solve
+patterns with
+multiply-
+connected
+regions?
+Deutsch
+& Hayes Yes Yes No No
+Oflazer Yes Yes Yes No
+Bartonek Yes No No No
+Kovalsky Yes No No No
+Our first analysis shows that the neural network method
+by Oflazer is more flexible in the sense of solving the
+tangram puzzle for patterns with holes and patterns which
+require the parallelogram reflection transformation. However,
+all the aforementioned approaches show limitations with re-
+spect to piece orientation, usually limiting rotations to a
+discrete set of multiples of 45 degrees. In addition, none of
+the approaches proved to be applicable in the solution of
+patterns with multiply-connected regions. We consider that
+the information contained in the corresponding papers are
+not sufficient to establish a comparison of performance and
+obtained arrangements between the approaches. Therefore,
+we propose to conduct a comparative study between these
+methods by implementing them and performing puzzle solving
+tests on a common set of test cases.
+IV. METHODOLOGY
+The methods will be implemented and evaluated in a
+common test bed. In the following, we present an overview of
+our proposed test cases and comparison criteria.
+A. Test cases
+We will use a common set of test cases covering different
+configurations such as patterns with perfect fit of pieces,
+patterns with missing pieces, patterns with spare pieces and
+patterns with holes. To better understand the limitations on the
+rotation of the pieces, the test cases will include patterns that
+do not require piece rotation, patterns that can be obtained
+through a discrete set of multiples of 45-degree orientations,
+and patterns in which the pieces are not limited to a discrete set
+of rotations. Furthermore, we will consider cases that require
+the reflection transformation of the parallelogram.
+B. Comparison criteria
+We will consider a set of quantitative and qualitative aspects
+for an initial comparative analysis. For quantitative aspects, we
+plan to include performance metrics such as processing time
+and memory consumption, and coverage metrics such as the
+area of the pattern covered and exceeded by the pieces. Qual-
+itative aspects should include the identification of conceptual
+limitations of each approach, difficulty of implementation, the
+ability to obtain approximate or partial results, identification
+of cases that could not be solved, qualification of the obtained
+results by checking the occurrence of overlapping pieces, use
+of all pieces and occurrence of space between pairs of pieces.
+After this first stage of analysis, the qualitative and quanti-
+tative results obtained will be discussed in order clarify some
+points. First, we will consider in which aspects each approach
+is superior or inferior compared to the others. Then, we can
+determine if there are limitations that no technique was able
+to solve. After that, we can determine what are the general
+limitations of the problem of solving tangram puzzles using
+computational techniques. Furthermore, we can verify if there
+are techniques applied to other types of planar puzzles that
+can solve the identified limitations.
+V. PRELIMINARY RESULTS
+We started our study by the heuristic technique proposed
+by Deutsch & Hayes, in which the authors propose to solve
+tangram puzzles using simple placement and extraction rules.
+We have obtained preliminary results over the extension
+lines generation procedure. Figure 6 shows the tangram puz-
+zles solutions and the extension lines obtained for each desired
+pattern. The desired patterns (i.e. the puzzle outlines) are
+shown as green lines. Concave-type vertices are shown as
+red dots. Convex-type vertices are shown as blue dots, and
+the obtained extension lines are shown as dashed blue lines.
+All pieces and composites can be placed along the extension
+lines and edges of the puzzle outline. Therefore, as the
+authors suggested, we can obtain each puzzle solution by using
+combinations of sub-puzzles separated by the extension lines
+to fit the pieces.
+According to the authors, the heuristic method cannot solve
+for patterns with holes. Also, we noticed that the method
+cannot solve for patterns composed by multiply-connected
+regions. In order to overcome this limitation, we propose to
+perform a preprocessing operation in which the pattern is
+partitioned in two or more sub-puzzles. After obtaining the
+pattern outline, we consider each vertex of the contour by
+starting with the top-leftmost vertex and proceeding in the
+(a) (b)
+(c) (d)
+Fig. 6. Tangram puzzles solutions and results of the extension lines generation
+procedure. (a) Tangram “robot” puzzle solution; (b) Tangram “robot” puzzle
+extension lines; (c) Tangram “running person” puzzle solution; (d) Tangram
+“running person” puzzle extension lines.
+clockwise direction. If we find two vertices that share the same
+coordinates, we extract the outline vertices located between
+these two vertices and consider them as a separated sub-puzzle.
+Then, we apply the extension lines extraction procedure in
+each obtained sub-puzzle and in the remaining pattern outline.
+Preliminary results of the preprocessing operation and the
+obtained representation and extension lines are shown in
+Figure 7.
+(a) (b)
+Fig. 7. Preprocessing operation considering patterns composed of multiple
+contours. (a) Tangram “praying person” puzzle solution; (b) Tangram “praying
+person” puzzle extension lines.
+VI. FINAL CONSIDERATIONS
+In this paper, we present preliminary results of an ongoing
+comparative study of four computational methods to solve
+tangram puzzles based on computational heuristics, genetic
+algorithms, artificial neural networks and algebraic represen-
+tations.
+Although the literature related to computational methods for
+solving jigsaw and edge-matching puzzles is broad, the de-
+velopment of computational techniques for solving dissection
+puzzles in particular is still a barely explored field. Among
+the approaches identified in the literature, only the techniques
+proposed by Deutsch & Hayes and Oflazer are designed for
+solving tangram puzzles. The others are variations of jigsaw
+and edge-matching puzzle techniques in which the authors
+present adaptations for their use in tangram puzzles, usually
+with limitations.
+We presented our implementation of the extension lines
+generation procedure presented in the heuristic method pro-
+posed by Deutsch & Hayes. So far, the obtained results are
+satisfactory and the procedure has proved efficient in the
+puzzle partitioning process. We have proposed a modification
+on the method in order to extract the extension lines from
+patterns composed by multiply-connected regions.
+We intend to propose further improvements for cases not
+covered by the original method by Deutsch & Hayes, as well as
+to implement the other approaches identified in the literature.
+In addition, during the development of this research, we aim to
+identify the advantages and limitations of each approach and
+propose possibilities of improvement for new computational
+methods to solve dissection puzzles.
+ACKNOWLEDGMENT
+This research has been supported by CAPES (Brazilian
+Coordination for Improvement of Higher Level Personnel).
+REFERENCES
+[1] J. E. C. Castanho and C. L. Tozzi, “Obtenc¸ ˜ao da transformac¸ ˜ao de
+corpo r´ıgido em registro de imagens com deformac¸ ˜ao usando thin plate
+splines,” in Anais..., L. Velho, A. d. Albuquerque, and R. A. Lotufo,
+Eds., Simp´osio Brasileiro de Computac¸ ˜ao Gr´afica e Processamento
+de Imagens, 9. (SIBGRAPI). Porto Alegre: Sociedade Brasileira de
+Computac¸ ˜ao, 1996, Aplicac¸ ˜oes em Medicina, pp. 181–187. [Online].
+Available: http://urlib.net/dpi.inpe.br/ambro/1998/04.27.11.28
+[2] E. S. Deutsch and K. C. Hayes Jr., “A heuristic solution to the tangram
+puzzle,” Machine Intelligence, vol. 7, pp. 205–240, 1972.
+[3] F. A. Andal´o, G. Taubin, and S. Goldenstein, “Solving image puzzles with
+a simple quadratic programming formulation,” in Proceedings..., C. M.
+D. S. Freitas, S. Sarkar, R. Scopigno, and L. Silva, Eds., Conference on
+Graphics, Patterns and Images, 25. (SIBGRAPI). Los Alamitos: IEEE
+Computer Society Conference Publishing Services, 2012.
+[4] E. D. Demaine and M. L. Demaine, “Jigsaw puzzles, edge matching, and
+polyomino packing: Connections and complexity,” Graphs and Combi-
+natorics, vol. 23, no. 1, pp. 195–208, 2007.
+[5] D. Bartonˇek, “A genetic algorithm how to solve a puzzle and its using
+in cartography,” Acta Scientiarum Polonorum. Geodesia et Descriptio
+Terrarum, vol. 4, no. 2, pp. 15–23, 2005.
+[6] S. Z. Kovalsky, D. Glasner, and R. Basri, “A global approach for solving
+edge-matching puzzles,” SIAM Journal on Imaging Sciences, vol. 8, no. 2,
+pp. 916–938, 2015.
+[7] K. Oflazer, “Solving tangram puzzles: A connectionist approach,” Inter-
+national journal of intelligent systems, vol. 8, no. 5, pp. 603–616, 1993.
+[8] R. Salakhutdinov and G. E. Hinton, “Deep boltzmann machines.” in
+AISTATS, vol. 1, 2009, p. 3.
+[9] M. R. Anderberg, Cluster analysis for applications: probability and
+mathematical statistics: a series of monographs and textbooks. Academic
+press, 2014, vol. 19.
