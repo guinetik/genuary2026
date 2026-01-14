@@ -527,14 +527,6 @@ body {
   box-shadow:
     0 0 0 1px var(--border),
     0 20px 50px rgba(0, 0, 0, 0.5);
-  transition: transform 0.5s cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-
-.day-canvas-container:hover {
-  transform: translateY(-5px) scale(1.01);
-  box-shadow:
-    0 0 0 1px var(--accent-dim),
-    0 30px 60px rgba(0, 255, 0, 0.05);
 }
 
 .day-canvas-container canvas {
@@ -572,12 +564,6 @@ body {
   border-bottom: 2px solid var(--accent);
 }
 
-.day-canvas-container:hover::before,
-.day-canvas-container:hover::after {
-  width: 40px;
-  height: 40px;
-  box-shadow: 0 0 10px var(--accent-glow);
-}
 
 /* Additional corner pieces */
 .day-canvas-container .corner-tr,
@@ -604,12 +590,6 @@ body {
   border-bottom: 2px solid var(--accent);
 }
 
-.day-canvas-container:hover .corner-tr,
-.day-canvas-container:hover .corner-bl {
-  width: 40px;
-  height: 40px;
-  box-shadow: 0 0 10px var(--accent-glow);
-}
 
 /* Tech decorations */
 .tech-decor-top {
@@ -624,9 +604,6 @@ body {
   transition: opacity 0.3s;
 }
 
-.day-canvas-container:hover .tech-decor-top {
-  opacity: 1;
-}
 
 /* Canvas bottom row - contains controls and day info */
 .canvas-bottom-row {
