@@ -2,79 +2,249 @@
  * Genuary 2026 - Day 5
  * Prompt: "Write 'Genuary'. Avoid using a font."
  *
- * RIPPLE TEXT - Pluribus Style
- * Concentric ripples emanate from G like a pebble dropped in water.
- * As each ripple reaches a letter position, that letter blooms from center.
- * Ripples persist as background, letters form on top.
+ * RIPPLE TEXT - Fingerprint Style
+ * Hand-coded 5x7 pixel font - NO system fonts used.
+ * G pulses like a heartbeat, spawning expanding ripples.
+ * Each pulse creates a new letter as the wave reaches it.
+ *
+ * Features:
+ * - Pure pixel-art letters defined as coordinate arrays
+ * - Heartbeat pulse spawns shockwaves from G
+ * - Letters spawn as shockwaves reach their positions
+ * - Orbital rings expand outward on each pulse
+ * - Fingerprint ridge pattern on letters
+ * - Mouse repulsion with glow effect
  */
 
-import { Game, Camera3D, Painter, ParticleSystem, ParticleEmitter, Updaters, Noise, Easing } from '@guinetik/gcanvas';
+import {
+  Game,
+  Camera3D,
+  Painter,
+  ParticleSystem,
+  ParticleEmitter,
+  Updaters,
+  Noise,
+  Easing,
+} from '@guinetik/gcanvas';
 
 const CONFIG = {
-  // Font-based text (smooth curves)
-  fontSize: 140,
-  fontFamily: 'Franklin Gothic Medium',
-  fontWeight: 'bold',
+  // Letter grid settings
+  pixelSize: 14,          // Size of each "pixel" in the letter grid
+  letterSpacing: 2,       // Pixels between letters
+  particlesPerPixel: 10,  // Particles per pixel for density
+  zSpread: 10,            // 3D depth spread for volumetric effect
 
-  // Fingerprint contour pattern (curved lines following letter shapes)
+  // Fingerprint pattern
   fingerprintEnabled: true,
-  fingerprintSpacing: 6,        // distance between contour lines (pixels)
-  fingerprintThickness: 0.55,   // 0-1, line thickness
-  fingerprintCurve: 0.4,        // how much lines curve (0 = circles, higher = more spiral)
+  fingerprintSpacing: 6,
+  fingerprintThickness: 0.7,
 
-  // Particles
-  maxParticles: 18000,
-  particleSize: { min: 1.6, max: 2.2 },
-  sampleStep: 2,  // denser for fingerprint detail
-
-  // Dash rendering (for letter particles - horizontal ridges)
-  dashLength: 4.0,
+  // Particle rendering
+  maxParticles: 15000,
+  particleSize: { min: 2.0, max: 3.5 },
+  dashLength: 3.5,
   dashWidth: 0.8,
 
   // Concentric ripples from G (like pebble drop)
-  initialRings: 3,              // rings visible from start (spawn G)
-  rippleBaseRadius: 50,         // innermost ring radius
-  rippleSpacing: 70,            // distance between rings
-  rippleParticlesBase: 35,      // particles in innermost ring
-  rippleParticlesGrowth: 4,     // extra particles per ring
-  rippleSpeed: 0.4,             // orbit speed
-  rippleEccentricity: 0.6,      // ellipse shape (1 = circle)
-
-  // Flag wave effect (subtle)
-  flagWaveSpeed: 0.8,           // how fast the wave travels
-  flagWaveAmplitude: 10,        // how much vertical displacement
-  flagWaveFrequency: 0.004,     // wave frequency across X
-  flagWaveSecondary: 0.2,       // secondary wave strength
-
-  // Animation
-  spawnDuration: 2.0,       // how long each particle takes to fully form
-  letterStagger: 0.9,       // seconds between each letter STARTING (overlap)
-  gDelay: 0.0,              // G starts immediately with initial rings
-  driftDuration: 8.0,       // how long the leftward drift takes
-  breatheAmount: 0.8,
-  breatheSpeed: 1.2,
+  initialRings: 3,              // Rings visible from start
+  rippleBaseRadius: 50,         // Innermost ring radius
+  rippleSpacing: 70,            // Distance between rings
+  rippleParticlesBase: 35,      // Particles in innermost ring
+  rippleParticlesGrowth: 4,     // Extra particles per ring
+  rippleSpeed: 0.4,             // Orbit speed
+  rippleEccentricity: 0.6,      // Ellipse shape (1 = circle)
 
   // G Pulse effect - continuous heartbeat
-  pulsePeriod: 1.2,         // heartbeat speed (seconds per beat)
-  pulseStrength: 12,        // scatter distance
-  pulseVibration: 3,        // vibration amount during growth
-  shockwaveSpeed: 350,      // faster ripple expansion
-  shockwaveStrength: 15,    // orbital push
+  pulsePeriod: 1.0,             // Heartbeat speed (seconds per beat)
+  pulseStrength: 12,            // Scatter distance
+  pulseVibration: 3,            // Vibration amount during growth
+  shockwaveSpeed: 300,          // Ripple expansion speed
+  shockwaveStrength: 15,        // Orbital push
+
+  // Spawn animation
+  spawnDuration: 1.8,
+  gDelay: 0.0,                  // G starts immediately
+
+  // Global drift (centers text after animation)
+  driftDuration: 8.0,
+
+  // Breathing/idle motion
+  breatheAmount: 0.6,
+  breatheSpeed: 1.0,
 
   // Camera
   perspective: 800,
-  sensitivity: 0.003,
+  sensitivity: 0.004,
 
-  // Mouse
-  mouseRadius: 180,
-  mousePush: 800,
+  // Mouse interaction
+  mouseRadius: 160,
+  mousePush: 700,
 };
 
-// 5x7 pixel font
-// Font bitmap will be created at runtime for smooth curves
+/**
+ * 5x7 Pixel Font Definition
+ * Each letter is a 5-wide x 7-tall grid
+ * 1 = filled pixel, 0 = empty
+ */
+const PIXEL_FONT = {
+  G: [
+    [0, 1, 1, 1, 0],
+    [1, 0, 0, 0, 1],
+    [1, 0, 0, 0, 0],
+    [1, 0, 1, 1, 1],
+    [1, 0, 0, 0, 1],
+    [1, 0, 0, 0, 1],
+    [0, 1, 1, 1, 0],
+  ],
+  E: [
+    [1, 1, 1, 1, 1],
+    [1, 0, 0, 0, 0],
+    [1, 0, 0, 0, 0],
+    [1, 1, 1, 1, 0],
+    [1, 0, 0, 0, 0],
+    [1, 0, 0, 0, 0],
+    [1, 1, 1, 1, 1],
+  ],
+  N: [
+    [1, 0, 0, 0, 1],
+    [1, 1, 0, 0, 1],
+    [1, 0, 1, 0, 1],
+    [1, 0, 1, 0, 1],
+    [1, 0, 0, 1, 1],
+    [1, 0, 0, 0, 1],
+    [1, 0, 0, 0, 1],
+  ],
+  U: [
+    [1, 0, 0, 0, 1],
+    [1, 0, 0, 0, 1],
+    [1, 0, 0, 0, 1],
+    [1, 0, 0, 0, 1],
+    [1, 0, 0, 0, 1],
+    [1, 0, 0, 0, 1],
+    [0, 1, 1, 1, 0],
+  ],
+  A: [
+    [0, 0, 1, 0, 0],
+    [0, 1, 0, 1, 0],
+    [1, 0, 0, 0, 1],
+    [1, 1, 1, 1, 1],
+    [1, 0, 0, 0, 1],
+    [1, 0, 0, 0, 1],
+    [1, 0, 0, 0, 1],
+  ],
+  R: [
+    [1, 1, 1, 1, 0],
+    [1, 0, 0, 0, 1],
+    [1, 0, 0, 0, 1],
+    [1, 1, 1, 1, 0],
+    [1, 0, 1, 0, 0],
+    [1, 0, 0, 1, 0],
+    [1, 0, 0, 0, 1],
+  ],
+  Y: [
+    [1, 0, 0, 0, 1],
+    [1, 0, 0, 0, 1],
+    [0, 1, 0, 1, 0],
+    [0, 0, 1, 0, 0],
+    [0, 0, 1, 0, 0],
+    [0, 0, 1, 0, 0],
+    [0, 0, 1, 0, 0],
+  ],
+};
 
 /**
- * Custom particle system that renders letter particles as oriented dashes
+ * Generate target positions from pixel font
+ * @param {string} text - Text to render
+ * @returns {Array} Array of particle target positions
+ */
+function generateLetterPositions(text) {
+  const positions = [];
+  const letters = text.split('');
+  const gridWidth = 5;
+  const gridHeight = 7;
+  const { pixelSize, letterSpacing, particlesPerPixel, zSpread } = CONFIG;
+
+  // Calculate total width for centering
+  const totalWidth =
+    letters.length * gridWidth * pixelSize +
+    (letters.length - 1) * letterSpacing * pixelSize;
+  const startX = -totalWidth / 2;
+  const startY = (-gridHeight * pixelSize) / 2;
+
+  letters.forEach((char, letterIndex) => {
+    const grid = PIXEL_FONT[char];
+    if (!grid) return;
+
+    const letterOffsetX =
+      startX + letterIndex * (gridWidth + letterSpacing) * pixelSize;
+
+    // Calculate letter center for fingerprint pattern
+    const letterCenterX = letterOffsetX + (gridWidth * pixelSize) / 2;
+    const letterCenterY = 0;
+
+    for (let row = 0; row < gridHeight; row++) {
+      for (let col = 0; col < gridWidth; col++) {
+        if (grid[row][col] === 1) {
+          // Base pixel position
+          const baseX = letterOffsetX + col * pixelSize + pixelSize / 2;
+          const baseY = startY + row * pixelSize + pixelSize / 2;
+
+          // Spawn multiple particles per pixel for density
+          for (let p = 0; p < particlesPerPixel; p++) {
+            const offsetX = (Math.random() - 0.5) * pixelSize * 0.75;
+            const offsetY = (Math.random() - 0.5) * pixelSize * 0.75;
+            const z = (Math.random() - 0.5) * zSpread;
+
+            const x = baseX + offsetX;
+            const y = baseY + offsetY;
+
+            // Fingerprint contour filtering
+            if (CONFIG.fingerprintEnabled) {
+              const dx = x - letterCenterX;
+              const dy = y - letterCenterY;
+              const dist = Math.sqrt(dx * dx + dy * dy);
+              const angle = Math.atan2(dy, dx);
+
+              const contourVal = dist + angle * 10;
+              const wave = Math.sin(
+                (contourVal * Math.PI * 2) / CONFIG.fingerprintSpacing
+              );
+
+              // Keep more particles (less aggressive filtering)
+              const threshold = CONFIG.fingerprintThickness;
+              if (Math.abs(wave) > threshold && Math.random() > 0.4) {
+                continue;
+              }
+            }
+
+            // Calculate tangent angle for dash orientation
+            const dx = x - letterCenterX;
+            const dy = y - letterCenterY;
+            const tangentAngle =
+              Math.atan2(dy, dx) + Math.PI / 2 + (Math.random() - 0.5) * 0.2;
+
+            positions.push({
+              x,
+              y,
+              z,
+              letterIndex,
+              letterCenterX,
+              letterCenterY,
+              angle: tangentAngle,
+              brightness: 0.7 + Math.random() * 0.3,
+              phase: (x + y) * 0.02 + Math.random() * 0.5,
+            });
+          }
+        }
+      }
+    }
+  });
+
+  return positions;
+}
+
+/**
+ * Custom particle system with dash rendering for letter particles
  */
 class DashParticleSystem extends ParticleSystem {
   drawParticle(ctx, p, x, y, scale) {
@@ -82,21 +252,17 @@ class DashParticleSystem extends ParticleSystem {
     const size = p.size * scale;
     if (size < 0.3 || a <= 0) return;
 
-    // Use dash rendering for letter particles
     if (p.custom?.isLetter && p.custom?.angle !== undefined) {
       const { r, g, b } = p.color;
       const angle = p.custom.angle;
       const glow = p.custom.glow || 0;
-
-      // dashScale: 0 = small dot, 1 = full dash
       const dashScale = p.custom.dashScale ?? 1;
 
-      // Morph from circle (when dashScale=0) to dash (when dashScale=1)
-      const minLen = size * 0.5;  // dot size when scale=0
+      const minLen = size * 0.5;
       const maxLen = size * CONFIG.dashLength;
       const dashLen = minLen + (maxLen - minLen) * dashScale;
 
-      const minW = size * 0.8;  // thicker when dot
+      const minW = size * 0.8;
       const maxW = size * CONFIG.dashWidth;
       const dashW = minW + (maxW - minW) * dashScale;
 
@@ -105,7 +271,6 @@ class DashParticleSystem extends ParticleSystem {
       ctx.rotate(angle);
       ctx.lineCap = 'round';
 
-      // Base stroke
       ctx.strokeStyle = `rgba(${Math.floor(r)},${Math.floor(g)},${Math.floor(b)},${a})`;
       ctx.lineWidth = Math.max(0.5, dashW);
       ctx.beginPath();
@@ -113,7 +278,6 @@ class DashParticleSystem extends ParticleSystem {
       ctx.lineTo(dashLen / 2, 0);
       ctx.stroke();
 
-      // Glow effect on hover (only if significant)
       if (glow > 0.15) {
         ctx.strokeStyle = `rgba(255,255,255,${a * 0.4 * glow})`;
         ctx.lineWidth = dashW * 2;
@@ -122,12 +286,14 @@ class DashParticleSystem extends ParticleSystem {
 
       ctx.restore();
     } else {
-      // Default circle rendering for orbital particles
       super.drawParticle(ctx, p, x, y, scale);
     }
   }
 }
 
+/**
+ * Main Demo Class
+ */
 class RippleTextDemo extends Game {
   constructor(canvas) {
     super(canvas);
@@ -142,11 +308,11 @@ class RippleTextDemo extends Game {
     this.mouseX = -9999;
     this.mouseY = -9999;
 
-    // Pulse state - continuous heartbeat starting when G forms
+    // Pulse state - continuous heartbeat
     this.pulseStartTime = CONFIG.gDelay + CONFIG.spawnDuration;
     this.lastPulseBeat = 0;
     this.shockwaves = [];
-    this.currentRingCount = CONFIG.initialRings; // start with initial rings, grow on pulse
+    this.currentRingCount = CONFIG.initialRings;
 
     Noise.seed(42);
 
@@ -162,24 +328,27 @@ class RippleTextDemo extends Game {
     });
     this.camera.enableMouseControl(this.canvas);
 
-    // Calculate text bounds - G is at letterCenters[0]
-    this.textBounds = this.calculateTextBounds('GENUARY');
+    // Generate letter positions from pixel font
+    this.targetPositions = generateLetterPositions('GENUARY');
 
-    // Orbit origin is always at G's position (relative to text)
-    this.orbitOrigin = {
-      x: this.textBounds.letterCenters[0].x,
-      y: this.textBounds.letterCenters[0].y,
-    };
+    // Find G's center for ripple/orbit origin
+    const gPositions = this.targetPositions.filter((p) => p.letterIndex === 0);
+    if (gPositions.length > 0) {
+      const sumX = gPositions.reduce((s, p) => s + p.x, 0);
+      const sumY = gPositions.reduce((s, p) => s + p.y, 0);
+      this.orbitOrigin = {
+        x: sumX / gPositions.length,
+        y: sumY / gPositions.length,
+      };
+    } else {
+      this.orbitOrigin = { x: -200, y: 0 };
+    }
 
-    // Global offset: everything starts centered (offset cancels G's position)
-    // then drifts to 0 so text ends up in final centered position
+    // Global offset for drift animation (start centered on G, drift to center text)
     this.globalOffset = {
-      x: -this.orbitOrigin.x,  // starts positive to center G
+      x: -this.orbitOrigin.x,
       y: -this.orbitOrigin.y,
     };
-
-    // Pre-calculate letter target positions
-    this.targetPositions = this.calculateTargetPositions('GENUARY');
 
     // Custom updaters
     const rippleMotion = this.createRippleUpdater();
@@ -188,7 +357,7 @@ class RippleTextDemo extends Game {
     const mouseInteraction = this.createMouseUpdater();
     const pulseEffect = this.createPulseUpdater();
 
-    // ParticleSystem with custom dash rendering
+    // Particle system
     this.particles = new DashParticleSystem(this, {
       camera: this.camera,
       depthSort: true,
@@ -219,7 +388,7 @@ class RippleTextDemo extends Game {
 
     this.pipeline.add(this.particles);
 
-    console.log(`[Day5] GENUARY: ${this.targetPositions.length} letter + ${this.particles.particleCount - this.targetPositions.length} ripple particles`);
+    console.log(`[Day5] GENUARY: ${this.targetPositions.length} letter + ${this.particles.particles.length - this.targetPositions.length} ripple particles`);
 
     // Mouse tracking
     this._onMouseMove = (e) => {
@@ -235,160 +404,9 @@ class RippleTextDemo extends Game {
     this.canvas.addEventListener('mouseleave', this._onMouseLeave);
   }
 
-  calculateTextBounds(text) {
-    // Create off-screen canvas to render text
-    const tempCanvas = document.createElement('canvas');
-    const tempCtx = tempCanvas.getContext('2d');
-
-    // Set up larger canvas first, then set font
-    const estimatedWidth = text.length * CONFIG.fontSize * 0.7;
-    const canvasHeight = CONFIG.fontSize * 1.5;
-    const padding = 30;
-
-    tempCanvas.width = estimatedWidth + padding * 2;
-    tempCanvas.height = canvasHeight + padding * 2;
-
-    // Clear and set font AFTER canvas is sized
-    tempCtx.fillStyle = '#000';
-    tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
-
-    // Set font
-    const fontString = `${CONFIG.fontWeight} ${CONFIG.fontSize}px ${CONFIG.fontFamily}`;
-    tempCtx.font = fontString;
-
-    // Measure actual text width
-    const metrics = tempCtx.measureText(text);
-    const textWidth = metrics.width;
-
-    // Re-size canvas to exact dimensions needed
-    tempCanvas.width = textWidth + padding * 2;
-    tempCanvas.height = canvasHeight + padding * 2;
-
-    // Must re-set everything after resize (canvas reset)
-    tempCtx.fillStyle = '#000';
-    tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
-    tempCtx.font = fontString;
-    tempCtx.fillStyle = '#fff';
-    tempCtx.textBaseline = 'top';
-
-    // Draw text - position at padding from left, and vertically centered
-    const textY = (tempCanvas.height - CONFIG.fontSize) / 2;
-    tempCtx.fillText(text, padding, textY);
-
-    // Get pixel data
-    const imageData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
-
-    // Calculate letter centers
-    const letterCenters = [];
-    let currentX = padding;
-    for (const char of text) {
-      const charWidth = tempCtx.measureText(char).width;
-      letterCenters.push({
-        x: currentX + charWidth / 2 - tempCanvas.width / 2,
-        y: 0,
-        width: charWidth
-      });
-      currentX += charWidth;
-    }
-
-    // Store for use in calculateTargetPositions
-    this.fontBitmap = {
-      imageData,
-      width: tempCanvas.width,
-      height: tempCanvas.height,
-      offsetX: -tempCanvas.width / 2,
-      offsetY: -tempCanvas.height / 2
-    };
-
-    return { letterCenters };
-  }
-
-  calculateTargetPositions(text) {
-    const positions = [];
-    const { imageData, width, height, offsetX, offsetY } = this.fontBitmap;
-    const { letterCenters } = this.textBounds;
-    const step = CONFIG.sampleStep;
-
-    // Sample the font bitmap
-    for (let py = 0; py < height; py += step) {
-      for (let px = 0; px < width; px += step) {
-        // IMPORTANT: Floor to integers for imageData indexing
-        const ipx = Math.floor(px);
-        const ipy = Math.floor(py);
-        const idx = (ipy * width + ipx) * 4;
-        const pixelValue = imageData.data[idx];  // R channel (white = text)
-
-        if (pixelValue > 128) {
-          // This pixel is part of the text
-          const wx = px + offsetX;
-          const wy = py + offsetY;
-
-          // Determine which letter this pixel belongs to
-          let letterIndex = 0;
-          let letterCenterX = letterCenters[0].x;
-          let letterCenterY = 0;
-
-          for (let i = 0; i < letterCenters.length; i++) {
-            const lc = letterCenters[i];
-            if (wx >= lc.x - lc.width / 2 && wx < lc.x + lc.width / 2) {
-              letterIndex = i;
-              letterCenterX = lc.x;
-              letterCenterY = lc.y;
-              break;
-            }
-            // Default to closest letter
-            if (i === letterCenters.length - 1 || wx < letterCenters[i + 1].x - letterCenters[i + 1].width / 2) {
-              letterIndex = i;
-              letterCenterX = lc.x;
-              letterCenterY = lc.y;
-            }
-          }
-
-          const noiseVal = Noise.simplex2(wx * 0.015, wy * 0.005);
-
-          // Fingerprint contour pattern - curved lines from letter center
-          let includeParticle = true;
-          if (CONFIG.fingerprintEnabled) {
-            // Distance and angle from letter center
-            const dx = wx - letterCenterX;
-            const dy = wy - letterCenterY;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-            const angle = Math.atan2(dy, dx);
-
-            // Create curved contours: distance + angle creates spiral effect
-            // Add noise for organic fingerprint feel
-            const contourVal = dist + angle * CONFIG.fingerprintCurve * 15 + noiseVal * 3;
-            const wave = Math.sin(contourVal * (Math.PI * 2 / CONFIG.fingerprintSpacing));
-
-            includeParticle = Math.abs(wave) < CONFIG.fingerprintThickness;
-          }
-
-          if (includeParticle) {
-            const z = noiseVal * 8;
-            const brightness = 0.75 + Math.random() * 0.25;
-
-            // Orient dashes along the contour lines (perpendicular to radius)
-            const dx = wx - letterCenterX;
-            const dy = wy - letterCenterY;
-            const tangentAngle = Math.atan2(dy, dx) + Math.PI / 2 + noiseVal * 0.2;
-
-            positions.push({
-              x: wx, y: wy, z: z,
-              brightness: brightness,
-              phase: (wx + wy) * 0.02,
-              angle: tangentAngle,
-              letterIndex: letterIndex,
-              letterCenterX: letterCenterX,
-              letterCenterY: letterCenterY,
-            });
-          }
-        }
-      }
-    }
-
-    return positions;
-  }
-
+  /**
+   * Spawn letter particles
+   */
   spawnLetterParticles() {
     const emitter = this.particles.getEmitter('text');
     const originX = this.orbitOrigin.x;
@@ -398,16 +416,14 @@ class RippleTextDemo extends Game {
       const p = this.particles.acquire();
       emitter.emit(p);
 
-      // Calculate angle from orbit origin to this particle's target
+      // Calculate angle and distance from G
       const dx = target.x - originX;
       const dy = target.y - originY;
       const angleToTarget = Math.atan2(dy, dx);
       const distFromOrigin = Math.sqrt(dx * dx + (dy / CONFIG.rippleEccentricity) ** 2);
 
-      // Find which orbital ring this particle will come from
+      // Start position: on an orbital ring
       const ringRadius = Math.max(CONFIG.rippleBaseRadius, distFromOrigin * 0.8);
-
-      // Start position: one ring further out (x+1) so they travel inward
       const startAngle = angleToTarget + (Math.random() - 0.5) * 0.5;
       const startRadius = ringRadius + CONFIG.rippleSpacing + (Math.random() - 0.5) * 20;
 
@@ -427,26 +443,19 @@ class RippleTextDemo extends Game {
       p.custom.letterIndex = target.letterIndex;
       p.custom.glow = 0;
 
-      // Store target angle and starting angle (pointing from origin toward target)
       p.custom.targetAngle = target.angle;
       p.custom.startAngle = angleToTarget + (Math.random() - 0.5) * 0.3;
       p.custom.angle = p.custom.startAngle;
 
-      // Store target size for dash morphing
       p.custom.targetDashScale = 1.0;
-      p.custom.dashScale = 0.0;  // starts as dot, grows to full dash
+      p.custom.dashScale = 0.0;
 
-      // Timing: letters spawn in sync with G's heartbeat
-      // G (index 0) starts at gDelay, each subsequent letter spawns on next beat
+      // Letters spawn on heartbeat (synced to pulse)
       const letterDelay = CONFIG.gDelay + target.letterIndex * CONFIG.pulsePeriod;
-
-      // Small random spread within each letter so they don't all appear at once
       const particleSpread = Math.random() * 0.3;
-
       p.custom.spawnDelay = letterDelay + particleSpread;
       p.custom.spawnProgress = 0;
 
-      // Start bright white
       p.color.r = 255;
       p.color.g = 255;
       p.color.b = 255;
@@ -459,13 +468,18 @@ class RippleTextDemo extends Game {
     }
   }
 
+  /**
+   * Spawn initial orbital ring particles
+   */
   spawnRippleParticles() {
-    // Only spawn initial rings at start - more rings added on each pulse
     for (let ring = 0; ring < CONFIG.initialRings; ring++) {
       this.spawnRing(ring);
     }
   }
 
+  /**
+   * Spawn a new ring at center (called on each heartbeat)
+   */
   spawnRingAtCenter() {
     const emitter = this.particles.getEmitter('text');
     const originX = this.orbitOrigin.x;
@@ -512,6 +526,9 @@ class RippleTextDemo extends Game {
     }
   }
 
+  /**
+   * Spawn a ring at a specific index
+   */
   spawnRing(ringIndex) {
     const emitter = this.particles.getEmitter('text');
     const originX = this.orbitOrigin.x;
@@ -526,7 +543,7 @@ class RippleTextDemo extends Game {
 
       const angle = (i / particleCount) * Math.PI * 2 + Math.random() * 0.1;
 
-      // START at center (small), will expand to target radius
+      // Start at center, expand to target
       p.x = originX + Math.cos(angle) * 10;
       p.y = originY + Math.sin(angle) * 10 * CONFIG.rippleEccentricity;
       p.z = (Math.random() - 0.5) * 10;
@@ -537,12 +554,11 @@ class RippleTextDemo extends Game {
       p.custom.originY = originY;
       p.custom.angle = angle;
       p.custom.ringIndex = ringIndex;
-      p.custom.orbitDirection = 1;
+      p.custom.orbitDirection = ringIndex % 2 === 0 ? 1 : -1;
 
-      // Expansion animation
       p.custom.targetRadius = targetRadius;
-      p.custom.currentRadius = 10; // start small
-      p.custom.expandSpeed = CONFIG.shockwaveSpeed * 0.8; // expand speed
+      p.custom.currentRadius = 10;
+      p.custom.expandSpeed = CONFIG.shockwaveSpeed * 0.8;
       p.custom.expanding = true;
 
       const brightness = 0.5 + Math.random() * 0.4;
@@ -560,14 +576,17 @@ class RippleTextDemo extends Game {
     }
   }
 
+  /**
+   * Ripple/orbital motion updater
+   */
   createRippleUpdater() {
-    return (p, dt, system) => {
+    return (p, dt) => {
       if (!p.custom.isRipple) return;
 
-      // Despawn if expanded too far off screen (use diagonal for corners)
+      // Despawn if too far off screen
       const maxRadius = Math.sqrt(this.width * this.width + this.height * this.height) * 1.0;
       if (p.custom.currentRadius > maxRadius) {
-        p.custom.dead = true; // mark for removal
+        p.custom.dead = true;
         return;
       }
 
@@ -580,59 +599,28 @@ class RippleTextDemo extends Game {
         }
       }
 
-      // Update rx/ry based on current radius
       p.custom.rx = p.custom.currentRadius;
       p.custom.ry = p.custom.currentRadius * CONFIG.rippleEccentricity;
 
-      // Slowly orbit around the origin
+      // Orbit around origin
       p.custom.angle += CONFIG.rippleSpeed * p.custom.orbitDirection * dt / (1 + p.custom.ringIndex * 0.05);
 
-      // Calculate base position on ellipse using current (expanding) radius
       const baseX = p.custom.originX + Math.cos(p.custom.angle) * p.custom.rx;
       const baseY = p.custom.originY + Math.sin(p.custom.angle) * p.custom.ry;
 
-      // Flag wave effect with unpredictable wind using noise
-      const flagAnchor = -500;
-      const distFromAnchor = Math.max(0, baseX - flagAnchor);
-      const waveStrength = Math.min(1, distFromAnchor / 800);
+      // Subtle wave distortion
+      const wave = Math.sin(this.time * 0.8 + p.custom.angle * 2) * 3;
 
-      // Noise-based wind variation - makes it unpredictable
-      const windNoise = Noise.simplex3(baseX * 0.002, baseY * 0.002, this.time * 0.4);
-      const gustNoise = Noise.simplex2(this.time * 0.8, p.custom.ringIndex * 0.3);
-      const windVariation = 1 + windNoise * 0.5 + gustNoise * 0.3;
-
-      // Primary wave with noise variation
-      const wave1 = Math.sin(
-        this.time * CONFIG.flagWaveSpeed * windVariation +
-        baseX * CONFIG.flagWaveFrequency
-      ) * CONFIG.flagWaveAmplitude * waveStrength;
-
-      // Secondary wave (higher frequency)
-      const wave2 = Math.sin(
-        this.time * CONFIG.flagWaveSpeed * 1.7 +
-        baseX * CONFIG.flagWaveFrequency * 2.3 +
-        windNoise * 2
-      ) * CONFIG.flagWaveAmplitude * CONFIG.flagWaveSecondary * waveStrength;
-
-      // Tertiary turbulence - subtle random gusts
-      const turbulence = Noise.simplex3(
-        baseX * 0.008,
-        baseY * 0.008,
-        this.time * 0.8
-      ) * 3 * waveStrength;
-
-      // Apply flag distortion
-      const targetX = baseX + turbulence * 0.15;
-      const targetY = baseY + wave1 + wave2 + turbulence * 0.5;
-
-      // Smooth movement to target
-      p.x += (targetX - p.x) * 0.12;
-      p.y += (targetY - p.y) * 0.12;
+      p.x += (baseX - p.x) * 0.12;
+      p.y += (baseY + wave - p.y) * 0.12;
     };
   }
 
+  /**
+   * Spawn animation updater
+   */
   createSpawnUpdater() {
-    return (p, dt, system) => {
+    return (p, dt) => {
       if (!p.custom.isLetter) return;
 
       const timeSinceSpawn = this.time - p.custom.spawnDelay;
@@ -642,7 +630,6 @@ class RippleTextDemo extends Game {
         return;
       }
 
-      // Store initial position on first frame
       if (p.custom.startX === undefined) {
         p.custom.startX = p.x;
         p.custom.startY = p.y;
@@ -651,33 +638,24 @@ class RippleTextDemo extends Game {
 
       if (p.custom.spawnProgress >= 1) return;
 
-      // Animate from orbital start position to target
       p.custom.spawnProgress = Math.min(1, (p.custom.spawnProgress || 0) + dt / CONFIG.spawnDuration);
 
-      // Use elastic easing for organic feel
       const t = Easing.easeOutElastic(p.custom.spawnProgress);
-      const tSmooth = Easing.easeOutQuad(p.custom.spawnProgress); // smoother for some props
+      const tSmooth = Easing.easeOutQuad(p.custom.spawnProgress);
 
-      // Lerp from orbital start to final position (elastic)
       p.x = p.custom.startX + (p.custom.targetX - p.custom.startX) * t;
       p.y = p.custom.startY + (p.custom.targetY - p.custom.startY) * t;
       p.z = p.custom.startZ + ((p.custom.targetZ || 0) - p.custom.startZ) * tSmooth;
 
-      // Tween angle from starting (pointing from origin) to target (fingerprint contour)
       p.custom.angle = p.custom.startAngle + (p.custom.targetAngle - p.custom.startAngle) * t;
-
-      // Tween dash scale: 0 = dot, 1 = full dash
       p.custom.dashScale = tSmooth;
 
-      // Size: start small, grow to target
       const startSize = 1.0;
       const endSize = p.custom.targetSize || CONFIG.particleSize.min;
       p.size = startSize + (endSize - startSize) * tSmooth;
 
-      // Fade in and settle to final brightness
       p.color.a = p.custom.brightness * Math.min(1, tSmooth * 1.5);
 
-      // Color: start white, transition to final gray
       const finalGray = Math.floor(180 + p.custom.brightness * 75);
       const gray = Math.floor(255 - (255 - finalGray) * t);
       p.color.r = gray;
@@ -686,12 +664,11 @@ class RippleTextDemo extends Game {
     };
   }
 
-  easeOutQuad(t) {
-    return 1 - (1 - t) * (1 - t);
-  }
-
+  /**
+   * Breathing/idle motion updater
+   */
   createBreatheUpdater() {
-    return (p, dt, system) => {
+    return (p, dt) => {
       if (!p.custom.isLetter || p.custom.spawnProgress < 1) return;
 
       const phase = p.custom.phase || 0;
@@ -700,44 +677,42 @@ class RippleTextDemo extends Game {
       const baseX = p.custom.targetX + breathe;
       const baseY = p.custom.targetY + breathe * 0.5;
 
-      // Direct lerp back to position (no spring/overshoot)
       const mousePush = p.custom.mousePush || 0;
       const returnSpeed = 0.15 * (1 - mousePush * 0.7);
 
       p.x += (baseX - p.x) * returnSpeed;
       p.y += (baseY - p.y) * returnSpeed;
 
-      // Kill velocity to prevent spring effect
       p.vx *= 0.8;
       p.vy *= 0.8;
 
-      // Subtle angle drift
       const angleDrift = Noise.simplex3(p.x * 0.01, p.y * 0.01, this.time * 0.3) * 0.08;
       p.custom.angle += angleDrift * dt;
     };
   }
 
+  /**
+   * Mouse interaction updater
+   */
   createMouseUpdater() {
-    return (p, dt, system) => {
+    return (p, dt) => {
       if (this.mouseX < 0) {
         p.custom.mousePush = 0;
         return;
       }
 
       const proj = this.camera.project(p.x, p.y, p.z);
-      const screenX = this.width / 2 + proj.x;
-      const screenY = this.height / 2 + proj.y;
+      const screenX = this.width / 2 + proj.x + this.globalOffset.x;
+      const screenY = this.height / 2 + proj.y + this.globalOffset.y;
 
       const mdx = screenX - this.mouseX;
       const mdy = screenY - this.mouseY;
       const mouseDist = Math.sqrt(mdx * mdx + mdy * mdy);
 
       if (mouseDist < CONFIG.mouseRadius && mouseDist > 1) {
-        // Quadratic falloff for punchier close-range repulsion
         const t = 1 - mouseDist / CONFIG.mouseRadius;
         const force = t * t * CONFIG.mousePush;
 
-        // Apply force directly to position for immediate response
         const pushX = (mdx / mouseDist) * force * dt;
         const pushY = (mdy / mouseDist) * force * dt;
         p.x += pushX;
@@ -745,10 +720,8 @@ class RippleTextDemo extends Game {
         p.vx += pushX * 0.5;
         p.vy += pushY * 0.5;
 
-        // Track push strength so breathe updater can back off
         p.custom.mousePush = t;
 
-        // Brighten and glow on hover
         if (p.custom.isLetter) {
           p.custom.brightness = Math.min(1, p.custom.baseBrightness + 0.4);
           p.custom.glow = Math.min(1, (p.custom.glow || 0) + dt * 6);
@@ -762,7 +735,6 @@ class RippleTextDemo extends Game {
         }
       }
 
-      // Update color based on brightness
       if (p.custom.isLetter) {
         const gray = Math.floor(180 + p.custom.brightness * 75);
         p.color.r = gray;
@@ -772,42 +744,25 @@ class RippleTextDemo extends Game {
     };
   }
 
+  /**
+   * Pulse/heartbeat effect updater
+   */
   createPulseUpdater() {
-    return (p, dt, system) => {
-      // Only active after G starts forming
+    return (p, dt) => {
       if (this.time < CONFIG.gDelay) return;
 
-      // Find the newest/innermost expanding ring to sync G pulse with
-      let newestRingProgress = 0;
-      for (const rp of this.particles.particles) {
-        if (rp.custom?.isRipple && rp.custom.expanding) {
-          // How far has this ring expanded? (0 = just started, 1 = reached target)
-          const progress = (rp.custom.currentRadius - 10) / (rp.custom.targetRadius - 10);
-          if (rp.custom.currentRadius < CONFIG.rippleBaseRadius + CONFIG.rippleSpacing) {
-            // This is an inner ring still expanding - use its progress
-            newestRingProgress = Math.max(newestRingProgress, Math.min(1, progress));
-          }
-        }
-      }
-
-      // G expands as orbit travels out, contracts with elastic bounce
-      // Use easeOutElastic for organic, springy feel
-      const pulseIntensity = Easing.easeOutElastic(newestRingProgress);
-
-      // Letter particles: pulse when shockwave reaches them
+      // Letter particles: react to shockwaves
       if (p.custom.isLetter && p.custom.spawnProgress >= 1) {
         const dx = p.custom.targetX - this.orbitOrigin.x;
         const dy = p.custom.targetY - this.orbitOrigin.y;
         const distFromG = Math.sqrt(dx * dx + dy * dy) || 1;
 
-        // Check if any shockwave is passing through this letter
         let letterPulseIntensity = 0;
         for (const wave of this.shockwaves) {
           const waveDist = Math.abs(distFromG - wave.radius);
-          const waveWidth = 120; // how wide the pulse wave is
+          const waveWidth = 120;
 
           if (waveDist < waveWidth) {
-            // Wave is passing through this letter
             const proximity = 1 - (waveDist / waveWidth);
             const waveAge = (this.time - wave.startTime) / CONFIG.pulsePeriod;
             const decay = Math.max(0, 1 - waveAge * 0.5);
@@ -815,10 +770,8 @@ class RippleTextDemo extends Game {
           }
         }
 
-        // Pulse strength
         const pushStrength = CONFIG.pulseStrength * letterPulseIntensity;
 
-        // Add vibration during pulse
         let vibX = 0, vibY = 0;
         if (letterPulseIntensity > 0.1) {
           const vibAmount = CONFIG.pulseVibration * letterPulseIntensity;
@@ -829,24 +782,21 @@ class RippleTextDemo extends Game {
         const targetX = p.custom.targetX + (dx / distFromG) * pushStrength + vibX;
         const targetY = p.custom.targetY + (dy / distFromG) * pushStrength + vibY;
 
-        // Smooth movement to pulse position
         p.x += (targetX - p.x) * 0.18;
         p.y += (targetY - p.y) * 0.18;
 
-        // Subtle brightness pulse
         const brightBoost = letterPulseIntensity * 30;
         p.color.r = Math.min(255, 180 + p.custom.brightness * 75 + brightBoost);
         p.color.g = Math.min(255, 180 + p.custom.brightness * 75 + brightBoost);
         p.color.b = Math.min(255, 180 + p.custom.brightness * 75 + brightBoost);
       }
 
-      // Orbital particles: react to shockwaves
+      // Ripple particles: react to shockwaves
       if (p.custom.isRipple) {
         const dx = p.x - this.orbitOrigin.x;
         const dy = p.y - this.orbitOrigin.y;
         const dist = Math.sqrt(dx * dx + dy * dy) || 1;
 
-        // Check all active shockwaves
         for (const wave of this.shockwaves) {
           const shockwaveDist = Math.abs(dist - wave.radius);
           const shockwaveWidth = 60;
@@ -860,16 +810,11 @@ class RippleTextDemo extends Game {
             p.x += (dx / dist) * pushStrength;
             p.y += (dy / dist) * pushStrength;
 
-            // Brief brightness boost
             p.color.a = Math.min(1, (p.color.a || 0.6) + 0.15 * proximity * decay);
           }
         }
       }
     };
-  }
-
-  easeOutCubic(t) {
-    return 1 - Math.pow(1 - t, 3);
   }
 
   stop() {
@@ -888,8 +833,7 @@ class RippleTextDemo extends Game {
     this.time += dt;
     this.camera.update(dt);
 
-    // Animate global offset: starts at (-orbitOrigin.x, -orbitOrigin.y) to center G
-    // Eases to (0, 0) so text ends up centered
+    // Animate global offset: drift from G-centered to text-centered
     const driftProgress = Math.min(1, this.time / CONFIG.driftDuration);
     const t = this.easeInOutQuad(driftProgress);
 
@@ -898,43 +842,42 @@ class RippleTextDemo extends Game {
     this.globalOffset.x = startOffsetX * (1 - t);
     this.globalOffset.y = startOffsetY * (1 - t);
 
-    // Heartbeat pulse - spawn shockwave and new ring on each beat
+    // Heartbeat pulse - spawn shockwave and expand rings on each beat
     if (this.time >= CONFIG.gDelay) {
       const timeSinceStart = this.time - CONFIG.gDelay;
       const currentBeat = Math.floor(timeSinceStart / CONFIG.pulsePeriod);
 
-      // On each new beat: spawn shockwave + new ring
       if (currentBeat > this.lastPulseBeat) {
         this.lastPulseBeat = currentBeat;
 
         // Spawn shockwave
         this.shockwaves.push({
           startTime: this.time,
-          radius: 0
+          radius: 0,
         });
 
-        // Push ALL existing rings outward (increase their target radius)
+        // Push ALL existing rings outward
         for (const p of this.particles.particles) {
           if (p.custom?.isRipple) {
             p.custom.targetRadius += CONFIG.rippleSpacing;
-            p.custom.expanding = true; // start expanding again
+            p.custom.expanding = true;
           }
         }
 
-        // Spawn new ring at center (only if under particle limit)
+        // Spawn new ring at center
         if (this.particles.particles.length < CONFIG.maxParticles) {
           this.spawnRingAtCenter();
         }
       }
 
-      // Expand all shockwaves and remove old ones (keep max 5)
-      this.shockwaves = this.shockwaves.filter(wave => {
+      // Expand shockwaves and remove old ones
+      this.shockwaves = this.shockwaves.filter((wave) => {
         wave.radius = (this.time - wave.startTime) * CONFIG.shockwaveSpeed;
         return wave.radius < 1500;
       }).slice(-5);
 
-      // Clean up dead particles (marked via custom.dead)
-      this.particles.particles = this.particles.particles.filter(p => !p.custom?.dead);
+      // Clean up dead particles
+      this.particles.particles = this.particles.particles.filter((p) => !p.custom?.dead);
     }
   }
 
@@ -943,11 +886,10 @@ class RippleTextDemo extends Game {
   }
 
   render() {
-    // Higher alpha = shorter trails (0.6 for minimal trails)
     this.ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
     this.ctx.fillRect(0, 0, this.width, this.height);
 
-    // Apply global offset (drift from center to final position)
+    // Apply global offset (drift from G to center)
     this.ctx.save();
     this.ctx.translate(this.globalOffset.x, this.globalOffset.y);
     this.pipeline.render(this.ctx);
@@ -955,6 +897,11 @@ class RippleTextDemo extends Game {
   }
 }
 
+/**
+ * Create Day 5 visualization
+ * @param {HTMLCanvasElement} canvas - Target canvas element
+ * @returns {Object} Game control object with stop() method
+ */
 export default function day05(canvas) {
   const game = new RippleTextDemo(canvas);
   game.start();
