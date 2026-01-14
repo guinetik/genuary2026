@@ -3,8 +3,8 @@
  * Prompt: "Split the canvas into a grid and recurse on each cell again and again"
  *
  * Menger Sponge - the classic 3D recursive fractal.
- * Built using particles at cube vertices for a wireframe aesthetic.
- * Particles assemble from chaos into the fractal structure.
+ * 8000 particles (1 per cube) assemble from chaos into the fractal structure.
+ * Particle size scales with cube depth - smaller cubes = smaller dots.
  *
  * Controls:
  * - Drag: Rotate camera
@@ -22,7 +22,8 @@ const CONFIG = {
   baseSize: 280,
 
   // Particle settings
-  particleSize: 2.5,
+  particleBaseSize: 20,  // Scaled by cube size
+  particleMinSize: 2,    // Minimum visible size
   particleShape: "square",
 
   // Colors - terminal green aesthetic
@@ -90,23 +91,6 @@ function generateMengerPositions(
   }
 
   return positions;
-}
-
-/**
- * Generate 8 corner positions for a cube
- */
-function getCubeCorners(cx, cy, cz, size) {
-  const hs = size / 2;
-  return [
-    { x: cx - hs, y: cy - hs, z: cz - hs },
-    { x: cx + hs, y: cy - hs, z: cz - hs },
-    { x: cx - hs, y: cy + hs, z: cz - hs },
-    { x: cx + hs, y: cy + hs, z: cz - hs },
-    { x: cx - hs, y: cy - hs, z: cz + hs },
-    { x: cx + hs, y: cy - hs, z: cz + hs },
-    { x: cx - hs, y: cy + hs, z: cz + hs },
-    { x: cx + hs, y: cy + hs, z: cz + hs },
-  ];
 }
 
 /**
@@ -182,24 +166,20 @@ class Day26Demo extends Game {
     // Sort by depth for build animation (shallow first)
     cubePositions.sort((a, b) => a.depth - b.depth);
 
-    // Store cubes with their corners
-    this.cubes = cubePositions.map((cube, i) => {
-      const corners = getCubeCorners(cube.x, cube.y, cube.z, cube.size * 0.95);
-      return {
-        ...cube,
-        corners,
-        spawnDelay: i * CONFIG.animation.buildDelay,
-        spawned: false,
-      };
-    });
+    // Store cubes (1 particle per cube center)
+    this.cubes = cubePositions.map((cube, i) => ({
+      ...cube,
+      spawnDelay: i * CONFIG.animation.buildDelay,
+      spawned: false,
+    }));
 
-    console.log(`Menger Sponge: ${this.cubes.length} cubes, ${this.cubes.length * 8} vertices`);
+    console.log(`Menger Sponge: ${this.cubes.length} cubes/particles`);
   }
 
   createParticleSystem() {
     // Custom updater: attract each particle to its target
     const attractToTarget = (particle, dt) => {
-      if (!particle.alive || !particle.custom.targetX) return;
+      if (!particle.alive || particle.custom.targetX === undefined) return;
 
       // Apply global rotation to target
       const rotY = this.globalRotation;
@@ -261,7 +241,7 @@ class Day26Demo extends Game {
     this.particles = new ParticleSystem(this, {
       camera: this.camera,
       depthSort: true,
-      maxParticles: 70000,
+      maxParticles: 10000,
       blendMode: "source-over",
       updaters: [attractToTarget],
     });
@@ -295,57 +275,57 @@ class Day26Demo extends Game {
   }
 
   /**
-   * Spawn particles for a single cube (8 corner vertices)
+   * Spawn 1 particle at cube center
    */
   spawnCube(cube) {
     const spawnRadius = Math.max(this.width, this.height) * 0.8;
 
-    for (const corner of cube.corners) {
-      // Random spawn position (spherical distribution)
-      const theta = Math.random() * Math.PI * 2;
-      const phi = Math.acos(2 * Math.random() - 1);
-      const r = spawnRadius * (0.3 + Math.random() * 0.7);
+    // Random spawn position (spherical distribution)
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(2 * Math.random() - 1);
+    const r = spawnRadius * (0.3 + Math.random() * 0.7);
 
-      const spawnX = r * Math.sin(phi) * Math.cos(theta);
-      const spawnY = r * Math.sin(phi) * Math.sin(theta);
-      const spawnZ = r * Math.cos(phi);
+    const spawnX = r * Math.sin(phi) * Math.cos(theta);
+    const spawnY = r * Math.sin(phi) * Math.sin(theta);
+    const spawnZ = r * Math.cos(phi);
 
-      // Acquire particle from pool
-      const p = this.particles.acquire();
+    // Acquire particle from pool
+    const p = this.particles.acquire();
 
-      // Set position
-      p.x = spawnX;
-      p.y = spawnY;
-      p.z = spawnZ;
+    // Set position
+    p.x = spawnX;
+    p.y = spawnY;
+    p.z = spawnZ;
 
-      // Set velocity (slight inward bias)
-      p.vx = -spawnX * 0.5;
-      p.vy = -spawnY * 0.5;
-      p.vz = -spawnZ * 0.5;
+    // Set velocity (slight inward bias)
+    p.vx = -spawnX * 0.5;
+    p.vy = -spawnY * 0.5;
+    p.vz = -spawnZ * 0.5;
 
-      // Set appearance
-      p.size = CONFIG.particleSize;
-      p.color.r = 0;
-      p.color.g = 255;
-      p.color.b = 0;
-      p.color.a = 1;
-      p.shape = CONFIG.particleShape;
+    // Size based on cube size (smaller cubes = smaller particles)
+    const sizeRatio = cube.size / (Math.min(this.width, this.height) * 0.35);
+    p.size = Math.max(CONFIG.particleMinSize, CONFIG.particleBaseSize * sizeRatio);
+    p.color.r = 255;
+    p.color.g = 255;
+    p.color.b = 255;
+    p.color.a = 1;
+    p.shape = CONFIG.particleShape;
 
-      // Set lifecycle (infinite)
-      p.age = 0;
-      p.lifetime = Infinity;
-      p.alive = true;
+    // Set lifecycle (infinite)
+    p.age = 0;
+    p.lifetime = Infinity;
+    p.alive = true;
 
-      // Store target in custom data
-      p.custom.targetX = corner.x;
-      p.custom.targetY = corner.y;
-      p.custom.targetZ = corner.z;
-      p.custom.depth = cube.depth;
-      p.custom.cubeSize = cube.size;
+    // Store target in custom data (cube center)
+    p.custom.targetX = cube.x;
+    p.custom.targetY = cube.y;
+    p.custom.targetZ = cube.z;
+    p.custom.depth = cube.depth;
+    p.custom.cubeSize = cube.size;
+    p.custom.baseSize = p.size;
 
-      // Add to active particles
-      this.particles.particles.push(p);
-    }
+    // Add to active particles
+    this.particles.particles.push(p);
 
     cube.spawned = true;
     this.cubesSpawned++;
@@ -392,11 +372,15 @@ class Day26Demo extends Game {
     }
   }
 
-  render() {
-    // Clear (no motion blur for cleaner look)
-    this.ctx.fillStyle = CONFIG.background;
+  /**
+   * Override clear for motion blur trail effect
+   */
+  clear() {
+    this.ctx.fillStyle = "rgba(0, 0, 0, 0.1)";
     this.ctx.fillRect(0, 0, this.width, this.height);
+  }
 
+  render() {
     // Particle system renders via pipeline
     super.render();
 
@@ -406,7 +390,6 @@ class Day26Demo extends Game {
     ctx.font = "12px monospace";
     ctx.textAlign = "left";
 
-    const activeCount = this.particles.particles.filter(p => p.alive).length;
     ctx.fillText(
       `MENGER SPONGE | Depth: ${CONFIG.maxDepth} | Cubes: ${this.cubesSpawned}/${this.cubes.length}`,
       10,
@@ -415,7 +398,7 @@ class Day26Demo extends Game {
 
     ctx.textAlign = "right";
     ctx.fillText(
-      `Vertices: ${activeCount.toLocaleString()} | Dbl-click to scatter`,
+      `Zoom: ${this.zoom.toFixed(1)}x | Dbl-click to scatter`,
       this.width - 10,
       this.height - 10
     );
@@ -436,19 +419,20 @@ class Day26Demo extends Game {
       }
       this.cubesSpawned = oldCubesSpawned;
 
-      // Update existing particle targets
+      // Update existing particle targets (1 particle per cube)
       let particleIndex = 0;
       for (const cube of this.cubes) {
         if (!cube.spawned) continue;
-        for (const corner of cube.corners) {
-          const particles = this.particles.particles;
-          if (particleIndex < particles.length && particles[particleIndex].alive) {
-            particles[particleIndex].custom.targetX = corner.x;
-            particles[particleIndex].custom.targetY = corner.y;
-            particles[particleIndex].custom.targetZ = corner.z;
-            particles[particleIndex].custom.depth = cube.depth;
-            particleIndex++;
-          }
+        const particles = this.particles.particles;
+        if (particleIndex < particles.length && particles[particleIndex].alive) {
+          particles[particleIndex].custom.targetX = cube.x;
+          particles[particleIndex].custom.targetY = cube.y;
+          particles[particleIndex].custom.targetZ = cube.z;
+          particles[particleIndex].custom.depth = cube.depth;
+          // Update size for new dimensions
+          const sizeRatio = cube.size / (Math.min(this.width, this.height) * 0.35);
+          particles[particleIndex].custom.baseSize = Math.max(CONFIG.particleMinSize, CONFIG.particleBaseSize * sizeRatio);
+          particleIndex++;
         }
       }
     }
