@@ -61,17 +61,17 @@ export const INTERPRETATIONS = {
   17: 'p6m Wallpaper Group: hexagonal symmetry with 6-fold rotation and mirrors. The pattern zooms infinitely while colors shift through the spectrum.',
   18: "Langton's Ant: one rule (turn right on light, left on dark) creates chaos, then suddenly builds a highway. Emergence from simplicity.",
   19: 'Something imprisoned in geometry wants you to free it. 16 clicks until the universe screams apart. An Homage to No Man\'s Sky.',
-  20: 'An artwork made from a single continuous line',
+  20: 'Ouroboros: the ancient serpent eating its own tail. One continuous line, eternally consuming and regenerating. Click to grow, drag to rotate.',
   21: 'Bauhaus Poster: Living geometric composition with cycling colors, breathing shapes, and a wandering cursor that leaves trails. Move mouse for parallax, click to regenerate.',
-  22: 'Vector art suitable for pen plotter output - clean lines, no fills',
+  22: 'Etch-a-Sketch: terminal-style drawing toy with rotary knobs. Drag to draw, shake to clear, [S] exports SVG for pen plotters.',
   23: 'Liquid Glass: Apple-inspired metaball blobs with frosted glass refraction, chromatic aberration, and fresnel rim lighting. Move mouse to attract.',
   24: 'Spirograph Nightmare: π (irrational) creates patterns that NEVER close. 3.14 (rational) eventually meets itself. Click to toggle and watch the difference.',
   25: 'Primordial Soup: Simple molecules in a warm ocean, energized by lightning and hydrothermal vents. Watch amino acids and peptides emerge from chaos.',
-  26: 'Split the canvas into a grid and recurse on each cell again and again',
+  26: 'Menger Sponge: 8,000 particles assemble into the 3D recursive fractal, one cube at a time. Double-click to scatter and watch them reform. Drag to orbit, scroll to zoom.',
   27: 'Gaseous Sentience: click to feed it colored nebulae, watch it grow complex. It slowly starves as it radiates.',
   28: 'GENUARY 2006: No canvas, only HTML! What if Genuary existed in 2006? Synthwave sunset, neon grid, VHS scanlines, and maximum vaporwave energy. Click to visit.',
   29: 'SEIR epidemic model with viral mutation. Click agent to infect, watch variants emerge. Hospital zone (cyan) forces mutation pressure. [i] for analytics.',
-  30: 'Embrace the glitch - make unexpected behavior into art',
+  30: 'QUIET ANALYZER: The quieter the sound, the CRAZIER the line goes. Loud = calm. Silence = chaos. It\'s not a bug, it\'s a feature!',
   31: 'Domain Warping: psychedelic flowing patterns created entirely in GLSL. Layers of noise distort space itself, creating organic fluid motion. Move mouse to disturb.'
 };
 
