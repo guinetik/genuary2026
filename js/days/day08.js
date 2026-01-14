@@ -79,22 +79,22 @@ const CONFIG = {
   // Orbital stations - Cloud City style
   stations: {
     count: 5,                 // 1 Capitol + 4 Annexes
-    orbitRadius: 280,         // Base orbit distance from star
+    orbitRadius: 350,         // Base orbit distance from star (larger orbit)
   },
 
   // Camera
   camera: {
-    perspective: 600,
+    perspective: 700,
     autoRotateSpeed: 0.08,
     friction: 0.92,
   },
 
   // Narrative phases (plays once, then idles in EMPIRE)
   phases: {
-    intro: 6,        // Just the star, contemplative
-    arrival: 7,      // Rocket approaches star
-    deployment: 5,   // Panels deploy, satellites separate
-    capitol: 6,      // Capitol station reveals
+    intro: 3,        // Just the star, contemplative (shorter)
+    arrival: 4,      // Rocket approaches star (shorter)
+    deployment: 3,   // Panels deploy, satellites separate (shorter)
+    capitol: 8,      // Capitol station reveals (longer but reveal is faster)
     empire: null,    // Full activity - stays forever
   },
 
@@ -111,9 +111,9 @@ const CONFIG = {
 
   // Reveal animation settings
   reveal: {
-    staggerDelay: 0.02,     // Delay between each voxel pop
-    annexStagger: 1.5,      // Delay between constructor ship launches (was 3.0)
-    shipSpawnInterval: 1.0, // Delay between each regular ship spawn (was 1.5)
+    staggerDelay: 0.008,    // Delay between each voxel pop (faster!)
+    annexStagger: 1.0,      // Delay between constructor ship launches
+    shipSpawnInterval: 0.8, // Delay between each regular ship spawn
   },
 
   // Visual style
@@ -850,7 +850,7 @@ class OrbitalStation {
     this.rotationSpeed = 0.1 + Math.random() * 0.1;
 
     // Size scales with Capitol status - Capitol is much larger
-    this.baseRadius = isCapitol ? 10 : 3 + Math.floor(Math.random() * 2);
+    this.baseRadius = isCapitol ? 16 : 4 + Math.floor(Math.random() * 2);
     this.voxelSize = isCapitol ? 5 : 4;  // Capitol has bigger voxels too
 
     this.voxels = [];
@@ -945,7 +945,7 @@ class OrbitalStation {
     // ─────────────────────────────────────────────────────────────────
     // 1. THRUSTER STEM (extends DOWN from center) - Negative Y
     // ─────────────────────────────────────────────────────────────────
-    const thrusterHeight = this.isCapitol ? 8 : 4 + Math.floor(Math.random() * 3);
+    const thrusterHeight = this.isCapitol ? 12 : 5 + Math.floor(Math.random() * 3);
 
     // Main thruster column
     for (let y = 1; y <= thrusterHeight; y++) {
@@ -958,7 +958,7 @@ class OrbitalStation {
     addVoxel(0, -(thrusterHeight + 1), 0, palette.glow, 0.6);
 
     // Thruster fins (Capitol has more)
-    const finCount = this.isCapitol ? 4 : 2;
+    const finCount = this.isCapitol ? 6 : 2;
     for (let f = 0; f < finCount; f++) {
       const finAngle = (f / finCount) * Math.PI * 2;
       const fx = Math.round(Math.cos(finAngle) * 1.5);
@@ -1003,7 +1003,7 @@ class OrbitalStation {
     const buildingMap = new Map();
 
     // Downtown cluster(s) - taller buildings near center
-    const clusterCount = this.isCapitol ? 4 : 2;
+    const clusterCount = this.isCapitol ? 7 : 2;
     for (let c = 0; c < clusterCount; c++) {
       const clusterAngle = (c / clusterCount) * Math.PI * 2 + Math.random() * 0.5;
       const clusterDist = Math.random() * r * 0.5;
@@ -1011,7 +1011,7 @@ class OrbitalStation {
       const cz = Math.round(Math.sin(clusterAngle) * clusterDist);
 
       // Cluster base height (Capitol has taller buildings)
-      const maxHeight = this.isCapitol ? 6 + Math.floor(Math.random() * 4) : 3 + Math.floor(Math.random() * 3);
+      const maxHeight = this.isCapitol ? 10 + Math.floor(Math.random() * 6) : 4 + Math.floor(Math.random() * 3);
 
       // Build cluster
       for (let ox = -1; ox <= 1; ox++) {
@@ -1054,7 +1054,7 @@ class OrbitalStation {
     }
 
     // Scatter smaller buildings around platform
-    const scatterCount = this.isCapitol ? 20 : 10;
+    const scatterCount = this.isCapitol ? 35 : 12;
     for (let i = 0; i < scatterCount; i++) {
       const angle = Math.random() * Math.PI * 2;
       const dist = 0.3 * r + Math.random() * r * 0.6;
@@ -1065,7 +1065,7 @@ class OrbitalStation {
       if (buildingMap.has(key)) continue;
       if (bx * bx + bz * bz > r * r) continue;
 
-      const h = 1 + Math.floor(Math.random() * 2);
+      const h = this.isCapitol ? 2 + Math.floor(Math.random() * 4) : 1 + Math.floor(Math.random() * 2);
 
       for (let y = 1; y <= h; y++) {
         // Small buildings: dark base, main/accent top
@@ -1077,11 +1077,13 @@ class OrbitalStation {
 
     // Capitol gets a central tower
     if (this.isCapitol) {
-      const towerHeight = 8;
+      const towerHeight = 14;
       for (let y = 1; y <= towerHeight; y++) {
-        const scale = y < 3 ? 1.2 : (y > towerHeight - 2 ? 0.6 : 0.9);
+        const scale = y < 3 ? 1.3 : (y > towerHeight - 2 ? 0.5 : 0.85);
         addVoxel(0, y, 0, y === towerHeight ? palette.glow : palette.main, scale);
       }
+      // Add beacon on top
+      addVoxel(0, towerHeight + 1, 0, palette.glow, 0.4);
     }
   }
 
