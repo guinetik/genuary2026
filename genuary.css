@@ -1112,3 +1112,51 @@ body {
     max-width: 1000px;
   }
 }
+
+/* ============================================
+   Firefox Performance Fixes
+   Firefox struggles with certain CSS features
+   ============================================ */
+
+@-moz-document url-prefix() {
+  /* Disable scanline animation (runs every 0.2s) */
+  .scanline-overlay {
+    animation: none !important;
+    display: none !important;
+  }
+
+  /* Disable grid float animation */
+  .grid-overlay svg {
+    animation: none !important;
+  }
+
+  /* Disable backdrop-filter (slow in Firefox) */
+  .mobile-header {
+    backdrop-filter: none !important;
+    background: rgba(5, 5, 5, 0.98) !important;
+  }
+
+  .nav-arrow {
+    backdrop-filter: none !important;
+    background: rgba(10, 10, 10, 0.98) !important;
+  }
+
+  /* Simplify vignette (radial gradient can be slow) */
+  .vignette-overlay {
+    background: none !important;
+  }
+
+  /* Disable transform animations on section transitions */
+  .day-section.active .day-info {
+    animation: none !important;
+  }
+
+  .day-section.active .day-bg-number {
+    animation: none !important;
+  }
+
+  /* Reduce box-shadow complexity */
+  .day-canvas-container {
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5) !important;
+  }
+}

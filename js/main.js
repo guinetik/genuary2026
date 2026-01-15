@@ -29,6 +29,8 @@ const state = {
   mounting: new Set(), // days currently being mounted (prevent race condition)
   sections: [],
   isScrolling: false,
+  isProgrammaticScroll: false, // True when we're scrolling via nav/permalink (ignore observer)
+  isInitializing: true, // True during initial page load (ignore observer until settled)
 };
 
 // ============================================
@@ -284,7 +286,23 @@ function handleNavClick(e, day) {
 function scrollToDay(day) {
   const section = state.sections[day - 1];
   if (section) {
+    // Mark as programmatic scroll to prevent IntersectionObserver interference
+    state.isProgrammaticScroll = true;
+    
+    // Unmount current day immediately to free resources during scroll
+    unmountDay(state.currentDay);
+    state.currentDay = day;
+    updateActiveNav(day);
+    
     section.scrollIntoView({ behavior: 'smooth' });
+    
+    // Mount new day and reset flag after scroll animation completes
+    clearTimeout(state.programmaticScrollTimeout);
+    state.programmaticScrollTimeout = setTimeout(() => {
+      mountDay(day);
+      history.replaceState(null, '', `#day-${day}`);
+      state.isProgrammaticScroll = false;
+    }, 700);
   }
 }
 
@@ -332,28 +350,67 @@ function navigateNext() {
 // ============================================
 
 /**
- * Setup scroll snap detection
+ * Setup scroll snap detection using IntersectionObserver for reliability
  */
 function setupScrollHandling() {
   let scrollTimeout;
 
+  // Use IntersectionObserver for more reliable detection (especially on mobile)
+  const observerOptions = {
+    root: elements.main,
+    rootMargin: '0px',
+    threshold: 0.6, // Section is "active" when 60% visible
+  };
+
+  const observer = new IntersectionObserver((entries) => {
+    // Skip during initialization or programmatic scroll
+    if (state.isInitializing || state.isProgrammaticScroll) return;
+    
+    for (const entry of entries) {
+      if (entry.isIntersecting && entry.intersectionRatio >= 0.6) {
+        const day = parseInt(entry.target.dataset.day);
+        if (!isNaN(day) && day !== state.currentDay) {
+          // Debounce to avoid rapid transitions
+          clearTimeout(scrollTimeout);
+          scrollTimeout = setTimeout(() => {
+            transitionToDay(day);
+          }, 50);
+        }
+      }
+    }
+  }, observerOptions);
+
+  // Observe all sections
+  state.sections.forEach(section => observer.observe(section));
+  state.sectionObserver = observer;
+
+  // Fallback scroll listener for edge cases
   elements.main.addEventListener('scroll', () => {
     state.isScrolling = true;
-    clearTimeout(scrollTimeout);
+    clearTimeout(state.scrollEndTimeout);
 
-    scrollTimeout = setTimeout(() => {
+    state.scrollEndTimeout = setTimeout(() => {
       state.isScrolling = false;
-      handleScrollEnd();
+      // Skip during initialization or programmatic scroll
+      if (!state.isInitializing && !state.isProgrammaticScroll) {
+        handleScrollEnd();
+      }
     }, CONFIG.scrollDebounce);
   }, { passive: true });
 }
 
 /**
- * Handle scroll end - detect current day and manage lifecycle
+ * Handle scroll end - fallback detection using scroll position
+ * Only used if IntersectionObserver misses something
  */
 function handleScrollEnd() {
   const scrollTop = elements.main.scrollTop;
-  const sectionHeight = elements.main.clientHeight;
+  
+  // Get actual section height from DOM (handles mobile where sections are smaller)
+  const firstSection = state.sections[0];
+  const sectionHeight = firstSection ? firstSection.offsetHeight : elements.main.clientHeight;
+
+  if (sectionHeight <= 0) return; // Safety check
 
   // Calculate which day is currently visible
   const newDay = Math.round(scrollTop / sectionHeight) + 1;
@@ -588,18 +645,15 @@ function handleInitialHash() {
   if (match) {
     const day = parseInt(match[1]);
     if (day >= 1 && day <= TOTAL_DAYS) {
+      // Set current day immediately to prevent observer interference
       state.currentDay = day;
-      state.pendingMount = day; // Don't mount yet, wait for scroll
+      
       setTimeout(() => {
         scrollToDay(day);
-        updateActiveNav(day);
-        // Mount after scroll animation completes (~600ms for smooth scroll)
+        // Clear initialization flag after scroll settles
         setTimeout(() => {
-          if (state.pendingMount === day) {
-            mountDay(day);
-            state.pendingMount = null;
-          }
-        }, 700);
+          state.isInitializing = false;
+        }, 1000);
       }, 100);
       return true; // Signal that we handled a hash
     }
@@ -634,6 +688,10 @@ async function init() {
   if (!handlingHash) {
     await mountDay(state.currentDay);
     updateActiveNav(state.currentDay);
+    // Clear initialization flag after a brief delay
+    setTimeout(() => {
+      state.isInitializing = false;
+    }, 500);
   }
 
   console.log('[Genuary] Ready!');
@@ -759,9 +817,18 @@ function setupGridResize() {
   });
 }
 
+// Firefox detection
+const IS_FIREFOX = navigator.userAgent.toLowerCase().includes('firefox');
+
 // Bootstrap
 window.addEventListener('load', () => {
   init();
-  generateCurvedGrid();
-  setupGridResize();
+  
+  // Skip heavy SVG grid on Firefox - it's too slow
+  if (!IS_FIREFOX) {
+    generateCurvedGrid();
+    setupGridResize();
+  } else {
+    console.log('[Genuary] Firefox detected - skipping SVG grid for performance');
+  }
 });
