@@ -94,11 +94,11 @@ const SQUARE_CONFIGS = [
     pieces: [
       trianglePosition(0, 0, Ll, 45), // Large 1
       trianglePosition(0, 0, Ll, 135), // Large 2
-      trianglePosition(0.5, -0.5, Ml, 90), // Medium 
-      trianglePosition(0, 0, Sl, 315), // Small 1 
+      trianglePosition(0.5, -0.5, Ml, 90), // Medium
+      trianglePosition(0, 0, Sl, 315), // Small 1
       trianglePosition(-0.25, -0.25, Sl, 225), // Small 2
       { x: 0, y: -0.25, rotation: 45 }, // Square
-      { x: 0.375, y: 0.125, rotation: 90 }, // Parallelogram 
+      { x: 0.375, y: 0.125, rotation: 90 }, // Parallelogram
     ],
   },
 
@@ -159,66 +159,129 @@ const SQUARE_CONFIGS = [
   }, */
 ];
 
-const CAT_CONFIG = {
-  name: "cat",
-  view: { offsetX: -150, offsetY: -50, scale: 0.7 },
+const DOG_CONFIG = {
+  name: "dog",
+  view: { offsetX: 0, offsetY: -50, scale: 0.90 },
   pieces: [
-    // Large 1: hind legs / base
-    trianglePosition(0.75, 0.375, Ll, 135),
-    // Large 2: tail (angled up/right)
-    trianglePosition(0.957, 0.880, Ll, 180),
-    // Medium: upper body / chest
-    trianglePosition(-0.105, 0.235, Ml, 315),
-    // Small 1: left ear
-    trianglePosition(0, -0.375, Sl, 135),
-    // Small 2: right ear
-    trianglePosition(0, -0.375, Sl, 315),
-    // Square: body core (diamond)
-    { x: 0, y: -0.125, rotation: 45 },
-    // Parallelogram: head (slanted), mirrored to better match the reference
-    { x: 1.34, y: 0.755, rotation: 0},
+    // Large 1
+    { x: 0.266, y: 0.153, rotation: 180 },
+    // Large 2
+    { x: -0.326, y: 0.275, rotation: 0 },
+    // Medium
+    { x: 0.738, y: 0.389, rotation: 315 },
+    // Small 1
+    { x: 0.621, y: 0.153, rotation: 0 },
+    // Small 2
+    { x: 0.752, y: -0.402, rotation: 45 },
+    // Square
+    { x: 0.679, y: -0.142, rotation: 90 },
+    // Parallelogram
+    { x: -0.717, y: -0.139, rotation: 225 },
   ],
-};
+}
+
+const CAT_CONFIGS = [
+  {
+    name: "cat",
+    view: { offsetX: -150, offsetY: -50, scale: 0.7 },
+    pieces: [
+      // Large 1
+      { x: 0.416, y: 0.376, rotation: 135 },
+      // Large 2
+      { x: 0.721, y: 0.641, rotation: 180 },
+      // Medium
+      { x: 0.132, y: 0.23, rotation: 315 },
+      // Small 1
+      { x: -0.167, y: -0.375, rotation: 135 },
+      // Small 2
+      { x: 0.167, y: -0.375, rotation: 315 },
+      // Square
+      { x: 0.0, y: -0.124, rotation: 45 },
+      // Parallelogram
+      { x: 1.332, y: 0.751, rotation: 0 },
+    ],
+  },
+  {
+    name: "cat2",
+    view: { offsetX: -50, offsetY: -75, scale: 0.6 },
+    pieces: [
+      // Large 1
+      { x: 0.405, y: 0.958, rotation: 180 },
+      // Large 2
+      { x: 0.307, y: 0.486, rotation: 135 },
+      // Medium
+      { x: 0.021, y: 0.217, rotation: 315 },
+      // Small 1
+      { x: 0.167, y: -0.501, rotation: 315 },
+      // Small 2
+      { x: -0.167, y: -0.501, rotation: 135 },
+      // Square
+      { x: 0.0, y: -0.25, rotation: 45 },
+      // Parallelogram
+      { x: -0.037, y: 0.571, rotation: 225, scaleX: -1 },
+    ],
+  },
+  {
+    name: "cat_sitting",
+    view: { offsetX: 0, offsetY: 0, scale: 0.8 },
+    pieces: [
+      // Large 1
+      { x: 0.469, y: 0.292, rotation: 45 },
+      // Large 2
+      { x: -0.031, y: 0.124, rotation: 225 },
+      // Medium
+      { x: -0.365, y: 0.292, rotation: 270 },
+      // Small 1
+      { x: 0.887, y: -0.292, rotation: 315 },
+      // Small 2
+      { x: 0.552, y: -0.292, rotation: 135 },
+      // Square
+      { x: 0.719, y: -0.041, rotation: 45 },
+      // Parallelogram
+      { x: -0.885, y: 0.282, rotation: 225 },
+    ],
+  },
+];
 
 const BEAR_CONFIG = {
   name: "bear",
   view: { offsetX: 0, offsetY: -85, scale: 0.9 },
   pieces: [
     // Large 1
-    trianglePosition(-1.07, 0.145, Ll, 315),
+    { x: -0.737, y: 0.149, rotation: 315 },
     // Large 2
-    trianglePosition(-0.57, -0.352, Ll, 0),
+    { x: -0.335, y: -0.116, rotation: 0 },
     // Medium
-    trianglePosition(0.140, 0.146, Ml, 180),
+    { x: -0.03, y: -0.019, rotation: 180 },
     // Small 1
-    trianglePosition(0.5, 0, Sl, 270),
+    { x: 0.608, y: -0.116, rotation: 270 },
     // Small 2
-    trianglePosition(-0.57, 0.65, Sl, 135),
+    { x: -0.737, y: 0.649, rotation: 135 },
     // Square
-    { x: 0.32, y: -0.175, rotation: 0 },
-    // Parallelogram: 
-    { x: 0.14, y: 0.325, rotation: 225},
+    { x: 0.313, y: -0.174, rotation: 0 },
+    // Parallelogram
+    { x: 0.137, y: 0.326, rotation: 225 },
   ],
 };
 
 const SHARK_CONFIG = {
-  name: "shark",
-  view: { offsetX: -50, offsetY: -55, scale: 0.8 },
+  name: "custom",
+  view: { offsetX: 0, offsetY: 0, scale: 0.8 },
   pieces: [
     // Large 1
-    trianglePosition(-0.5, 0, Ll, 45),
+    { x: -0.501, y: 0.333, rotation: 45 },
     // Large 2
-    trianglePosition(0.21, 0, Ll, 90),
+    { x: -0.026, y: 0.236, rotation: 90 },
     // Medium
-    trianglePosition(0.921, 0, Ml, 270),
+    { x: 1.083, y: -0.167, rotation: 270 },
     // Small 1
-    trianglePosition(-0.25, 0.75, Sl, 225),
+    { x: -0.25, y: 0.584, rotation: 225 },
     // Small 2
-    trianglePosition(0.3, 0, Sl, 180),
+    { x: 0.182, y: -0.117, rotation: 180 },
     // Square
     { x: 0.388, y: 0.177, rotation: 0 },
-    // Parallelogram: 
-    { x: 0.74, y: 0, rotation: 135 },
+    // Parallelogram
+    { x: 0.739, y: 0.0, rotation: 135 },
   ],
 };
 
@@ -233,7 +296,7 @@ const CAMEL_CONFIG = {
     // Medium
     { x: 0.845, y: 0.042, rotation: 45 },
     // Small 1
-    { x: 0.160, y: -0.338, rotation: 315 },
+    { x: 0.16, y: -0.338, rotation: 315 },
     // Small 2
     { x: -0.006, y: -0.504, rotation: 225 },
     // Square
@@ -243,30 +306,52 @@ const CAMEL_CONFIG = {
   ],
 };
 
-const HOUSE_CONFIG = {
-  name: "house",
-  view: { offsetX: 0, offsetY: 0, scale: 0.90 },
-  pieces: [
-    // Large 1
-    { x: 0.222, y: -0.026, rotation: 45 },
-    // Large 2
-    { x: -0.024, y: 0.473, rotation: 45 },
-    // Medium
-    { x: -0.358, y: 0.307, rotation: 0 },
-    // Small 1
-    { x: 0.392, y: 0.390, rotation: 315 },
-    // Small 2
-    { x: 0.227, y: 0.225, rotation: 225 },
-    // Square
-    { x: -0.206, y: -0.287, rotation: 0 },
-    // Parallelogram
-    { x: -0.398, y: 0.016, rotation: 0 },
-  ],
-}
+const HOUSE_CONFIGS = [
+  {
+    name: "house",
+    view: { offsetX: 0, offsetY: 0, scale: 0.9 },
+    pieces: [
+      // Large 1
+      { x: 0.222, y: -0.026, rotation: 45 },
+      // Large 2
+      { x: -0.024, y: 0.473, rotation: 45 },
+      // Medium
+      { x: -0.358, y: 0.307, rotation: 0 },
+      // Small 1
+      { x: 0.392, y: 0.39, rotation: 315 },
+      // Small 2
+      { x: 0.227, y: 0.225, rotation: 225 },
+      // Square
+      { x: -0.206, y: -0.287, rotation: 0 },
+      // Parallelogram
+      { x: -0.398, y: 0.016, rotation: 0 },
+    ],
+  },
+  {
+    name: "house2",
+    view: { offsetX: 0, offsetY: 105, scale: 0.9 },
+    pieces: [
+      // Large 1
+      { x: 0.22, y: -0.153, rotation: 270 },
+      // Large 2
+      { x: -0.252, y: -0.153, rotation: 180 },
+      // Medium
+      { x: 0.16, y: 0.319, rotation: 45 },
+      // Small 1
+      { x: -0.076, y: 0.202, rotation: 0 },
+      // Small 2
+      { x: 0.396, y: 0.202, rotation: 90 },
+      // Square
+      { x: -0.37, y: 0.26, rotation: 90 },
+      // Parallelogram
+      { x: 0.442, y: -0.416, rotation: 90 },
+    ],
+  },
+];
 
 const HORSERIDER_CONFIG = {
   name: "horserider",
-  view: { offsetX: -50, offsetY: -55, scale: 0.70 },
+  view: { offsetX: -50, offsetY: -55, scale: 0.7 },
   pieces: [
     // Large 1
     { x: 0.034, y: 0.617, rotation: 0 },
@@ -275,7 +360,7 @@ const HORSERIDER_CONFIG = {
     // Medium
     { x: 0.172, y: 0.214, rotation: 270 },
     // Small 1
-    { x: 1.000, y: 0.244, rotation: 270 },
+    { x: 1.0, y: 0.244, rotation: 270 },
     // Small 2
     { x: 0.765, y: 0.833, rotation: 90 },
     // Square
@@ -283,32 +368,95 @@ const HORSERIDER_CONFIG = {
     // Parallelogram
     { x: -0.58, y: 0.507, rotation: 0 },
   ],
+};
+
+const HORSE_CONFIG = {
+  name: "horse",
+  view: { offsetX: 0, offsetY: -105, scale: 0.65 },
+  pieces: [
+    // Large 1
+    { x: 0.167, y: 0.482, rotation: 135 },
+    // Large 2
+    { x: -0.235, y: 0.217, rotation: 90 },
+    // Medium
+    { x: -0.353, y: -0.489, rotation: 45 },
+    // Small 1
+    { x: -0.707, y: 0.149, rotation: 45 },
+    // Small 2
+    { x: -0.117, y: 0.924, rotation: 180 },
+    // Square
+    { x: -0.176, y: -0.195, rotation: 0 },
+    // Parallelogram
+    { x: 0.678, y: 0.835, rotation: 225, scaleY: -1 },
+  ],
+}
+
+const HELICOPTER_CONFIG = {
+  name: "helicopter",
+  view: { offsetX: -200, offsetY: 75, scale: 0.85 },
+  pieces: [
+    // Large 1
+    { x: 0.167, y: 0.000, rotation: 135 },
+    // Large 2
+    { x: -0.167, y: 0.000, rotation: 315 },
+    // Medium
+    { x: -0.355, y: -0.618, rotation: 45 },
+    // Small 1
+    { x: 0.501, y: 0.167, rotation: 45 },
+    // Small 2
+    { x: 0.751, y: 0.083, rotation: 225 },
+    // Square
+    { x: 1.136, y: -0.120, rotation: 45 },
+    // Parallelogram
+    { x: 0.373, y: -0.625, rotation: 0, scaleX: -1, scaleY: -1 },
+  ],
+};
+
+const PLANE_CONFIG = {
+  name: "plane",
+  view: { offsetX: 0, offsetY: 0, scale: 0.80 },
+  pieces: [
+    // Large 1
+    { x: 0.481, y: -0.216, rotation: 180 },
+    // Large 2
+    { x: -0.245, y: -0.061, rotation: 225 },
+    // Medium
+    { x: 0.092, y: 0.439, rotation: 90 },
+    // Small 1
+    { x: -0.495, y: 0.189, rotation: 45 },
+    // Small 2
+    { x: -0.223, y: -0.312, rotation: 45 },
+    // Square
+    { x: -0.745, y: 0.021, rotation: 45 },
+    // Parallelogram
+    { x: 0.133, y: 0.147, rotation: 180 },
+  ],
 }
 
 const BOAT_CONFIG = {
   name: "boat",
-  view: { offsetX: 0, offsetY: 0, scale: 0.8 },
+  view: { offsetX: 0, offsetY: 140, scale: 0.7 },
   pieces: [
     // Large 1
-    { x: -0.222, y: 0.228, rotation: 45 },
+    { x: 0.157, y: -0.166, rotation: 135 },
     // Large 2
-    { x: -0.555, y: -0.104, rotation: 135 },
+    { x: -0.245, y: 0.006, rotation: 180 },
     // Medium
-    { x: -0.431, y: 0.511, rotation: 225 },
+    { x: 0.157, y: -0.832, rotation: 270 },
     // Small 1
-    { x: -0.194, y: 0.629, rotation: 180 },
+    { x: 0.24, y: 0.25, rotation: 45 },
     // Small 2
-    { x: 0.513, y: 0.631, rotation: 180 },
+    { x: 0.24, y: 0.418, rotation: 225 },
     // Square
-    { x: 0.100, y: 0.571, rotation: 0 },
+    { x: 0.491, y: 0.083, rotation: 45 },
     // Parallelogram
-    { x: 0.455, y: 0.395, rotation: 315 },
+    { x: -0.134, y: 0.459, rotation: 0, scaleY: -1 },
   ],
-}
+};
 
 const GOOSE_CONFIG = {
   name: "goose",
-  view: { offsetX: 0, offsetY: -70, scale: 0.72 },
+  view: { offsetX: 0, offsetY: -80, scale: 0.72 },
   pieces: [
     // Large 1
     { x: 0.403, y: 0.447, rotation: 225 },
@@ -321,7 +469,7 @@ const GOOSE_CONFIG = {
     // Small 2
     { x: -0.367, y: 0.383, rotation: 135 },
     // Square
-    { x: -0.200, y: 0.132, rotation: 45 },
+    { x: -0.2, y: 0.132, rotation: 45 },
     // Parallelogram
     { x: -0.074, y: -0.244, rotation: 90 },
   ],
@@ -329,7 +477,7 @@ const GOOSE_CONFIG = {
 
 const RABBIT_CONFIG = {
   name: "rabbit",
-  view: { offsetX: 0, offsetY: -100, scale: 0.60 },
+  view: { offsetX: 0, offsetY: -100, scale: 0.6 },
   pieces: [
     // Large 1
     { x: -0.306, y: 0.483, rotation: 315 },
@@ -342,30 +490,232 @@ const RABBIT_CONFIG = {
     // Small 2
     { x: 0.242, y: 0.599, rotation: 90 },
     // Square
-    { x: 0.110, y: -0.018, rotation: 45 },
+    { x: 0.11, y: -0.018, rotation: 45 },
     // Parallelogram
     { x: -0.242, y: -0.445, rotation: 45 },
   ],
+};
+
+const ROCKET_CONFIG = {
+  name: "rocket",
+  view: { offsetX: 50, offsetY: 0, scale: 0.6 },
+  pieces: [
+    // Large 1
+    { x: -0.054, y: 0.267, rotation: 315 },
+    // Large 2
+    { x: -0.222, y: -0.233, rotation: 135 },
+    // Medium
+    { x: -0.054, y: -0.566, rotation: 90 },
+    // Small 1
+    { x: -0.556, y: 0.767, rotation: 135 },
+    // Small 2
+    { x: -0.137, y: -0.817, rotation: 45 },
+    // Square
+    { x: -0.389, y: 0.516, rotation: 45 },
+    // Parallelogram
+    { x: 0.237, y: 0.642, rotation: 270 },
+  ],
+};
+
+const TURTLE_CONFIG = {
+  name: "turtle",
+  view: { offsetX: 0, offsetY: -90, scale: 0.7 },
+  pieces: [
+    // Large 1
+    { x: 0.167, y: 0.326, rotation: 135 },
+    // Large 2
+    { x: -0.166, y: 0.326, rotation: 315 },
+    // Medium
+    { x: -0.539, y: -0.11, rotation: 45 },
+    // Small 1
+    { x: 0.36, y: 0.82, rotation: 90 },
+    // Small 2
+    { x: -0.36, y: 0.82, rotation: 0 },
+    // Square
+    { x: 0.0, y: -0.423, rotation: 45 },
+    // Parallelogram
+    { x: 0.542, y: -0.162, rotation: 315, scaleY: -1 },
+  ],
+};
+
+const CHICKEN_CONFIG = {
+  name: "chicken",
+  view: { offsetX: 0, offsetY: -120, scale: 0.7 },
+  pieces: [
+    // Large 1
+    { x: -0.106, y: 0.253, rotation: 90 },
+    // Large 2
+    { x: 0.366, y: 0.253, rotation: 0 },
+    // Medium
+    { x: -0.41, y: -0.149, rotation: 270 },
+    // Small 1
+    { x: 0.38, y: 0.641, rotation: 45 },
+    // Small 2
+    { x: 0.734, y: -0.419, rotation: 45 },
+    // Square
+    { x: 0.661, y: -0.159, rotation: 90 },
+    // Parallelogram
+    { x: -0.049, y: 0.724, rotation: 45, scaleY: -1 },
+  ],
+};
+
+const PYRAMID_CONFIG = {
+  name: "pyramid",
+  view: { offsetX: 0, offsetY: -50, scale: 0.95 },
+  pieces: [
+    // Large 1
+    { x: 0.489, y: 0.373, rotation: 45 },
+    // Large 2
+    { x: -0.511, y: 0.373, rotation: 45 },
+    // Medium
+    { x: -0.177, y: 0.206, rotation: 90 },
+    // Small 1
+    { x: 0.073, y: 0.289, rotation: 135 },
+    // Small 2
+    { x: -0.011, y: -0.293, rotation: 45 },
+    // Square
+    { x: 0.239, y: 0.04, rotation: 45 },
+    // Parallelogram
+    { x: -0.136, y: -0.084, rotation: 0 },
+  ],
+};
+
+const FROG_CONFIG = {
+  name: "custom",
+  view: { offsetX: 0, offsetY: -100, scale: 0.75 },
+  pieces: [
+    // Large 1
+    { x: 0.169, y: 0.579, rotation: 45 },
+    // Large 2
+    { x: -0.033, y: 0.113, rotation: 225 },
+    // Medium
+    { x: -0.027, y: -0.173, rotation: 45 },
+    // Small 1
+    { x: 0.386, y: -0.472, rotation: 90 },
+    // Small 2
+    { x: 0.269, y: -0.355, rotation: 270 },
+    // Square
+    { x: -0.379, y: -0.413, rotation: 180 },
+    // Parallelogram
+    { x: 0.044, y: 0.871, rotation: 180 },
+  ],
 }
+
+const SEAL_CONFIG = {
+  name: "seal",
+  view: { offsetX: -100, offsetY: -100, scale: 0.85 },
+  pieces: [
+    // Large 1
+    { x: 0.335, y: 0.286, rotation: 180 },
+    // Large 2
+    { x: -0.329, y: 0.380, rotation: 225 },
+    // Medium
+    { x: 0.924, y: -0.303, rotation: 45 },
+    // Small 1
+    { x: 0.688, y: 0.286, rotation: 0 },
+    // Small 2
+    { x: -0.711, y: 0.096, rotation: 270 },
+    // Square
+    { x: 0.747, y: -0.009, rotation: 90 },
+    // Parallelogram
+    { x: 0.747, y: 0.522, rotation: 135 },
+  ],
+}
+
+const CRAB_CONFIG = {
+  name: "crab",
+  view: { offsetX: 0, offsetY: 0, scale: 0.80 },
+  pieces: [
+    // Large 1
+    { x: 0.292, y: 0.044, rotation: 180 },
+    // Large 2
+    { x: -0.295, y: 0.160, rotation: 0 },
+    // Medium
+    { x: 0.646, y: -0.369, rotation: 135 },
+    // Small 1
+    { x: -0.648, y: -0.546, rotation: 180 },
+    // Small 2
+    { x: 0.409, y: 0.398, rotation: 90 },
+    // Square
+    { x: 0.000, y: -0.250, rotation: 90 },
+    // Parallelogram
+    { x: -0.531, y: -0.250, rotation: 225 },
+  ],
+}
+
+const GIRAFFE_CONFIG = {
+  name: "giraffe",
+  view: { offsetX: 0, offsetY: -200, scale: 0.53 },
+  pieces: [
+    // Large 1
+    { x: 0.086, y: 1.127, rotation: 315 },
+    // Large 2
+    { x: -0.415, y: 1.127, rotation: 315 },
+    // Medium
+    { x: 0.419, y: -0.290, rotation: 270 },
+    // Small 1
+    { x: 0.169, y: -0.124, rotation: 315 },
+    // Small 2
+    { x: -0.164, y: 0.877, rotation: 135 },
+    // Square
+    { x: 0.003, y: 0.626, rotation: 45 },
+    // Parallelogram
+    { x: 0.127, y: 0.252, rotation: 270 },
+  ],
+}
+
+const CROW_CONFIG = {
+  name: "crow",
+  view: { offsetX: -275, offsetY: -125, scale: 0.80 },
+  pieces: [
+    // Large 1
+    { x: 0.765, y: 0.236, rotation: 90 },
+    // Large 2
+    { x: 0.501, y: -0.166, rotation: 45 },
+    // Medium
+    { x: 1.167, y: 0.333, rotation: 270 },
+    // Small 1
+    { x: 0.931, y: 0.804, rotation: 45 },
+    // Small 2
+    { x: -0.249, y: -0.083, rotation: 45 },
+    // Square
+    { x: 0.000, y: -0.250, rotation: 45 },
+    // Parallelogram
+    { x: 1.376, y: 0.625, rotation: 180, scaleY: -1 },
+  ],
+}
+
+//const ALL_CONFIGS = [CROW_CONFIG];
 
 const ALL_CONFIGS = [
   ...SQUARE_CONFIGS,
+  ...CAT_CONFIGS,
+  ...HOUSE_CONFIGS,
+  ROCKET_CONFIG,
   RABBIT_CONFIG,
   GOOSE_CONFIG,
   BOAT_CONFIG,
   HORSERIDER_CONFIG,
-  HOUSE_CONFIG,
   CAMEL_CONFIG,
-  CAT_CONFIG,
   BEAR_CONFIG,
   SHARK_CONFIG,
+  CROW_CONFIG,
+  GIRAFFE_CONFIG,
+  CRAB_CONFIG,
+  TURTLE_CONFIG,
+  PYRAMID_CONFIG,
+  FROG_CONFIG,
+  SEAL_CONFIG,
+  HORSE_CONFIG,
+  HELICOPTER_CONFIG,
+  PLANE_CONFIG,
 ];
 
 /**
  * Starting configuration for design mode.
  * Set to null to scatter pieces, or paste a config to start from it.
  */
-const DESIGN_START_CONFIG = null; // Set to a config like HOUSE_CONFIG to start from it
+const DESIGN_START_CONFIG = SQUARE_CONFIGS[1]; // Set to a config like HOUSE_CONFIG to start from it
 
 /**
  * Default framing for configurations (centered, no scaling).
@@ -484,7 +834,7 @@ class TangramPiece extends GameObject {
    */
   _calculateLocalVertices() {
     const shape = this.shape;
-    
+
     if (shape.leg !== undefined) {
       // RightTriangle: right angle at origin, legs along +X and +Y
       // Centroid is at (leg/3, leg/3), so local coords relative to centroid:
@@ -492,9 +842,9 @@ class TangramPiece extends GameObject {
       const cx = leg / 3;
       const cy = leg / 3;
       this._localVertices = [
-        { x: -cx, y: -cy },           // Right angle vertex
-        { x: leg - cx, y: -cy },      // End of X leg
-        { x: -cx, y: leg - cy },      // End of Y leg
+        { x: -cx, y: -cy }, // Right angle vertex
+        { x: leg - cx, y: -cy }, // End of X leg
+        { x: -cx, y: leg - cy }, // End of Y leg
       ];
     } else if (shape.side !== undefined) {
       // Square: centered
@@ -512,10 +862,10 @@ class TangramPiece extends GameObject {
       const s = shape.slant || 0;
       // Centered parallelogram
       this._localVertices = [
-        { x: -w/2, y: h/2 },           // Bottom-left
-        { x: w/2, y: h/2 },            // Bottom-right
-        { x: w/2 + s, y: -h/2 },       // Top-right
-        { x: -w/2 + s, y: -h/2 },      // Top-left
+        { x: -w / 2, y: h / 2 }, // Bottom-left
+        { x: w / 2, y: h / 2 }, // Bottom-right
+        { x: w / 2 + s, y: -h / 2 }, // Top-right
+        { x: -w / 2 + s, y: -h / 2 }, // Top-left
       ];
     } else {
       this._localVertices = [];
@@ -528,13 +878,14 @@ class TangramPiece extends GameObject {
    */
   getWorldVertices() {
     // Use tracked degrees if available, otherwise rotation is already in radians
-    const rad = this._rotationDeg !== undefined 
-      ? (this._rotationDeg * Math.PI) / 180 
-      : this.rotation; // rotation from engine is in radians
+    const rad =
+      this._rotationDeg !== undefined
+        ? (this._rotationDeg * Math.PI) / 180
+        : this.rotation; // rotation from engine is in radians
     const cos = Math.cos(rad);
     const sin = Math.sin(rad);
-    
-    return this._localVertices.map(v => {
+
+    return this._localVertices.map((v) => {
       // Rotate then translate
       return {
         x: this.x + v.x * cos - v.y * sin,
@@ -602,6 +953,10 @@ class TangramDemo extends Game {
     this._onKeyDown = null;
     this._onCanvasClick = null;
     this._dragCleanups = [];
+
+    // Shuffle bag for showcase - ensures all configs shown before repeating
+    this.shuffledIndices = [];
+    this.shufflePosition = 0;
   }
 
   init() {
@@ -661,11 +1016,14 @@ class TangramDemo extends Game {
         },
         showcase: {
           enter: () => {
-            this.configIndex = 0;
-            this.configuration = ALL_CONFIGS[0];
+            // Initialize shuffle bag and show first config
+            this.shuffleConfigs();
+            this.configIndex = this.shuffledIndices[0];
+            this.shufflePosition = 0;
+            this.configuration = ALL_CONFIGS[this.configIndex];
             this.applyConfiguration(false);
             this.assignDistinctColors();
-            
+
             // Click cycles to next shape with new colors
             this.setupCanvasClickHandler(() => this.toggleShowcase());
             this.disableDragging();
@@ -681,25 +1039,29 @@ class TangramDemo extends Game {
               Tweenetik.killTarget(piece);
             }
             Tweenetik.killTarget(this.scene);
-            
+
             // Reset scene position
             this.scene.x = this.width / 2;
             this.scene.y = this.height / 2;
-            
+
             // Load starting config or scatter pieces
             if (DESIGN_START_CONFIG) {
               this.loadDesignConfig(DESIGN_START_CONFIG);
-              console.log(`[Design Mode] Loaded config: ${DESIGN_START_CONFIG.name}`);
+              console.log(
+                `[Design Mode] Loaded config: ${DESIGN_START_CONFIG.name}`
+              );
             } else {
               this.scene.scaleX = 1;
               this.scene.scaleY = 1;
               this._designScale = 1;
               this.scatterPieces();
             }
-            
+
             this.enableDragging();
             this.enableWheelZoom();
-            console.log("[Design Mode] Q/E to rotate, Mouse wheel to zoom, P to print config");
+            console.log(
+              "[Design Mode] Q/E rotate, W/S flip (mirror), Wheel zoom, Drag to pan, P print"
+            );
           },
           exit: () => {
             this.disableDragging();
@@ -778,18 +1140,43 @@ class TangramDemo extends Game {
         if (key === "q" || key === "e") {
           e.preventDefault();
           e.stopPropagation();
-          
+
           // Track rotation in degrees on our own property
           if (this.selectedPiece._rotationDeg === undefined) {
             this.selectedPiece._rotationDeg = 0;
           }
-          
+
           const delta = key === "q" ? -STEP_DEG : STEP_DEG;
           this.selectedPiece._rotationDeg += delta;
-          
+
           // Engine takes degrees directly (converts to radians internally)
-          console.log(`[Rotate] ${key.toUpperCase()}: ${this.selectedPiece._rotationDeg - delta}° -> ${this.selectedPiece._rotationDeg}°`);
+          console.log(
+            `[Rotate] ${key.toUpperCase()}: ${
+              this.selectedPiece._rotationDeg - delta
+            }° -> ${this.selectedPiece._rotationDeg}°`
+          );
           this.selectedPiece.rotation = this.selectedPiece._rotationDeg;
+          return;
+        }
+
+        // W/S to flip piece (mirror) - useful for parallelogram chirality
+        if (key === "w" || key === "s") {
+          e.preventDefault();
+          e.stopPropagation();
+
+          if (key === "w") {
+            // Flip horizontally (mirror X)
+            this.selectedPiece.scaleX *= -1;
+            console.log(
+              `[Flip] Horizontal: scaleX = ${this.selectedPiece.scaleX}`
+            );
+          } else {
+            // Flip vertically (mirror Y)
+            this.selectedPiece.scaleY *= -1;
+            console.log(
+              `[Flip] Vertical: scaleY = ${this.selectedPiece.scaleY}`
+            );
+          }
           return;
         }
       }
@@ -850,7 +1237,7 @@ class TangramDemo extends Game {
       const onInputDown = (e) => {
         piece._isDragging = true;
         this.draggingPiece = piece;
-        
+
         // Select this piece (persists after mouse release)
         this.selectPiece(piece);
 
@@ -879,7 +1266,7 @@ class TangramDemo extends Game {
         if (!piece._isDragging) return;
         piece._isDragging = false;
         this.draggingPiece = null;
-        
+
         // Try to snap to nearby pieces
         this.snapPieceToNearby(piece);
       };
@@ -899,33 +1286,67 @@ class TangramDemo extends Game {
       });
     }
 
-    // Add canvas click handler to deselect when clicking empty space
+    // Add canvas dragging to pan the scene (when not clicking a piece)
     this._clickedPiece = false;
-    
-    this._onDesignCanvasDown = () => {
+    this._isDraggingCanvas = false;
+    this._canvasDragStart = { x: 0, y: 0 };
+    this._sceneDragStart = { x: 0, y: 0 };
+
+    this._onDesignCanvasDown = (e) => {
       // Will be set to true by piece inputdown if a piece is clicked
       this._clickedPiece = false;
+
+      // Delay check to see if a piece was clicked
+      setTimeout(() => {
+        if (!this._clickedPiece && !this.draggingPiece) {
+          // Start canvas drag for panning
+          this._isDraggingCanvas = true;
+          this._canvasDragStart.x = e.x;
+          this._canvasDragStart.y = e.y;
+          this._sceneDragStart.x = this.scene.x;
+          this._sceneDragStart.y = this.scene.y;
+        }
+      }, 0);
     };
-    
-    this._onDesignCanvasUp = () => {
-      // If no piece was clicked, deselect
-      if (!this._clickedPiece && !this.draggingPiece) {
-        this.deselectPiece();
+
+    this._onDesignCanvasMove = (e) => {
+      if (this._isDraggingCanvas) {
+        // Pan the scene
+        const dx = e.x - this._canvasDragStart.x;
+        const dy = e.y - this._canvasDragStart.y;
+        this.scene.x = this._sceneDragStart.x + dx;
+        this.scene.y = this._sceneDragStart.y + dy;
       }
     };
-    
+
+    this._onDesignCanvasUp = () => {
+      // If no piece was clicked and we weren't dragging canvas, deselect
+      if (
+        !this._clickedPiece &&
+        !this.draggingPiece &&
+        !this._isDraggingCanvas
+      ) {
+        this.deselectPiece();
+      }
+      this._isDraggingCanvas = false;
+    };
+
     // Mark that a piece was clicked (called before canvas handler)
     for (const piece of this.pieces) {
-      const markClicked = () => { this._clickedPiece = true; };
+      const markClicked = () => {
+        this._clickedPiece = true;
+      };
       piece.on("inputdown", markClicked);
       this._dragCleanups.push(() => piece.off("inputdown", markClicked));
     }
-    
+
     this.events.on("inputdown", this._onDesignCanvasDown);
+    this.events.on("inputmove", this._onDesignCanvasMove);
     this.events.on("inputup", this._onDesignCanvasUp);
-    
+
     this._dragCleanups.push(() => {
       this.events.off("inputdown", this._onDesignCanvasDown);
+      this.events.off("inputmove", this._onDesignCanvasMove);
       this.events.off("inputup", this._onDesignCanvasUp);
     });
   }
@@ -939,11 +1360,11 @@ class TangramDemo extends Game {
     if (this.selectedPiece && this.selectedPiece !== piece) {
       this.restorePieceStroke(this.selectedPiece);
     }
-    
+
     // Select new piece
     this.selectedPiece = piece;
     this.scene.bringToFront(piece);
-    
+
     // Store original stroke and change to green
     if (!piece._originalStroke) {
       piece._originalStroke = piece.shape.stroke;
@@ -994,17 +1415,20 @@ class TangramDemo extends Game {
   enableWheelZoom() {
     this._onWheel = (e) => {
       e.preventDefault();
-      
+
       const zoomSpeed = 0.05;
       const delta = e.deltaY > 0 ? -zoomSpeed : zoomSpeed;
-      
+
       // Update scale, capping between 0.3 and 1.0
-      this._designScale = Math.max(0.3, Math.min(1.0, this._designScale + delta));
-      
+      this._designScale = Math.max(
+        0.3,
+        Math.min(1.0, this._designScale + delta)
+      );
+
       this.scene.scaleX = this._designScale;
       this.scene.scaleY = this._designScale;
     };
-    
+
     this.canvas.addEventListener("wheel", this._onWheel, { passive: false });
   }
 
@@ -1024,26 +1448,26 @@ class TangramDemo extends Game {
    */
   snapPieceToNearby(piece) {
     const SNAP_THRESHOLD = 25; // Pixels threshold for snapping
-    
+
     const pieceVerts = piece.getWorldVertices();
     if (pieceVerts.length === 0) return;
-    
+
     let bestSnap = null;
     let bestDist = SNAP_THRESHOLD;
-    
+
     // Check all other pieces
     for (const other of this.pieces) {
       if (other === piece) continue;
-      
+
       const otherVerts = other.getWorldVertices();
-      
+
       // Find closest vertex pair
       for (const pv of pieceVerts) {
         for (const ov of otherVerts) {
           const dx = ov.x - pv.x;
           const dy = ov.y - pv.y;
           const dist = Math.sqrt(dx * dx + dy * dy);
-          
+
           if (dist < bestDist) {
             bestDist = dist;
             bestSnap = { dx, dy };
@@ -1051,12 +1475,16 @@ class TangramDemo extends Game {
         }
       }
     }
-    
+
     // Apply snap if found
     if (bestSnap) {
       piece.x += bestSnap.dx;
       piece.y += bestSnap.dy;
-      console.log(`[Snap] Snapped piece by (${bestSnap.dx.toFixed(1)}, ${bestSnap.dy.toFixed(1)})`);
+      console.log(
+        `[Snap] Snapped piece by (${bestSnap.dx.toFixed(
+          1
+        )}, ${bestSnap.dy.toFixed(1)})`
+      );
     }
   }
 
@@ -1096,7 +1524,7 @@ class TangramDemo extends Game {
     for (let i = 0; i < this.pieces.length; i++) {
       const piece = this.pieces[i];
       const target = config.pieces[i];
-      
+
       piece.x = target.x * this.baseSize;
       piece.y = target.y * this.baseSize;
       piece.rotation = target.rotation; // Degrees for engine
@@ -1133,12 +1561,21 @@ ${this.pieces
     const x = (p.x / this.baseSize).toFixed(3);
     const y = (p.y / this.baseSize).toFixed(3);
     // Use our tracked rotation in degrees, or convert from radians
-    const rotDeg = p._rotationDeg !== undefined 
-      ? p._rotationDeg 
-      : (p.rotation * 180 / Math.PI);
+    const rotDeg =
+      p._rotationDeg !== undefined
+        ? p._rotationDeg
+        : (p.rotation * 180) / Math.PI;
     const rot = snapAngle(rotDeg, 45);
+
+    // Include scaleX/scaleY if flipped (not default 1)
+    const sx = p.scaleX ?? 1;
+    const sy = p.scaleY ?? 1;
+    let extras = "";
+    if (sx !== 1) extras += `, scaleX: ${sx}`;
+    if (sy !== 1) extras += `, scaleY: ${sy}`;
+
     // Output raw position (don't use trianglePosition - it expects corner, not centroid)
-    return `    // ${pieceNames[i]}\n    { x: ${x}, y: ${y}, rotation: ${rot} },`;
+    return `    // ${pieceNames[i]}\n    { x: ${x}, y: ${y}, rotation: ${rot}${extras} },`;
   })
   .join("\n")}
   ],
@@ -1150,13 +1587,20 @@ ${this.pieces
 
   /**
    * Apply scene framing (position + scale) for the current configuration.
+   * Offsets scale proportionally with screen size for consistent framing.
    * @param {boolean} animate Whether to tween into the framing
    */
   applySceneView(animate = true) {
     const view = getViewForConfig(this.configuration);
+    
+    // Scale offsets proportionally to screen size (base reference: 800px)
+    const baseSize = 800;
+    const minDim = Math.min(this.width, this.height);
+    const offsetScale = minDim / baseSize;
+    
     const target = {
-      x: this.width / 2 + view.offsetX,
-      y: this.height / 2 + view.offsetY,
+      x: this.width / 2 + view.offsetX * offsetScale,
+      y: this.height / 2 + view.offsetY * offsetScale,
       scaleX: view.scale,
       scaleY: view.scale,
     };
@@ -1179,26 +1623,40 @@ ${this.pieces
     this.nextConfiguration();
     this.assignDistinctColors();
   }
-  
+
   /**
    * Generate distinct colors for all 7 pieces (no duplicates).
-   * Uses evenly spaced hues around the color wheel.
+   * Randomly generates hues ensuring minimum separation, with varied saturation/lightness.
    */
   assignDistinctColors() {
-    // 7 distinct hues evenly spaced (360 / 7 ≈ 51°)
-    const baseHues = [0, 30, 60, 120, 180, 240, 300]; // Red, Orange, Yellow, Green, Cyan, Blue, Magenta
+    const numPieces = this.pieces.length;
+    const minHueSeparation = 30; // Minimum degrees between hues
+    const hues = [];
     
-    // Shuffle the hues
-    const hues = [...baseHues];
+    // Generate random starting hue
+    let currentHue = Math.random() * 360;
+    
+    // Generate 7 distinct hues with random spacing (but at least minHueSeparation apart)
+    for (let i = 0; i < numPieces; i++) {
+      hues.push(currentHue % 360);
+      // Random jump between 40-70 degrees ensures variety while staying distinct
+      currentHue += minHueSeparation + Math.random() * 40;
+    }
+    
+    // Shuffle the hues so adjacent pieces don't always have adjacent colors
     for (let i = hues.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [hues[i], hues[j]] = [hues[j], hues[i]];
     }
-    
-    // Apply to pieces
-    for (let i = 0; i < this.pieces.length; i++) {
-      const hue = hues[i];
-      this.pieces[i].shape.color = `hsl(${hue}, 85%, 55%)`;
+
+    // Apply to pieces with varied saturation and lightness
+    for (let i = 0; i < numPieces; i++) {
+      const hue = Math.round(hues[i]);
+      const saturation = 70 + Math.random() * 25; // 70-95%
+      const lightness = 45 + Math.random() * 20;  // 45-65%
+      const colorValue = `hsl(${hue}, ${saturation.toFixed(0)}%, ${lightness.toFixed(0)}%)`;
+      this.pieces[i].shape.color = colorValue;
+      this.pieces[i].shape.fill = colorValue;
     }
   }
 
@@ -1216,20 +1674,22 @@ ${this.pieces
     for (let i = 0; i < this.pieces.length; i++) {
       const piece = this.pieces[i];
       Tweenetik.killTarget(piece);
-      
+
       // Store original color if not already stored
       if (!piece._originalColor) {
         piece._originalColor = piece.shape.color;
       }
-      
+
       // Random position within the scene bounds
       const targetX = (Math.random() - 0.5) * this.baseSize * 1.2;
       const targetY = (Math.random() - 0.5) * this.baseSize * 1.2;
       const targetRotation = Math.floor(Math.random() * 8) * 45; // Random 45° increments
-      
+
       // Randomize color using Painter.colors
-      piece.shape.color = Painter.colors.randomColorHSL();
-      
+      const randomColor = Painter.colors.randomColorHSL();
+      piece.shape.color = randomColor;
+      piece.shape.fill = randomColor;
+
       Tweenetik.to(
         piece,
         { x: targetX, y: targetY, rotation: targetRotation },
@@ -1239,7 +1699,7 @@ ${this.pieces
       );
     }
   }
-  
+
   /**
    * Restore original colors on all pieces.
    */
@@ -1247,6 +1707,7 @@ ${this.pieces
     for (const piece of this.pieces) {
       if (piece._originalColor) {
         piece.shape.color = piece._originalColor;
+        piece.shape.fill = piece._originalColor;
       }
     }
   }
@@ -1342,26 +1803,50 @@ ${this.pieces
   }
 
   /**
-   * Pick a random configuration with animation (showcase mode).
+   * Shuffle the config indices (Fisher-Yates shuffle).
+   * Ensures all configs are shown before any repeat.
+   */
+  shuffleConfigs() {
+    const count = ALL_CONFIGS.length;
+    this.shuffledIndices = Array.from({ length: count }, (_, i) => i);
+
+    // Fisher-Yates shuffle
+    for (let i = count - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [this.shuffledIndices[i], this.shuffledIndices[j]] = [
+        this.shuffledIndices[j],
+        this.shuffledIndices[i],
+      ];
+    }
+
+    console.log(
+      `[Showcase] Shuffled ${count} configs: ${this.shuffledIndices
+        .map((i) => ALL_CONFIGS[i].name)
+        .join(", ")}`
+    );
+  }
+
+  /**
+   * Advance to next configuration in the shuffle bag (showcase mode).
    */
   nextConfiguration() {
     const count = ALL_CONFIGS.length;
     if (count === 0) return;
 
-    let nextIndex;
-    if (count === 1) {
-      nextIndex = 0;
-    } else {
-      // Pick a different config than current
-      nextIndex = this.configIndex;
-      while (nextIndex === this.configIndex) {
-        nextIndex = Math.floor(Math.random() * count);
-      }
+    // Move to next position in shuffled array
+    this.shufflePosition++;
+
+    // If we've seen all configs, reshuffle
+    if (this.shufflePosition >= count) {
+      this.shuffleConfigs();
+      this.shufflePosition = 0;
     }
 
-    this.configIndex = nextIndex;
+    this.configIndex = this.shuffledIndices[this.shufflePosition];
     this.configuration = ALL_CONFIGS[this.configIndex];
-    console.log(`Assembling: ${this.configuration.name}`);
+    console.log(
+      `Assembling: ${this.configuration.name} (${this.shufflePosition + 1}/${count})`
+    );
     this.applyConfiguration(true);
   }
 
