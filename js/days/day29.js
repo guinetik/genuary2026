@@ -14,6 +14,9 @@
  */
 import { Game, Painter, ToggleButton, Tweenetik, Easing } from "@guinetik/gcanvas";
 
+// Firefox detection - shadowBlur is extremely slow
+const IS_FIREFOX = typeof navigator !== 'undefined' && navigator.userAgent.toLowerCase().includes('firefox');
+
 /**
  * Greek letter names for variants (COVID-style naming)
  */
