@@ -31,6 +31,7 @@ const state = {
   isScrolling: false,
   isProgrammaticScroll: false, // True when we're scrolling via nav/permalink (ignore observer)
   isInitializing: true, // True during initial page load (ignore observer until settled)
+  isFullscreenTransition: false, // True during fullscreen enter/exit (ignore observer)
 };
 
 // ============================================
@@ -59,6 +60,15 @@ async function mountDay(day) {
   // Already mounted or currently mounting? Skip (prevents race condition)
   if (state.games.has(day) || state.mounting.has(day)) {
     return;
+  }
+
+  // IMPORTANT: Unmount ALL other games first - only one should run at a time
+  for (const [otherDay, game] of state.games) {
+    if (otherDay !== day) {
+      console.log(`[Genuary] Unmounting Day ${otherDay} (switching to Day ${day})`);
+      game.stop();
+      state.games.delete(otherDay);
+    }
   }
 
   // Mark as mounting BEFORE async operation
@@ -96,7 +106,7 @@ async function mountDay(day) {
     state.games.set(day, game);
     state.mounting.delete(day);
 
-    console.log(`[Genuary] Mounted Day ${day}`);
+    console.log(`[Genuary] Mounted Day ${day} (only game running)`);
   } catch (err) {
     console.warn(`[Genuary] Day ${day} not implemented:`, err.message);
     state.mounting.delete(day);
@@ -118,6 +128,14 @@ function unmountDay(day) {
   // Stop the game loop
   game.stop();
   state.games.delete(day);
+
+  // Clear the canvas to avoid showing stale content
+  const canvas = document.getElementById(`canvas-${day}`);
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
 
   console.log(`[Genuary] Unmounted Day ${day}`);
 }
@@ -363,8 +381,8 @@ function setupScrollHandling() {
   };
 
   const observer = new IntersectionObserver((entries) => {
-    // Skip during initialization or programmatic scroll
-    if (state.isInitializing || state.isProgrammaticScroll) return;
+    // Skip during initialization, programmatic scroll, or fullscreen transition
+    if (state.isInitializing || state.isProgrammaticScroll || state.isFullscreenTransition) return;
     
     for (const entry of entries) {
       if (entry.isIntersecting && entry.intersectionRatio >= 0.6) {
@@ -391,8 +409,8 @@ function setupScrollHandling() {
 
     state.scrollEndTimeout = setTimeout(() => {
       state.isScrolling = false;
-      // Skip during initialization or programmatic scroll
-      if (!state.isInitializing && !state.isProgrammaticScroll) {
+      // Skip during initialization, programmatic scroll, or fullscreen transition
+      if (!state.isInitializing && !state.isProgrammaticScroll && !state.isFullscreenTransition) {
         handleScrollEnd();
       }
     }, CONFIG.scrollDebounce);
@@ -539,30 +557,45 @@ function toggleFullscreen(day) {
  */
 function handleFullscreenChange() {
   const isFullscreen = !!document.fullscreenElement;
-
-  // If entering fullscreen, resize canvas to fill screen
-  if (isFullscreen && document.fullscreenElement) {
-    const canvas = document.fullscreenElement.querySelector('canvas');
-    if (canvas) {
-      const day = parseInt(canvas.id.replace('canvas-', ''));
-      // Brief delay to let fullscreen settle
-      setTimeout(() => {
-        if (state.games.has(day)) {
-          unmountDay(day);
-          mountDay(day);
-        }
-      }, 100);
+  const day = state.currentDay;
+  
+  // Block scroll handling during fullscreen transition
+  state.isFullscreenTransition = true;
+  
+  // Brief delay to let fullscreen transition settle
+  setTimeout(() => {
+    const canvas = document.getElementById(`canvas-${day}`);
+    if (!canvas) {
+      state.isFullscreenTransition = false;
+      return;
     }
-  } else {
-    // Exiting fullscreen - remount current day
-    setTimeout(() => {
-      const day = state.currentDay;
-      if (state.games.has(day)) {
-        unmountDay(day);
-        mountDay(day);
+    
+    const container = canvas.parentElement;
+    const newWidth = container.clientWidth;
+    const newHeight = container.clientHeight;
+    
+    // Only remount if dimensions actually changed
+    if (canvas.width !== newWidth || canvas.height !== newHeight) {
+      console.log(`[Genuary] Fullscreen ${isFullscreen ? 'enter' : 'exit'} - resizing Day ${day}`);
+      
+      // Remount to handle resize
+      unmountDay(day);
+      mountDay(day);
+    }
+    
+    // When exiting fullscreen, scroll back to the current day (instant, no animation)
+    if (!isFullscreen) {
+      const section = state.sections[day - 1];
+      if (section) {
+        section.scrollIntoView({ behavior: 'instant' });
       }
-    }, 100);
-  }
+    }
+    
+    // Re-enable scroll handling after transition settles
+    setTimeout(() => {
+      state.isFullscreenTransition = false;
+    }, 300);
+  }, 150);
 }
 
 // ============================================
@@ -817,18 +850,9 @@ function setupGridResize() {
   });
 }
 
-// Firefox detection
-const IS_FIREFOX = navigator.userAgent.toLowerCase().includes('firefox');
-
 // Bootstrap
 window.addEventListener('load', () => {
   init();
-  
-  // Skip heavy SVG grid on Firefox - it's too slow
-  if (!IS_FIREFOX) {
-    generateCurvedGrid();
-    setupGridResize();
-  } else {
-    console.log('[Genuary] Firefox detected - skipping SVG grid for performance');
-  }
+  generateCurvedGrid();
+  setupGridResize();
 });
