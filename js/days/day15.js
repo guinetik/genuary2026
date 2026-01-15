@@ -14,34 +14,28 @@
 
 import { Game, Camera3D, Painter, Easing, applyGravitationalLensing, keplerianOmega } from '@guinetik/gcanvas';
 
-// Firefox detection - it struggles with canvas2D composite operations
-const IS_FIREFOX = typeof navigator !== 'undefined' && navigator.userAgent.toLowerCase().includes('firefox');
-
 const CONFIG = {
   // Black hole - size as fraction of screen
   bhRadiusRatio: 0.045, // Smaller ratio = more of disk visible
   bhMass: 1.0,
 
-  // Starfield - base count, scales with screen area (reduced on Firefox)
-  starCountBase: IS_FIREFOX ? 100 : 225,
-  starCountPerMegapixel: IS_FIREFOX ? 300 : 800,
+  // Starfield - base count, scales with screen area
+  starCountBase: 225,
+  starCountPerMegapixel: 800,
   starFieldRadius: 1200,
 
-  // Lensing - proportional to black hole size (disabled on Firefox)
+  // Lensing - proportional to black hole size
   lensRadiusMultiplier: 8,
-  lensStrengthMultiplier: IS_FIREFOX ? 0 : 2.5, // Disable lensing on FF
+  lensStrengthMultiplier: 2.5,
   lensFalloff: 0.007,
   occlusionRadius: 2.6, // Photon sphere multiplier
 
-  // Accretion disk (fewer particles on Firefox)
+  // Accretion disk
   diskInnerRadius: 1.8,  // Multiplier of bhRadius
   diskOuterRadius: 8.0,
-  diskParticles: IS_FIREFOX ? 1200 : 3000,
+  diskParticles: 3000,
   diskThickness: 0.15,
   baseOrbitalSpeed: 0.6,
-  
-  // Glow effects (disabled on Firefox - too slow)
-  enableGlow: !IS_FIREFOX,
 
   // Colors - realistic heat gradient (white-hot to deep red)
   colorHot: { r: 255, g: 250, b: 220 },   // White-hot inner
@@ -74,27 +68,6 @@ class BlackHoleDemo extends Game {
   init() {
     super.init();
     Painter.init(this.ctx);
-    
-    // Performance debugging - enable on Firefox to find bottleneck
-    this._debugPerf = IS_FIREFOX;
-    this._frameCount = 0;
-    this._minimalMode = false; // Set to true to test if game loop is the issue
-    
-    // Log Firefox mode
-    if (IS_FIREFOX) {
-      console.log('[Day15] Firefox/Zen detected - using reduced settings');
-      console.log('[Day15] Performance logging enabled - check console');
-      console.log('[Day15] Press M to toggle minimal mode (tests game loop vs rendering)');
-    }
-    
-    // Keyboard toggle for minimal mode
-    this._onKeyDown = (e) => {
-      if (e.key === 'm' || e.key === 'M') {
-        this._minimalMode = !this._minimalMode;
-        console.log(`[Day15] Minimal mode: ${this._minimalMode ? 'ON (only clear)' : 'OFF (full render)'}`);
-      }
-    };
-    window.addEventListener('keydown', this._onKeyDown);
 
     const minDim = Math.min(this.width, this.height);
     const screenArea = this.width * this.height;
@@ -406,53 +379,21 @@ class BlackHoleDemo extends Game {
     const cx = w / 2;
     const cy = h / 2;
 
-    // Minimal mode - only clear screen to test if game loop is the issue
-    if (this._minimalMode) {
-      ctx.fillStyle = '#000';
-      ctx.fillRect(0, 0, w, h);
-      ctx.fillStyle = '#0f0';
-      ctx.font = '20px monospace';
-      ctx.fillText('MINIMAL MODE - Press M to toggle', 20, 30);
-      ctx.fillText(`Frame: ${this._frameCount}`, 20, 55);
-      return;
-    }
-
-    // Performance timing (toggle with this._debugPerf)
-    const debug = this._debugPerf;
-    let t0, t1, t2, t3, t4;
-    if (debug) t0 = performance.now();
-
     // Motion blur trail
     ctx.fillStyle = 'rgba(0, 0, 0, 0.12)';
     ctx.fillRect(0, 0, w, h);
 
-    if (debug) t1 = performance.now();
-
     // Render starfield with lensing
     this.renderStarfield(ctx, cx, cy);
-
-    if (debug) t2 = performance.now();
 
     // Render falling matter
     this.renderFallingMatter(ctx, cx, cy);
 
-    if (debug) t3 = performance.now();
-
     // Render accretion disk
     this.renderDisk(ctx, cx, cy);
 
-    if (debug) t4 = performance.now();
-
     // Render black hole shadow (the "invisible" object)
     this.renderBlackHole(ctx, cx, cy);
-
-    // Log timing every 60 frames
-    if (debug) {
-      this._frameCount = (this._frameCount || 0) + 1;
-      if (this._frameCount % 60 === 0) {
-        console.log(`[Perf] clear: ${(t1-t0).toFixed(2)}ms | stars: ${(t2-t1).toFixed(2)}ms | matter: ${(t3-t2).toFixed(2)}ms | disk: ${(t4-t3).toFixed(2)}ms | total: ${(t4-t0).toFixed(2)}ms`);
-      }
-    }
   }
 
   renderStarfield(ctx, cx, cy) {
@@ -672,8 +613,8 @@ class BlackHoleDemo extends Game {
         ctx.fill();
       }
 
-      // Collect bright particles for glow pass (skip on Firefox)
-      if (CONFIG.enableGlow && item.doppler > 1.1 && item.alpha > 0.5) {
+      // Collect bright particles for glow pass
+      if (item.doppler > 1.1 && item.alpha > 0.5) {
         glowParticles.push({
           x: px,
           y: py,
@@ -683,8 +624,8 @@ class BlackHoleDemo extends Game {
       }
     }
 
-    // PASS 2: Render all glow particles (skipped on Firefox for performance)
-    if (CONFIG.enableGlow && glowParticles.length > 0) {
+    // PASS 2: Render all glow particles
+    if (glowParticles.length > 0) {
       ctx.globalCompositeOperation = 'lighter';
       for (const glow of glowParticles) {
         ctx.fillStyle = glow.color;
@@ -774,14 +715,12 @@ class BlackHoleDemo extends Game {
       const stretchLen = baseSize * stretch;
       const stretchWidth = baseSize * squeeze;
 
-      // Collect for batched rendering (skip glow on Firefox)
-      if (CONFIG.enableGlow) {
-        glowParticles.push({
-          x: screenX, y: screenY, angle,
-          w: stretchLen * 1.5, h: stretchWidth * 2,
-          color: this._getRgba(r, g, b, alpha * 0.2),
-        });
-      }
+      // Collect for batched rendering
+      glowParticles.push({
+        x: screenX, y: screenY, angle,
+        w: stretchLen * 1.5, h: stretchWidth * 2,
+        color: this._getRgba(r, g, b, alpha * 0.2),
+      });
 
       coreParticles.push({
         x: screenX, y: screenY, angle,
@@ -799,8 +738,8 @@ class BlackHoleDemo extends Game {
       }
     }
 
-    // PASS 1: All glow particles (skipped on Firefox for performance)
-    if (CONFIG.enableGlow && glowParticles.length > 0) {
+    // PASS 1: All glow particles
+    if (glowParticles.length > 0) {
       ctx.globalCompositeOperation = 'lighter';
       for (const p of glowParticles) {
         ctx.fillStyle = p.color;
@@ -861,13 +800,7 @@ export default function day15(canvas) {
   game.start();
 
   return {
-    stop: () => {
-      // Clean up keyboard listener
-      if (game._onKeyDown) {
-        window.removeEventListener('keydown', game._onKeyDown);
-      }
-      game.stop();
-    },
+    stop: () => game.stop(),
     game
   };
 }
