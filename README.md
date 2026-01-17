@@ -64,7 +64,7 @@ genuary2026/
 │   └── days/
 │       ├── day01.js  # Daily implementations
 │       └── ...
-├── kernels/          # WebGL compute shader kernels
+├── kernels/          # Experimental studies and unused prompt scripts (archived for future use)
 ├── docs/             # Implementation documentation
 └── public/           # Static assets
 ```
