@@ -25,52 +25,7 @@ import {
   Shape,
   Cloud,
   Painter,
-  heatTransferFalloff,
 } from "@guinetik/gcanvas";
-
-/**
- * Apply heat transfer between nearby particles.
- * (Temporary local copy until npm link works)
- */
-function applyParticleHeatTransfer(particles, options = {}) {
-  const {
-    maxDistance = 50,
-    rate = 0.01,
-    falloff = 1,
-    temperatureKey = 'temperature',
-    filter = null,
-  } = options;
-
-  const n = particles.length;
-  const maxDist2 = maxDistance * maxDistance;
-
-  for (let i = 0; i < n; i++) {
-    const pi = particles[i];
-    if (filter && !filter(pi)) continue;
-    if (pi.custom[temperatureKey] === undefined) pi.custom[temperatureKey] = 0.5;
-
-    for (let j = i + 1; j < n; j++) {
-      const pj = particles[j];
-      if (filter && !filter(pj)) continue;
-      if (pj.custom[temperatureKey] === undefined) pj.custom[temperatureKey] = 0.5;
-
-      const dx = pi.x - pj.x;
-      const dy = pi.y - pj.y;
-      const dist2 = dx * dx + dy * dy;
-      if (dist2 >= maxDist2 || dist2 < 0.0001) continue;
-
-      const dist = Math.sqrt(dist2);
-      const delta = heatTransferFalloff(
-        pi.custom[temperatureKey],
-        pj.custom[temperatureKey],
-        dist, maxDistance, rate, falloff
-      );
-
-      pi.custom[temperatureKey] = Math.max(0, Math.min(1, pi.custom[temperatureKey] + delta));
-      pj.custom[temperatureKey] = Math.max(0, Math.min(1, pj.custom[temperatureKey] - delta));
-    }
-  }
-}
 
 /**
  * Ellipse shape - not built into gcanvas, so we create our own
@@ -148,7 +103,8 @@ class Demon extends GameObject {
     // Animation state
     this.eyeAngle = 0;          // -0.5 to 0.5, where to look
     this.mouthOpen = 0;         // 0-1 how open the mouth is
-    this.puff = 1;              // Scale multiplier for "puffed up" state
+    this.puff = 1;              // Base scale multiplier for "puffed up" state
+    this.squash = 0;            // -1 to 1: negative = tall/thin, positive = wide/flat
     this.spitEffect = { active: false, direction: 0, timer: 0 };
 
     // Build the demon composition
@@ -278,7 +234,7 @@ class Demon extends GameObject {
   startSpitEffect(direction) {
     this.spitEffect.active = true;
     this.spitEffect.direction = direction;
-    this.spitEffect.timer = 0.2;
+    this.spitEffect.timer = 0.08;  // Quick spit visual
   }
 
   update(dt) {
@@ -296,25 +252,45 @@ class Demon extends GameObject {
   draw() {
     super.draw();
 
-    // Apply puff scale
+    // Apply puff scale with squash/stretch (12 principles of animation!)
+    // squash > 0 = wide and flat (inhaling), squash < 0 = tall and thin (exhaling)
+    // More dramatic deformation for metaball/organic feel
+    const scaleX = this.puff * (1 + this.squash * 0.35);
+    const scaleY = this.puff * (1 - this.squash * 0.28);
+    
     Painter.save();
-    Painter.ctx.scale(this.puff, this.puff);
+    Painter.ctx.scale(scaleX, scaleY);
 
     // Render the body group
     this.body.render();
 
     Painter.restore();
+    // Spit lines are drawn separately via drawSpitEffect() after particles
+  }
 
-    // Draw spit motion lines (need raw ctx for these lines)
-    if (this.spitEffect.active) {
-      this._drawSpitLines();
-    }
+  /**
+   * Draw spit motion lines - call this AFTER particles render so it appears on top
+   */
+  drawSpitEffect() {
+    if (!this.spitEffect.active) return;
+    
+    const ctx = Painter.ctx;
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    
+    // Apply the same scale as the body so lines match the mouth position
+    const scaleX = this.puff * (1 + this.squash * 0.35);
+    const scaleY = this.puff * (1 - this.squash * 0.28);
+    ctx.scale(scaleX, scaleY);
+    
+    this._drawSpitLines();
+    ctx.restore();
   }
 
   _drawSpitLines() {
     const dir = this.spitEffect.direction;
-    const mouthY = 10;
-    const alpha = this.spitEffect.timer / 0.2;
+    const mouthY = 14;  // Match the open mouth position (y: 12 + a bit lower)
+    const alpha = this.spitEffect.timer / 0.08;  // Match timer duration
     const ctx = Painter.ctx;
 
     ctx.strokeStyle = `rgba(255, 255, 255, ${alpha * 0.9})`;
@@ -322,11 +298,12 @@ class Demon extends GameObject {
     ctx.lineCap = "round";
 
     for (let i = 0; i < 3; i++) {
-      const offsetY = (i - 1) * 6;
-      const lineLength = 20 + i * 8;
+      const offsetY = (i - 1) * 5;
+      const lineLength = 15 + i * 6;
       ctx.beginPath();
-      ctx.moveTo(dir * 12, mouthY + offsetY * 0.3);
-      ctx.lineTo(dir * (12 + lineLength), mouthY + offsetY);
+      // Start closer to the mouth edge
+      ctx.moveTo(dir * 6, mouthY + offsetY * 0.3);
+      ctx.lineTo(dir * (6 + lineLength), mouthY + offsetY);
       ctx.stroke();
     }
   }
@@ -350,8 +327,8 @@ class ThoughtBubble extends GameObject {
   }
 
   _buildShapes() {
-    // Main cloud bubble - big enough for "YOU ARE ALL FREE NOW"
-    this.cloud = new Cloud(70, {
+    // Main cloud bubble - smaller with multiline text
+    this.cloud = new Cloud(50, {
       color: "rgba(255, 255, 255, 0.95)",
     });
 
@@ -388,12 +365,19 @@ class ThoughtBubble extends GameObject {
     // Draw main cloud
     this.cloud.render();
 
-    // Draw text inside bubble
+    // Draw text inside bubble (supports multiline with \n)
     ctx.fillStyle = "#333";
     ctx.font = "bold 10px 'Fira Code', monospace";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(this.text, 0, 0);
+    
+    const lines = this.text.split('\n');
+    const lineHeight = 12;
+    const startY = -((lines.length - 1) * lineHeight) / 2;
+    
+    for (let i = 0; i < lines.length; i++) {
+      ctx.fillText(lines[i], 0, startY + i * lineHeight);
+    }
 
     ctx.globalAlpha = 1;
   }
@@ -403,10 +387,10 @@ const CONFIG = {
   particleSize: 20,  // 30% smaller
   // maxParticles calculated dynamically based on screen size
   // @ 1080p, scales proportionally
-  baseParticles: 200,
+  baseParticles: 1000,
   baseArea: 1920 * 1080,  // 1080p reference
-  minParticles: 100,
-  maxParticles: 300,
+  minParticles: 500,
+  maxParticles: 3000,  // Allow more on 4K screens
   gravity: 0,  // No gravity - pure gas
   container: {
     marginX: 0,
@@ -416,24 +400,24 @@ const CONFIG = {
   wall: {
     width: 8,
   },
-  // Particle-to-particle heat transfer (uses applyParticleHeatTransfer from gcanvas)
-  heatTransfer: {
-    maxDistance: 36,        // Particles must be this close to exchange heat
-    rateEntropy: 0.015,     // Heat transfer rate during entropy (mixing)
-    rateSorting: 0.002,     // Much slower while demon sorts (insulated boxes)
-    falloff: 1,             // Linear falloff (2 = quadratic)
-  },
+  // NO heat transfer - particles keep their random initial temperatures
+  // This matches Maxwell's Demon concept: demon sorts by inherent particle speed
+  // Heat zones also disabled - temps are fixed at spawn
   // Demon AI settings
   demon: {
-    tempThreshold: 0.5,   // Particles hotter than this are "hot"
-    detectionRange: 600,  // How far demon can see (whole chamber)
-    gobbleCooldown: 0.2,  // Seconds between gobbles
+    tempThreshold: 0.5,   // Particles hotter than this are "hot" (0.5 = balanced 50/50)
+    gobbleCooldown: 0.15, // Seconds between gobbles (faster sorting!)
+    batchPercent: 0.02,   // Gobble this % of total particles at once (2% = 20 per 1000)
+    minBatch: 5,          // Minimum particles per gobble
+    maxBatch: 50,         // Maximum particles per gobble (tripled on 2K+ screens)
+    largeScreenWidth: 2560, // Width threshold for "large screen"
   },
   // Phase timings
   phases: {
     entropyDuration: 10,    // Seconds of entropy before demon arrives
-    exhaustedDuration: 4,   // Seconds showing thought bubble
-    departureDuration: 2,   // Seconds for departure animation
+    exhaustedDuration: 10,  // Seconds showing sorted chambers + thought bubble ("FREE NOW")
+    departureDuration: 5,   // Seconds for departure - particles are FREE!
+    colorTransitionTime: 2, // Seconds to fade from true colors to gradient at entropy start
   },
 };
 
@@ -455,11 +439,9 @@ class Day16Demo extends Game {
     // Gobble state (demon animation is now on the Demon object)
     this.spitDirection = 0;
     this.gobbleFromDirection = 0;  // Which side we're gobbling from
-    this.gobbleTarget = null;
-    this.gobbleStartX = 0;
-    this.gobbleStartY = 0;
-    this.gobbleProgress = 0;  // 0-1 for mouth sync
-    this.gobbleDuration = 0.3;  // Dynamic based on distance
+    this.gobbleTargets = [];       // Array of particles being gobbled (batch mode!)
+    this.gobbleProgress = 0;       // 0-1 for mouth sync
+    this.gobbleDuration = 0.3;     // Dynamic based on distance
     this.gobbleStateTimer = 0;
 
     // Phase state machine - the main narrative loop
@@ -498,29 +480,47 @@ class Day16Demo extends Game {
       states: {
         idle: {
           enter: () => {
-            this.gobbleTarget = null;
+            this.gobbleTargets = [];
             this.gobbleProgress = 0;
-            this.gobbleStateTimer = 0.15;  // Quick pause before next
+            this.gobbleStateTimer = 0.02;  // Almost instant - demon is FAST
             if (this.demon) {
               this.demon.setMouthOpen(0);
+              this.demon.puff = 1;
+              this.demon.squash = 0;
             }
           },
           update: (dt) => this._idleUpdate(dt),
         },
         gobbling: {
           enter: () => {
-            // Calculate duration based on distance (faster)
-            const dx = this.gobbleStartX - this.wallX;
-            const dy = this.gobbleStartY - (this.bounds.y + this.bounds.h / 2);
-            const dist = Math.sqrt(dx * dx + dy * dy);
-            const minTime = 0.08;
-            const maxTime = 0.25;
-            const maxDist = CONFIG.demon.detectionRange;
-            this.gobbleDuration = minTime + (dist / maxDist) * (maxTime - minTime);
+            const demonY = this.bounds.y + this.bounds.h / 2;
+            
+            // Sort particles by distance (closest first) and assign stagger delay
+            this.gobbleTargets.forEach((p, i) => {
+              const dx = p.x - this.wallX;
+              const dy = p.y - demonY;
+              p._gobbleDist = Math.sqrt(dx * dx + dy * dy);
+            });
+            this.gobbleTargets.sort((a, b) => a._gobbleDist - b._gobbleDist);
+            
+            // Assign stagger start times - each particle starts 0.03s after previous
+            const staggerDelay = 0.03;
+            this.gobbleTargets.forEach((p, i) => {
+              p._gobbleDelay = i * staggerDelay;
+              p._arrived = false;
+            });
+            
+            // Total duration = last particle's delay + time to travel
+            const lastDelay = (this.gobbleTargets.length - 1) * staggerDelay;
+            this.gobbleDuration = lastDelay + 0.15;  // Base travel time
+            this.gobbleElapsed = 0;
 
-            // Puff up like Kirby - animate on the Demon object
+            // Calculate target puff based on batch size
+            this.targetPuff = 1.3 + this.gobbleTargets.length * 0.02;
+            
+            // Smooth anticipation squash (gets wider as mouth opens to inhale)
             if (this.demon) {
-              Tweenetik.to(this.demon, { puff: 1.4 }, this.gobbleDuration, Easing.easeOutQuad);
+              Tweenetik.to(this.demon, { squash: 0.5 }, 0.15, Easing.easeOutQuad);
             }
             this.gobbleStateTimer = this.gobbleDuration;
           },
@@ -532,18 +532,41 @@ class Day16Demo extends Game {
             if (this.demon) {
               this.demon.setMouthOpen(0);  // Close mouth while holding
             }
-            this.gobbleStateTimer = 0.25;
+            this.gobbleStateTimer = 0.05;  // Brief hold
           },
           update: (dt) => this._holdingUpdate(dt),
         },
         spitting: {
           enter: () => {
-            this._doSpit();
-            // Deflate - animate on the Demon object
+            // Re-sort gobbleTargets so hot particles come first, then cold
+            // (gobbling state sorts by distance which messes up our hot/cold ordering)
+            this.gobbleTargets.sort((a, b) => {
+              const aHot = a.custom.isHot ? 1 : 0;
+              const bHot = b.custom.isHot ? 1 : 0;
+              return bHot - aHot;  // Hot first (1 before 0)
+            });
+            
+            // Recount hot/cold after re-sort
+            this.hotInBatch = this.gobbleTargets.filter(p => p.custom.isHot).length;
+            this.coldInBatch = this.gobbleTargets.length - this.hotInBatch;
+            
+            // Setup staggered spit timing
+            this.spitElapsed = 0;
+            this.spitIndex = 0;
+            const staggerDelay = 0.03;  // Time between each spit
+            const pauseBetweenGroups = 0.5;  // Clear pause when switching from hot to cold
+            // Add pause time if we have both hot and cold particles
+            const hasBothTypes = this.hotInBatch > 0 && this.coldInBatch > 0;
+            this.spitDuration = this.gobbleTargets.length * staggerDelay + (hasBothTypes ? pauseBetweenGroups : 0) + 0.05;
+            this.gobbleStateTimer = this.spitDuration;
+
+            // Start spitting - will deflate progressively
             if (this.demon) {
-              Tweenetik.to(this.demon, { puff: 1 }, 0.1, Easing.easeOutQuad);
+              this.demon.setMouthOpen(1);
+              this.demon.startSpitEffect(this.spitDirection);
+              // Smooth squeeze (tall/thin) as it pushes particles out
+              Tweenetik.to(this.demon, { squash: -0.8 }, 0.1, Easing.easeOutBack);
             }
-            this.gobbleStateTimer = 0.2;
           },
           update: (dt) => this._spittingUpdate(dt),
         },
@@ -571,7 +594,7 @@ class Day16Demo extends Game {
     );
     console.log(`[Day16] Canvas: ${this.width}x${this.height}, particles: ${this.particleCount}`);
 
-    // FluidSystem in gas mode - we handle heat transfer ourselves
+    // FluidSystem - disable ALL built-in thermal features
     this.fluid = new FluidSystem(this, {
       maxParticles: this.particleCount,
       particleSize: CONFIG.particleSize,
@@ -581,7 +604,9 @@ class Day16Demo extends Game {
       physics: "gas",
       debug: false,
       gravity: CONFIG.gravity,
-      heat: { enabled: false },  // Disable built-in heat zones
+      heat: { enabled: false },           // Disable built-in heat zones
+      thermalEquilibrium: false,          // Disable thermal equilibrium
+      heatTransfer: { enabled: false },   // Disable particle-to-particle heat
       particleColor: { r: 255, g: 255, b: 255, a: 0.9 },
     });
 
@@ -590,10 +615,13 @@ class Day16Demo extends Game {
 
     // Initialize particle custom data
     this._initParticles();
+    
+    // Debug: count initial hot/cold distribution (using fixedTemp)
+    const hotCount = this.fluid.particles.filter(p => p.custom.fixedTemp > 0.5).length;
+    const coldCount = this.fluid.particles.length - hotCount;
+    console.log(`[Day16] Initial fixedTemps: ${hotCount} hot, ${coldCount} cold (${(hotCount/this.fluid.particles.length*100).toFixed(1)}% hot)`);
 
-    this.pipeline.add(this.fluid);
-
-    // Create the Demon game object (initially hidden)
+    // Create the Demon game object (initially hidden) - RENDERED FIRST (behind particles)
     this.demon = new Demon(this, {
       x: this.wallX,
       y: this.bounds.y + this.bounds.h / 2,
@@ -601,6 +629,9 @@ class Day16Demo extends Game {
       visible: false,  // Start hidden until arrival animation
     });
     this.pipeline.add(this.demon);
+
+    // Particles AFTER demon so they render on top (visible going into mouth)
+    this.pipeline.add(this.fluid);
 
     // Create thought bubble (positioned above demon)
     this.thoughtBubble = new ThoughtBubble(this, {
@@ -615,6 +646,72 @@ class Day16Demo extends Game {
     // Manually trigger initial state enter (StateMachine may not auto-call it)
     this._enterEntropy();
     console.log("[Day16] Init complete, starting entropy phase");
+    
+    // Click anywhere to restart from scratch (useful for recording in fullscreen)
+    this.canvas.addEventListener('click', () => this._restartSimulation());
+  }
+  
+  /**
+   * Restart the simulation from scratch - resets everything to initial state.
+   * Particles start from center and expand outward like a container opening.
+   * Useful for recording after entering fullscreen.
+   */
+  _restartSimulation() {
+    console.log("[Day16] Restarting simulation...");
+    
+    // Center of the container
+    const centerX = this.bounds.x + this.bounds.w / 2;
+    const centerY = this.bounds.y + this.bounds.h / 2;
+    
+    // Reset all particles with fresh random temperatures, starting from center
+    for (const p of this.fluid.particles) {
+      const temp = 0.1 + Math.random() * 0.8;
+      p.custom.temperature = temp;
+      p.custom.fixedTemp = temp;
+      p.custom.sorted = false;
+      p.size = CONFIG.particleSize;  // Full size
+      
+      // Start clustered near center with small random offset
+      const spawnRadius = 30 + Math.random() * 50;
+      const spawnAngle = Math.random() * Math.PI * 2;
+      p.x = centerX + Math.cos(spawnAngle) * spawnRadius;
+      p.y = centerY + Math.sin(spawnAngle) * spawnRadius;
+      
+      // Outward velocity - expands from center like a container opening
+      const speed = 100 + Math.random() * 200;
+      const velAngle = spawnAngle + (Math.random() - 0.5) * 0.5; // Mostly outward with some spread
+      p.vx = Math.cos(velAngle) * speed;
+      p.vy = Math.sin(velAngle) * speed;
+    }
+    
+    // Reset demon
+    if (this.demon) {
+      this.demon.alpha = 0;
+      this.demon.puff = 1;
+      this.demon.squash = 0;
+      this.demon.setMouthOpen(0);
+    }
+    
+    // Reset thought bubble
+    if (this.thoughtBubble) {
+      this.thoughtBubble.alpha = 0;
+    }
+    
+    // Reset visuals
+    this.visuals = {
+      leftBgAlpha: 0,
+      rightBgAlpha: 0,
+      wallProgress: 0,
+    };
+    
+    // Reset gobble state
+    this.gobbleTargets = [];
+    this.gobbleProgress = 0;
+    this.demonArrived = false;
+    
+    // Reset to entropy phase
+    this.phaseState.setState("entropy");
+    this._enterEntropy();
   }
 
   /**
@@ -625,8 +722,11 @@ class Day16Demo extends Game {
   _initParticles() {
     for (const p of this.fluid.particles) {
       // Random temperature [0.1-0.9] creates initial disorder
-      p.custom.temperature = 0.1 + Math.random() * 0.8;
-      p.custom.sorted = false;  // Not yet processed by demon
+      // Store in BOTH temperature (for color) AND fixedTemp (permanent, for classification)
+      const temp = 0.1 + Math.random() * 0.8;
+      p.custom.temperature = temp;
+      p.custom.fixedTemp = temp;  // FluidSystem can't touch this!
+      p.custom.sorted = false;
     }
   }
 
@@ -649,20 +749,14 @@ class Day16Demo extends Game {
 
     super.update(dt);
 
-    // Apply particle-to-particle heat transfer (excludes sorted particles)
-    // Slower rate when demon is sorting (insulated boxes)
-    const heatRate = this.demonArrived
-      ? CONFIG.heatTransfer.rateSorting
-      : CONFIG.heatTransfer.rateEntropy;
+    // NO heat transfer during entropy - particles keep their initial random temperatures
+    // This matches the Maxwell's Demon concept: demon sorts by inherent particle speed,
+    // not by a changing temperature. Heat zones also disabled.
+    // The demon's job is to CREATE order from disorder, not maintain it.
+    
+    // Debug removed - fixedTemp is now used for classification
 
-    applyParticleHeatTransfer(this.fluid.particles, {
-      maxDistance: CONFIG.heatTransfer.maxDistance,
-      rate: heatRate,
-      falloff: CONFIG.heatTransfer.falloff,
-      filter: (p) => !p.custom.sorted && p !== this.gobbleTarget,
-    });
-
-    // Lock sorted particle temperatures (FluidSystem zones may have touched them)
+    // Lock sorted particle temperatures (demon-processed particles stay locked)
     this._lockSortedTemperatures();
 
     // Color particles by temperature
@@ -737,6 +831,18 @@ class Day16Demo extends Game {
   _enterSorting() {
     this.phaseTimer = 0;
     this.gobbleState.setState("idle");  // Reset gobble state
+    
+    // Debug: count distribution using fixedTemp
+    let hotOnLeft = 0, coldOnLeft = 0, hotOnRight = 0, coldOnRight = 0;
+    for (const p of this.fluid.particles) {
+      const isHot = (p.custom.fixedTemp ?? p.custom.temperature) > 0.5;
+      const onLeft = p.x < this.wallX;
+      if (onLeft && isHot) hotOnLeft++;
+      else if (onLeft && !isHot) coldOnLeft++;
+      else if (!onLeft && isHot) hotOnRight++;
+      else coldOnRight++;
+    }
+    console.log(`[Day16] Sorting start (fixedTemp): LEFT: ${hotOnLeft} hot + ${coldOnLeft} cold | RIGHT: ${hotOnRight} hot + ${coldOnRight} cold`);
   }
 
   _updateSorting(dt) {
@@ -747,7 +853,7 @@ class Day16Demo extends Game {
     this.gobbleState.update(dt);
 
     // Only check if sorted when demon is idle (not mid-gobble/spit)
-    const isIdle = this.gobbleState.currentState === "idle" && !this.gobbleTarget;
+    const isIdle = this.gobbleState.currentState === "idle" && this.gobbleTargets.length === 0;
 
     if (isIdle && this._checkAllSorted()) {
       console.log("[Day16] All sorted! Transitioning to exhausted");
@@ -771,7 +877,7 @@ class Day16Demo extends Game {
     // The iconic line
     if (this.thoughtBubble) {
       console.log("[Day16] Setting bubble text and alpha");
-      this.thoughtBubble.text = "YOU ARE ALL FREE NOW";
+      this.thoughtBubble.text = "YOU ARE\nALL FREE\nNOW";
       this.thoughtBubble.alpha = 1;  // Set directly instead of tween for debug
     }
   }
@@ -838,6 +944,7 @@ class Day16Demo extends Game {
    * Check if all particles have been sorted by the demon
    */
   _checkAllSorted() {
+    // ALL particles must have been gobbled and spit by the demon
     for (const p of this.fluid.particles) {
       if (!p.custom.sorted) {
         return false;
@@ -847,7 +954,8 @@ class Day16Demo extends Game {
   }
 
   /**
-   * Randomize particle velocities and reset sorted flag to restore entropy
+   * Randomize particle velocities and reset sorted flag to restore entropy.
+   * Temperatures are KEPT - particles retain their hot/cold identity.
    */
   _randomizeParticleVelocities() {
     for (const p of this.fluid.particles) {
@@ -856,7 +964,8 @@ class Day16Demo extends Game {
       p.vx = Math.cos(angle) * speed;
       p.vy = Math.sin(angle) * speed;
       p.custom.sorted = false;  // Back to unsorted state
-      p.custom.temperature = 0.1 + Math.random() * 0.8;  // Random temperature
+      // Keep temperatures! Particles retain their identity across cycles
+      // The visual will transition from true colors back to gradient via color blend
     }
   }
 
@@ -869,8 +978,8 @@ class Day16Demo extends Game {
     const wallHalfWidth = CONFIG.wall.width / 2;
 
     for (const p of this.fluid.particles) {
-      // Skip the particle being gobbled - it needs to reach the mouth
-      if (p === this.gobbleTarget) continue;
+      // Skip particles being gobbled - they need to reach the mouth
+      if (this.gobbleTargets.includes(p)) continue;
 
       const dx = p.x - wallX;
 
@@ -889,10 +998,10 @@ class Day16Demo extends Game {
   }
 
   /**
-   * Idle state - look for wrong particles to gobble
+   * Idle state - look for wrong particles to gobble (BATCH MODE - grabs multiple!)
    */
   _idleUpdate(dt) {
-    // Wait for cooldown before looking for next particle
+    // Wait for cooldown before looking for next batch
     this.gobbleStateTimer -= dt;
     if (this.gobbleStateTimer > 0) {
       // Slowly return eyes to center
@@ -903,72 +1012,102 @@ class Day16Demo extends Game {
       return;
     }
 
-    const { detectionRange, tempThreshold } = CONFIG.demon;
+    const { tempThreshold, batchPercent, minBatch, maxBatch, largeScreenWidth } = CONFIG.demon;
 
-    // Find the nearest "wrong" particle (unsorted only)
-    let target = null;
-    let minDist = Infinity;
-    let targetIsHot = false;
+    // Calculate batch size based on total particles
+    // Triple the max on 2K+ screens to speed up sorting
+    const isLargeScreen = this.width >= largeScreenWidth;
+    const effectiveMaxBatch = isLargeScreen ? maxBatch * 3 : maxBatch;
+    const totalParticles = this.fluid.particles.length;
+    const batchSize = Math.min(effectiveMaxBatch, Math.max(minBatch, Math.floor(totalParticles * batchPercent)));
 
-    // Also track any unsorted particle as a fallback (straggler)
-    let straggler = null;
-    let stragglerIsHot = false;
+    // Collect ALL wrong particles from each side (no distance limit!)
+    const wrongOnRight = [];  // Hot particles on cold side (need to go left)
+    const wrongOnLeft = [];   // Cold particles on hot side (need to go right)
+    const stragglers = [];    // Unsorted particles already on correct side
 
     for (const p of this.fluid.particles) {
-      // Skip already sorted particles
-      if (p.custom.sorted) continue;
-
       const dx = p.x - this.wallX;
       const distToWall = Math.abs(dx);
-
-      // Determine hot/cold based on stored TEMPERATURE
-      const temp = p.custom.temperature ?? 0.5;
+      // Use fixedTemp for classification - FluidSystem can't change this!
+      const temp = p.custom.fixedTemp ?? p.custom.temperature ?? 0.5;
       const isHot = temp > tempThreshold;
-
-      // Track as straggler - ANY unsorted particle (no range limit)
-      if (!straggler) {
-        straggler = p;
-        stragglerIsHot = isHot;
-      }
-
-      // For "wrong" detection, use range limit
-      if (distToWall > detectionRange) continue;
-
       const onRightSide = dx > 0;
-      const onLeftSide = dx < 0;
-      const isWrong = (isHot && onRightSide) || (!isHot && onLeftSide);
+      
+      // Hot particles should be on LEFT, cold on RIGHT
+      const isWrong = (isHot && onRightSide) || (!isHot && !onRightSide);
 
-      if (isWrong && distToWall < minDist) {
-        minDist = distToWall;
-        target = p;
-        targetIsHot = isHot;
+      if (isWrong) {
+        // Wrong side - needs to be moved (even if previously sorted!)
+        if (onRightSide) {
+          wrongOnRight.push({ p, dist: distToWall, isHot, onRight: true });
+        } else {
+          wrongOnLeft.push({ p, dist: distToWall, isHot, onRight: false });
+        }
+      } else if (!p.custom.sorted) {
+        // Correct side but not yet marked sorted - straggler
+        stragglers.push({ p, dist: distToWall, isHot, onRight: onRightSide });
       }
+      // If sorted AND on correct side, skip entirely
     }
 
-    // If no "wrong" particle found, grab a straggler anyway
-    // (particles near threshold that ended up on the "correct" side by chance)
-    if (!target && straggler) {
-      target = straggler;
-      targetIsHot = stragglerIsHot;
+    // Sort each side by distance (closest to wall first)
+    wrongOnRight.sort((a, b) => a.dist - b.dist);
+    wrongOnLeft.sort((a, b) => a.dist - b.dist);
+    stragglers.sort((a, b) => a.dist - b.dist);
+
+    // PICK FROM BOTH SIDES AT ONCE - demon spits hot left AND cold right simultaneously!
+    // wrongOnRight = HOT particles stuck on cold side (need to go LEFT)
+    // wrongOnLeft = COLD particles stuck on hot side (need to go RIGHT)
+    let batch = [];
+    let focusSide = 0;
+    
+    if (wrongOnRight.length > 0 || wrongOnLeft.length > 0) {
+      // Split batch between both sides for simultaneous sorting
+      const halfBatch = Math.ceil(batchSize / 2);
+      
+      // Take from both sides
+      const fromRight = wrongOnRight.slice(0, halfBatch);  // Hot particles to send left
+      const fromLeft = wrongOnLeft.slice(0, halfBatch);    // Cold particles to send right
+      
+      // Combine into one mixed batch
+      batch = [...fromRight, ...fromLeft];
+      
+      // Focus on the side with more particles (for eye direction)
+      focusSide = fromRight.length >= fromLeft.length ? 1 : -1;
+    }
+    
+    // If no wrong particles, grab stragglers to finish up
+    if (batch.length === 0 && stragglers.length > 0) {
+      batch = stragglers.slice(0, batchSize);
+      focusSide = batch[0].onRight ? 1 : -1;
     }
 
-    if (target) {
-      // Found a target - start gobbling
-      this.gobbleTarget = target;
+    if (batch.length > 0) {
+      // Sort batch so all hot particles come first, then cold
+      // This way demon spits all to one side, then the other (door can only open one way!)
+      batch.sort((a, b) => (b.isHot ? 1 : 0) - (a.isHot ? 1 : 0));
+      
+      // Found targets - prepare batch for gobbling
+      this.gobbleTargets = batch.map(item => {
+        item.p.custom.isHot = item.isHot;
+        // Store start position so particles stay put until their turn
+        item.p._startX = item.p.x;
+        item.p._startY = item.p.y;
+        return item.p;
+      });
+      
+      // Count hot vs cold for spit direction changes
+      this.hotInBatch = batch.filter(b => b.isHot).length;
+      this.coldInBatch = batch.length - this.hotInBatch;
 
-      // Lock the temperature decision NOW (based on current speed)
-      target.custom.isHot = targetIsHot;
+      // Direction is based on focused side
+      this.gobbleFromDirection = focusSide;
 
-      // Determine which side particle is on and where to spit
-      const particleOnRight = target.x > this.wallX;
-      this.gobbleFromDirection = particleOnRight ? 1 : -1;  // 1 = right, -1 = left
-      this.spitDirection = targetIsHot ? -1 : 1;    // Hot→left, Cold→right
+      // Start spitting hot (left) if we have any, otherwise cold (right)
+      this.spitDirection = this.hotInBatch > 0 ? -1 : 1;
 
-      // Store original position for inhale animation
-      this.gobbleStartX = target.x;
-      this.gobbleStartY = target.y;
-
-      // Look toward the particle (where it's coming from)
+      // Look toward the particles
       if (this.demon) {
         this.demon.setEyeAngle(this.gobbleFromDirection * 0.5);
       }
@@ -985,65 +1124,134 @@ class Day16Demo extends Game {
   }
 
   /**
-   * Gobbling state - suck particle toward mouth with force
+   * Gobbling state - suck particles toward mouth with STAGGERED timing!
    */
   _gobblingUpdate(dt) {
     this.gobbleStateTimer -= dt;
+    this.gobbleElapsed += dt;
     const progress = Math.min(1, Math.max(0, 1 - (this.gobbleStateTimer / this.gobbleDuration)));
 
     // Store progress for mouth animation sync
     this.gobbleProgress = progress;
 
-    // Update demon mouth opening
+    // Update demon - mouth opens, body puffs up as particles arrive (Kirby style!)
     if (this.demon) {
-      this.demon.setMouthOpen(progress * progress);  // Ease in the opening
+      const arrivedCount = this.gobbleTargets.filter(p => p._arrived).length;
+      const totalCount = this.gobbleTargets.length;
+      const arrivalProgress = totalCount > 0 ? arrivedCount / totalCount : 0;
+      
+      // Mouth opens as particles arrive
+      const mouthOpen = Math.min(1, arrivedCount * 0.15 + progress * 0.3);
+      this.demon.setMouthOpen(mouthOpen);
+      
+      // Puff grows progressively as each particle arrives
+      const basePuff = 1.0;
+      const maxPuff = this.targetPuff || 1.5;
+      const targetPuff = basePuff + (maxPuff - basePuff) * arrivalProgress;
+      
+      // Smoothly lerp puff (not instant)
+      this.demon.puff += (targetPuff - this.demon.puff) * 0.15;
+      
+      // Squash effect - smoothly lerp to target (gets rounder/wider as filling up)
+      const targetSquash = 0.4 + arrivalProgress * 0.6;
+      this.demon.squash += (targetSquash - this.demon.squash) * 0.12;
     }
 
-    // Apply suction force toward mouth
-    if (this.gobbleTarget) {
-      const demonY = this.bounds.y + this.bounds.h / 2;
-      const mouthX = this.wallX;
-      const mouthY = demonY + 14;
+    const demonY = this.bounds.y + this.bounds.h / 2;
+    const mouthX = this.wallX;
+    const mouthY = demonY + 14;
 
-      const dx = mouthX - this.gobbleTarget.x;
-      const dy = mouthY - this.gobbleTarget.y;
+    // Apply suction force to particles whose delay has passed
+    for (const p of this.gobbleTargets) {
+      // Skip already arrived particles - keep them at mouth, scaled to 0
+      if (p._arrived) {
+        p.x = mouthX;
+        p.y = mouthY;
+        p.vx = 0;
+        p.vy = 0;
+        p.size = 0;  // Scaled to nothing once swallowed
+        continue;
+      }
+
+      // If this particle's turn hasn't come yet, keep it at its stored start position
+      if (this.gobbleElapsed < p._gobbleDelay) {
+        // Keep particle at its original position (stored when batch was created)
+        if (p._startX !== undefined) {
+          p.x = p._startX;
+          p.y = p._startY;
+          p.vx = 0;
+          p.vy = 0;
+        }
+        continue;
+      }
+
+      const dx = mouthX - p.x;
+      const dy = mouthY - p.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
 
-      if (dist > 5) {
+      if (dist > 8) {
+        // Calculate individual progress for this particle
+        const particleTime = this.gobbleElapsed - p._gobbleDelay;
+        const particleProgress = Math.min(1, particleTime / 0.12);
         // Fast accelerating suction
-        const suctionStrength = 1500 + progress * 2500;
-        this.gobbleTarget.vx = (dx / dist) * suctionStrength;
-        this.gobbleTarget.vy = (dy / dist) * suctionStrength;
+        const suctionStrength = 2500 + particleProgress * 4000;
+        p.vx = (dx / dist) * suctionStrength;
+        p.vy = (dy / dist) * suctionStrength;
+        
+        // Only shrink when close to mouth (within 80px), not from start
+        const shrinkRadius = 80;
+        if (dist < shrinkRadius) {
+          const shrinkProgress = 1 - (dist / shrinkRadius); // 0 at edge, 1 at center
+          p.size = CONFIG.particleSize * (1 - shrinkProgress * 0.9);
+        } else {
+          p.size = CONFIG.particleSize; // Full size while far away
+        }
       } else {
-        // Particle reached mouth - NOW transition to holding
-        this.gobbleTarget.x = mouthX;
-        this.gobbleTarget.y = mouthY;
-        this.gobbleTarget.vx = 0;
-        this.gobbleTarget.vy = 0;
-        this.gobbleProgress = 1;
-        this.gobbleState.setState("holding");
-        return;
+        // Particle reached mouth - snap and mark arrived
+        p.x = mouthX;
+        p.y = mouthY;
+        p.vx = 0;
+        p.vy = 0;
+        p.size = 0;  // Scaled to nothing
+        p._arrived = true;
       }
     }
 
-    // Failsafe - if timer expired but particle didn't arrive, keep going
-    // (don't transition based on time alone)
+    // Check if ALL particles have arrived
+    const allArrived = this.gobbleTargets.every(p => p._arrived);
+
+    // Transition ONLY when all particles arrived (no timer failsafe - wait for all!)
+    if (allArrived) {
+      this.gobbleProgress = 1;
+      this.gobbleState.setState("holding");
+    }
   }
 
   /**
-   * Holding state - mouth closed, particle hidden inside, eyes move to other side
+   * Holding state - mouth closed, particles hidden inside, eyes move to other side
    */
   _holdingUpdate(dt) {
     this.gobbleStateTimer -= dt;
-    const duration = 0.5;
+    const duration = 0.05;
     const progress = 1 - (this.gobbleStateTimer / duration);
 
-    // Hide particle off-screen while "swallowed"
-    if (this.gobbleTarget) {
-      this.gobbleTarget.x = -1000;
-      this.gobbleTarget.y = -1000;
-      this.gobbleTarget.vx = 0;
-      this.gobbleTarget.vy = 0;
+    // Hide ALL particles while "swallowed" (invisible, at mouth)
+    const demonY = this.bounds.y + this.bounds.h / 2;
+    const mouthX = this.wallX;
+    const mouthY = demonY + 14;
+    for (const p of this.gobbleTargets) {
+      p.x = mouthX;
+      p.y = mouthY;
+      p.vx = 0;
+      p.vy = 0;
+      p.size = 0;  // Scaled to nothing while inside
+    }
+    
+    // Maintain full puff, settle squash to rounder shape with smooth wobble
+    if (this.demon) {
+      // Smooth wobble/settle as it holds the particles - like a water balloon
+      const targetSquash = 0.6 + Math.sin(progress * Math.PI * 3) * 0.1;
+      this.demon.squash += (targetSquash - this.demon.squash) * 0.2;
     }
 
     // Eyes: look at source → center → target
@@ -1067,51 +1275,104 @@ class Day16Demo extends Game {
   }
 
   /**
-   * Perform the spit - eject particle with force
-   * Mark particle as sorted and lock its temperature
-   */
-  _doSpit() {
-    if (!this.gobbleTarget) return;
-
-    // Position particle at mouth before spitting
-    const demonY = this.bounds.y + this.bounds.h / 2;
-    this.gobbleTarget.x = this.wallX;
-    this.gobbleTarget.y = demonY + 14;
-
-    const spitForce = 450 + Math.random() * 150;
-    const spitAngle = (Math.random() - 0.5) * 0.3;
-
-    // Spit in the correct direction (based on current temperature at gobble time)
-    this.gobbleTarget.vx = this.spitDirection * spitForce;
-    this.gobbleTarget.vy = spitAngle * spitForce;
-
-    // Mark as sorted - this particle is now "locked" out of heat dynamics
-    this.gobbleTarget.custom.sorted = true;
-    // Lock the temperature so FluidSystem zones can't change it
-    this.gobbleTarget.custom.lockedTemp = this.gobbleTarget.custom.isHot ? 0.9 : 0.1;
-    this.gobbleTarget.custom.temperature = this.gobbleTarget.custom.lockedTemp;
-
-    // Activate spit effect on demon
-    if (this.demon) {
-      this.demon.startSpitEffect(this.spitDirection);
-      this.demon.setMouthOpen(1);  // Open mouth for spit
-      this.demon.setEyeAngle(this.spitDirection * 0.5);  // Look in spit direction
-    }
-  }
-
-  /**
-   * Spitting state - show effect then return to idle
+   * Spitting state - spit particles one at a time with stagger!
    */
   _spittingUpdate(dt) {
     this.gobbleStateTimer -= dt;
+    this.spitElapsed += dt;
 
-    // Update mouth closing during spit
+    const staggerDelay = 0.03;
+    const demonY = this.bounds.y + this.bounds.h / 2;
+    const mouthX = this.wallX;
+    const mouthY = demonY + 14;
+
+    // Keep un-spit particles at mouth, scaled to 0 until their turn
+    for (let i = this.spitIndex; i < this.gobbleTargets.length; i++) {
+      const p = this.gobbleTargets[i];
+      p.x = mouthX;
+      p.y = mouthY;
+      p.vx = 0;
+      p.vy = 0;
+      p.size = 0;  // Scaled to nothing until spit
+    }
+
+    // Calculate timing with pause between hot and cold groups
+    // Hot particles are first in the sorted array, then cold
+    const pauseBetweenGroups = 0.5;  // Clear pause when switching sides (door closes/opens other way)
+    const hotCount = this.hotInBatch || 0;
+    
+    // Spit particles one at a time based on elapsed time
+    while (this.spitIndex < this.gobbleTargets.length) {
+      // Add pause after all hot particles before starting cold
+      let targetTime = this.spitIndex * staggerDelay;
+      if (this.spitIndex >= hotCount && hotCount > 0) {
+        // Add pause after hot group
+        targetTime += pauseBetweenGroups;
+      }
+      
+      if (this.spitElapsed < targetTime) break;
+
+      // Spit this particle!
+      const p = this.gobbleTargets[this.spitIndex];
+      
+      // Position at mouth (already there from above, but be explicit)
+      p.x = mouthX;
+      p.y = mouthY;
+
+      // Pop to full size when spit
+      p.size = CONFIG.particleSize;
+
+      // Each particle goes to its correct side - door opens one way at a time!
+      const spitDir = p.custom.isHot ? -1 : 1;
+      const spitForce = 4000 + Math.random() * 1000;
+      const spitAngle = (Math.random() - 0.5) * 0.2;
+
+      p.vx = spitDir * spitForce;
+      p.vy = spitAngle * spitForce * 0.3;  // Less vertical spread
+
+      // Mark as sorted and lock temperature
+      p.custom.sorted = true;
+      p.custom.lockedTemp = p.custom.isHot ? 0.9 : 0.02;
+      p.custom.temperature = p.custom.lockedTemp;
+
+      // Trigger spit effect and look toward spit direction
+      if (this.demon) {
+        this.demon.startSpitEffect(spitDir);
+        this.demon.setEyeAngle(spitDir * 0.5);
+        
+        // Update spit direction for visual effects
+        this.spitDirection = spitDir;
+      }
+
+      this.spitIndex++;
+    }
+
+    // Update mouth and body - deflates as particles leave
     if (this.demon) {
-      const progress = this.gobbleStateTimer / 0.2;  // 0.2 is spit duration
-      this.demon.setMouthOpen(progress);
+      const totalCount = this.gobbleTargets.length;
+      const spitCount = this.spitIndex;
+      const remaining = totalCount - spitCount;
+      const spitProgress = totalCount > 0 ? spitCount / totalCount : 1;
+      
+      // Mouth closes as particles leave
+      const mouthOpen = Math.min(1, remaining * 0.15);
+      this.demon.setMouthOpen(mouthOpen);
+      
+      // Puff deflates progressively back to normal (smooth lerp)
+      const maxPuff = this.targetPuff || 1.5;
+      const targetPuff = maxPuff - (maxPuff - 1) * spitProgress;
+      this.demon.puff += (targetPuff - this.demon.puff) * 0.15;
+      
+      // Squash smoothly goes back to normal with bouncy overshoot
+      const targetSquash = -0.6 * (1 - spitProgress) + Math.sin(spitProgress * Math.PI) * 0.25;
+      this.demon.squash += (targetSquash - this.demon.squash) * 0.12;
     }
 
     if (this.gobbleStateTimer <= 0) {
+      // Smooth return to normal state
+      if (this.demon) {
+        Tweenetik.to(this.demon, { puff: 1, squash: 0 }, 0.2, Easing.easeOutBack);
+      }
       this.gobbleState.setState("idle");
     }
   }
@@ -1133,22 +1394,26 @@ class Day16Demo extends Game {
    * Unsorted particles are managed by FluidSystem's thermal physics.
    */
   _enforceTemperatureSpeeds() {
-    const hotSpeed = 150;   // Target speed for hot particles
-    const coldSpeed = 50;   // Target speed for cold particles
+    const hotSpeed = 450;   // Target speed for hot particles (faster = hotter)
+    const coldSpeed = 80;   // Target speed for cold particles
+    const minSpeed = 600;   // Don't slow down if above this (let spit momentum carry)
 
     for (const p of this.fluid.particles) {
-      if (p === this.gobbleTarget) continue;
+      if (this.gobbleTargets.includes(p)) continue;
       if (!p.custom.sorted) continue;  // Only enforce on sorted particles
 
       const speed = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
       if (speed < 1) continue;
+      
+      // Don't slow down fast-moving particles (fresh spit)
+      if (speed > minSpeed) continue;
 
       const targetSpeed = p.custom.isHot ? hotSpeed : coldSpeed;
       const scale = targetSpeed / speed;
 
-      // Gradually nudge toward target speed
-      p.vx += (p.vx * scale - p.vx) * 0.05;
-      p.vy += (p.vy * scale - p.vy) * 0.05;
+      // Very gradually nudge toward target speed
+      p.vx += (p.vx * scale - p.vx) * 0.01;
+      p.vy += (p.vy * scale - p.vy) * 0.01;
     }
   }
 
@@ -1158,34 +1423,68 @@ class Day16Demo extends Game {
    * Blue (cold, 0) → Purple (neutral, 0.5) → Red (hot, 1)
    */
   _colorByTemperature() {
+    const phase = this.phaseState.currentState;
+    
+    // During early entropy, blend from true colors to gradient
+    let blendToGradient = 1; // 1 = full gradient, 0 = full true colors
+    if (phase === "entropy" && this.phaseTimer < CONFIG.phases.colorTransitionTime) {
+      blendToGradient = this.phaseTimer / CONFIG.phases.colorTransitionTime;
+    }
+    
+    // In exhausted/departure, ALL particles use true colors
+    const allTrueColors = phase === "exhausted" || phase === "departure";
+    
     for (const p of this.fluid.particles) {
-      const t = p.custom.temperature;
+      // Use fixedTemp for classification
+      const t = p.custom.fixedTemp ?? p.custom.temperature;
+      const isHot = t > 0.5;
 
-      // Temperature-based color gradient
-      // Blue (cold) → Purple (mid) → Red (hot)
-      p.color.r = Math.floor(255 * t);
-      p.color.g = Math.floor(80 * (1 - Math.abs(t - 0.5) * 2));  // Peak at 0.5
-      p.color.b = Math.floor(255 * (1 - t));
+      // Calculate gradient colors
+      const gradR = Math.floor(255 * t);
+      const gradG = Math.floor(80 * (1 - Math.abs(t - 0.5) * 2));
+      const gradB = Math.floor(255 * (1 - t));
+      
+      // Calculate true colors
+      const trueR = isHot ? 255 : 0;
+      const trueG = 0;
+      const trueB = isHot ? 0 : 255;
+
+      if (allTrueColors || p.custom.sorted) {
+        // True colors: after being spit, or in exhausted/departure
+        p.color.r = trueR;
+        p.color.g = trueG;
+        p.color.b = trueB;
+      } else if (phase === "entropy" && blendToGradient < 1) {
+        // Blend from true to gradient during early entropy
+        p.color.r = Math.floor(trueR + (gradR - trueR) * blendToGradient);
+        p.color.g = Math.floor(trueG + (gradG - trueG) * blendToGradient);
+        p.color.b = Math.floor(trueB + (gradB - trueB) * blendToGradient);
+      } else {
+        // Gradient colors: during sorting (until spit) and entropy
+        p.color.r = gradR;
+        p.color.g = gradG;
+        p.color.b = gradB;
+      }
     }
   }
 
   render() {
     const ctx = this.ctx;
 
-    // Clear background
-    ctx.fillStyle = "#000";
+    // Motion blur trail - subtle particle trails
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
     ctx.fillRect(0, 0, this.width, this.height);
 
     // Draw chambers and wall (using tweened values - fade in AND out)
     const { leftBgAlpha, rightBgAlpha, wallProgress } = this.visuals;
 
-    // Draw chambers background
+    // Draw chambers background (slightly transparent to blend with trails)
     if (leftBgAlpha > 0) {
-      ctx.fillStyle = `rgba(60, 20, 20, ${leftBgAlpha})`;
+      ctx.fillStyle = `rgba(60, 20, 20, ${leftBgAlpha * 0.3})`;
       ctx.fillRect(this.bounds.x, this.bounds.y, this.bounds.w / 2, this.bounds.h);
     }
     if (rightBgAlpha > 0) {
-      ctx.fillStyle = `rgba(20, 20, 60, ${rightBgAlpha})`;
+      ctx.fillStyle = `rgba(10, 15, 80, ${rightBgAlpha * 0.3})`;
       ctx.fillRect(this.wallX, this.bounds.y, this.bounds.w / 2, this.bounds.h);
     }
 
@@ -1203,6 +1502,11 @@ class Day16Demo extends Game {
 
     // Demon, particles, and thought bubble are rendered via pipeline
     this.pipeline.render(ctx);
+    
+    // Draw spit effect OVER particles (so it's visible)
+    if (this.demon) {
+      this.demon.drawSpitEffect();
+    }
   }
 }
 
