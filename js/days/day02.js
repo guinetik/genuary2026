@@ -21,11 +21,11 @@
  * Move mouse to guide the wind. Click to scatter.
  */
 
-import { Game } from '@guinetik/gcanvas';
+import { Game, Painter, Easing, Tweenetik } from '@guinetik/gcanvas';
 
 const CONFIG = {
   // Flock
-  birdDensity: 0.00015,  // Birds per square pixel (scales with canvas size)
+  birdDensity: 0.00008,  // Birds per square pixel (reduced for 4K)
   
   // Boids physics
   maxSpeed: 180,
@@ -42,7 +42,7 @@ const CONFIG = {
   mouseAvoidDist: 120,
   
   // Visuals
-  birdSizeRatio: 0.018,    // Size relative to canvas
+  birdSizeRatio: 0.015,    // Size relative to canvas
   
   // Day/night cycle
   cycleDuration: 60,       // Seconds for full day/night cycle
@@ -330,13 +330,25 @@ class OrigamiMurmurationDemo extends Game {
     });
 
     this.canvas.addEventListener('click', () => {
-      // Scatter! Add burst of force away from center
+      // Scatter with Tweenetik for smooth eased burst
       for (const bird of this.birds) {
         const dx = bird.x - this.mouseX;
         const dy = bird.y - this.mouseY;
         const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-        bird.vx += (dx / dist) * CONFIG.maxSpeed * 0.8;
-        bird.vy += (dy / dist) * CONFIG.maxSpeed * 0.8;
+        
+        // Calculate target velocity boost
+        const boostX = (dx / dist) * CONFIG.maxSpeed * 1.2;
+        const boostY = (dy / dist) * CONFIG.maxSpeed * 1.2;
+        
+        // Store original velocity
+        const startVx = bird.vx;
+        const startVy = bird.vy;
+        
+        // Use Tweenetik to animate the velocity boost with easeOutBack for overshoot effect
+        Tweenetik.to(bird, {
+          vx: startVx + boostX,
+          vy: startVy + boostY
+        }, 0.4, Easing.easeOutBack);
       }
     });
 
@@ -353,7 +365,7 @@ class OrigamiMurmurationDemo extends Game {
       this.mouseActive = false;
     });
 
-    this.time = 0;
+    this.time = CONFIG.cycleDuration * 0.2;
   }
 
   update(dt) {
@@ -434,7 +446,7 @@ class OrigamiMurmurationDemo extends Game {
     const moonAngle = Math.PI * 1.15 - moonPhase * Math.PI * 1.3;
     
     const moonX = arcCenterX + Math.cos(moonAngle) * arcRadiusX * 0.9;
-    const moonY = arcCenterY - Math.sin(moonAngle) * arcRadiusY * 0.85;
+    const moonY = arcCenterY - Math.sin(moonAngle) * arcRadiusY * 1.0; // Full arc height like sun
     
     // Only draw moon if it's above the bottom edge
     if (moonY < h + celestialRadius * 2) {
@@ -548,26 +560,24 @@ class OrigamiMurmurationDemo extends Game {
   }
   
   /**
-   * Draw stars for night sky
+   * Draw stars for night sky using Painter
    */
   drawStars(ctx, w, h, intensity) {
     // Use seeded random for consistent star positions
     const starCount = 60;
-    ctx.fillStyle = `rgba(255, 255, 255, ${intensity * 0.8})`;
     
     for (let i = 0; i < starCount; i++) {
       // Pseudo-random based on index
       const x = ((i * 7919) % 1000) / 1000 * w;
       const y = ((i * 6271) % 1000) / 1000 * h * 0.6; // Stars in upper portion
       const size = ((i * 3571) % 100) / 100 * 2 + 0.5;
-      const twinkle = Math.sin(this.time * 3 + i) * 0.3 + 0.7;
+      // Apply smootherstep easing to twinkle for more organic feel
+      const rawTwinkle = (Math.sin(this.time * 3 + i) + 1) / 2;
+      const twinkle = Easing.smootherstep(rawTwinkle) * 0.6 + 0.4;
       
-      ctx.globalAlpha = intensity * twinkle;
-      ctx.beginPath();
-      ctx.arc(x, y, size, 0, Math.PI * 2);
-      ctx.fill();
+      const alpha = intensity * twinkle * 0.8;
+      Painter.shapes.fillCircle(x, y, size, `rgba(255, 255, 255, ${alpha})`);
     }
-    ctx.globalAlpha = 1;
   }
   
   /**
@@ -676,6 +686,7 @@ class OrigamiMurmurationDemo extends Game {
 
   /**
    * Draw a single origami bird (4-part geometric style)
+   * Uses Painter.shapes.polygon for drawing and Easing for smooth wing animation
    */
   drawOrigamiBird(ctx, bird) {
     const size = this.birdSize;
@@ -685,8 +696,9 @@ class OrigamiMurmurationDemo extends Game {
     const stretch = 1 + (speed / CONFIG.maxSpeed) * 0.3;
     const squash = 1 / Math.sqrt(stretch);
     
-    // Wing flap animation (0 to 1, smooth)
-    const flapT = (Math.sin(bird.wingPhase) + 1) / 2; // 0-1
+    // Wing flap animation with Easing.smoothstep for organic motion
+    const rawT = (Math.sin(bird.wingPhase) + 1) / 2; // 0-1
+    const flapT = Easing.smoothstep(rawT); // Smooth S-curve for natural flapping
     
     // Adjust color based on time of day
     let baseColor = bird.color;
@@ -714,10 +726,11 @@ class OrigamiMurmurationDemo extends Game {
     const wingBackColor = this.lightenColor(baseColor, 0.1);
     const wingFrontColor = this.darkenColor(baseColor, 0.05);
     
-    ctx.save();
-    ctx.translate(bird.x, bird.y);
-    ctx.rotate(bird.angle);
-    ctx.scale(stretch, squash);
+    // Save state using Painter
+    Painter.save();
+    Painter.translateTo(bird.x, bird.y);
+    Painter.rotate(bird.angle);
+    Painter.scale(stretch, squash);
     
     // Normalized coordinates (bird faces right, centered at origin)
     // Based on the SVG design, scaled to our size
@@ -748,23 +761,21 @@ class OrigamiMurmurationDemo extends Game {
       p3: { x: 5 * s, y: 50 * s }
     };
     
-    // Interpolate wing positions
-    const lerp = (a, b, t) => a + (b - a) * t;
-    
+    // Interpolate wing positions using Easing.lerp
     const backWing = {
-      p1: { x: lerp(backWing1.p1.x, backWing2.p1.x, flapT), y: lerp(backWing1.p1.y, backWing2.p1.y, flapT) },
-      p2: { x: lerp(backWing1.p2.x, backWing2.p2.x, flapT), y: lerp(backWing1.p2.y, backWing2.p2.y, flapT) },
-      p3: { x: lerp(backWing1.p3.x, backWing2.p3.x, flapT), y: lerp(backWing1.p3.y, backWing2.p3.y, flapT) }
+      p1: { x: Easing.lerp(backWing1.p1.x, backWing2.p1.x, flapT), y: Easing.lerp(backWing1.p1.y, backWing2.p1.y, flapT) },
+      p2: { x: Easing.lerp(backWing1.p2.x, backWing2.p2.x, flapT), y: Easing.lerp(backWing1.p2.y, backWing2.p2.y, flapT) },
+      p3: { x: Easing.lerp(backWing1.p3.x, backWing2.p3.x, flapT), y: Easing.lerp(backWing1.p3.y, backWing2.p3.y, flapT) }
     };
     
     const frontWing = {
-      p1: { x: lerp(frontWing1.p1.x, frontWing2.p1.x, flapT), y: lerp(frontWing1.p1.y, frontWing2.p1.y, flapT) },
-      p2: { x: lerp(frontWing1.p2.x, frontWing2.p2.x, flapT), y: lerp(frontWing1.p2.y, frontWing2.p2.y, flapT) },
-      p3: { x: lerp(frontWing1.p3.x, frontWing2.p3.x, flapT), y: lerp(frontWing1.p3.y, frontWing2.p3.y, flapT) }
+      p1: { x: Easing.lerp(frontWing1.p1.x, frontWing2.p1.x, flapT), y: Easing.lerp(frontWing1.p1.y, frontWing2.p1.y, flapT) },
+      p2: { x: Easing.lerp(frontWing1.p2.x, frontWing2.p2.x, flapT), y: Easing.lerp(frontWing1.p2.y, frontWing2.p2.y, flapT) },
+      p3: { x: Easing.lerp(frontWing1.p3.x, frontWing2.p3.x, flapT), y: Easing.lerp(frontWing1.p3.y, frontWing2.p3.y, flapT) }
     };
     
     // Body (static, lerp slightly for breathing)
-    const bodyBreath = lerp(0, 3 * s, flapT);
+    const bodyBreath = Easing.lerp(0, 3 * s, flapT);
     const body = {
       p1: { x: -50 * s, y: bodyBreath },
       p2: { x: 20 * s, y: -10 * s },
@@ -779,44 +790,41 @@ class OrigamiMurmurationDemo extends Game {
     };
     
     // Draw in order: back wing, body, head, front wing
+    // Using Painter.shapes.polygon for cleaner API
     
     // Back wing
-    ctx.beginPath();
-    ctx.moveTo(backWing.p1.x, backWing.p1.y);
-    ctx.lineTo(backWing.p2.x, backWing.p2.y);
-    ctx.lineTo(backWing.p3.x, backWing.p3.y);
-    ctx.closePath();
-    ctx.fillStyle = wingBackColor;
-    ctx.fill();
+    Painter.shapes.polygon(
+      [backWing.p1, backWing.p2, backWing.p3],
+      wingBackColor,
+      null,
+      null
+    );
     
     // Body
-    ctx.beginPath();
-    ctx.moveTo(body.p1.x, body.p1.y);
-    ctx.lineTo(body.p2.x, body.p2.y);
-    ctx.lineTo(body.p3.x, body.p3.y);
-    ctx.closePath();
-    ctx.fillStyle = bodyColor;
-    ctx.fill();
+    Painter.shapes.polygon(
+      [body.p1, body.p2, body.p3],
+      bodyColor,
+      null,
+      null
+    );
     
     // Head
-    ctx.beginPath();
-    ctx.moveTo(head.p1.x, head.p1.y);
-    ctx.lineTo(head.p2.x, head.p2.y);
-    ctx.lineTo(head.p3.x, head.p3.y);
-    ctx.closePath();
-    ctx.fillStyle = headColor;
-    ctx.fill();
+    Painter.shapes.polygon(
+      [head.p1, head.p2, head.p3],
+      headColor,
+      null,
+      null
+    );
     
     // Front wing
-    ctx.beginPath();
-    ctx.moveTo(frontWing.p1.x, frontWing.p1.y);
-    ctx.lineTo(frontWing.p2.x, frontWing.p2.y);
-    ctx.lineTo(frontWing.p3.x, frontWing.p3.y);
-    ctx.closePath();
-    ctx.fillStyle = wingFrontColor;
-    ctx.fill();
+    Painter.shapes.polygon(
+      [frontWing.p1, frontWing.p2, frontWing.p3],
+      wingFrontColor,
+      null,
+      null
+    );
 
-    ctx.restore();
+    Painter.restore();
   }
 }
 
