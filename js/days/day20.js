@@ -18,6 +18,14 @@ const CONFIG = {
   },
   segments: 300,
   baseRadius: 0.6,
+  
+  // Timing
+  growthDuration: 8, // seconds to full growth
+  
+  // Psychedelic
+  hueSpeed: 20,       // Base hue cycle speed
+  glowSize: 40,       // Glow radius multiplier
+  cometLength: 30,    // Comet tail segments
 };
 
 class Day20Demo extends Game {
@@ -48,10 +56,25 @@ class Day20Demo extends Game {
     // Ouroboros state - only true when head catches tail
     this.isOuroboros = false;
     this.ouroborosBlend = 0;
+    this.perfection = 0; // 0 = organic/messy, 1 = geometric perfection
     this.eatPulse = 0; // Pulse effect when eating
     this.totalEaten = 0; // How much it has consumed
     this.eatAngleOffset = 0; // Rotation offset when eating (dash forward)
     this.coils = 1; // How many times the snake wraps around (grows when eating)
+    this.targetCoils = 1; // Smooth coil growth
+
+    // Smooth animation vars
+    this.lungeOffset = 0;
+    this.targetLungeOffset = 0;
+    this.phaseOffset = 0;
+    this.currentRadius = 0;
+    
+    // Psychedelic color cycling
+    this.hueOffset = Math.random() * 360; // Random start hue
+    this.screenFlash = 0; // Flash on eat
+    
+    // Particles for eat burst
+    this.particles = [];
 
     // Snake body - store position history for slithering
     this.maxHistory = 400;
@@ -75,23 +98,16 @@ class Day20Demo extends Game {
       this.targetY = (this.mouseY - 0.5) * 1.4;
     });
 
-    this.canvas.addEventListener("click", () => {
+    this.canvas.addEventListener("click", (e) => {
       if (this.isOuroboros) {
-        // Eat! Snake lunges forward and regenerates tail
-        this.eatPulse = 1;
-        this.eatAngleOffset += 0.25; // Dash forward (head bites)
-        this.coils += 0.08; // Tail regenerates - snake grows longer
-        this.totalEaten += 1;
+        this.doEat(e);
       }
     });
 
     this.canvas.addEventListener("touchstart", (e) => {
       e.preventDefault();
       if (this.isOuroboros) {
-        this.eatPulse = 1;
-        this.eatAngleOffset += 0.25;
-        this.coils += 0.08;
-        this.totalEaten += 1;
+        this.doEat(e.touches[0]);
       }
     });
 
@@ -104,13 +120,54 @@ class Day20Demo extends Game {
     });
   }
 
+  /**
+   * Eat action - spawn particles, flash, lunge
+   */
+  doEat() {
+    this.eatPulse = 1;
+    this.screenFlash = 1;
+    this.targetLungeOffset += 0.5;
+    this.targetCoils += 0.08;
+    this.totalEaten += 1;
+    
+    // Spawn particle burst from head
+    const headPoint = this.getSnakePoint(1, this.time);
+    const projected = this.projectPoint(headPoint);
+    const cx = this.width / 2;
+    const cy = this.height / 2;
+    const scale = Math.min(this.width, this.height) * 0.7;
+    const headX = cx + projected.x * scale;
+    const headY = cy + projected.y * scale;
+    
+    // Burst of particles
+    for (let i = 0; i < 25; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 100 + Math.random() * 200;
+      this.particles.push({
+        x: headX,
+        y: headY,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life: 1,
+        maxLife: 1,
+        hue: this.hueOffset + this.totalEaten * 25 + Math.random() * 60,
+        size: 4 + Math.random() * 8,
+      });
+    }
+  }
+
   update(dt) {
     super.update(dt);
     this.time += dt;
+    
+    // Cycle hue - faster as more is consumed
+    const hueSpeed = CONFIG.hueSpeed + this.totalEaten * 3;
+    this.hueOffset = (this.hueOffset + hueSpeed * dt) % 360;
 
-    // Grow snake length over time
+    // Grow snake length over time (8 seconds to full)
+    const growthRate = (this.maxSnakeLength - 20) / CONFIG.growthDuration;
     if (!this.isOuroboros && this.snakeLength < this.maxSnakeLength) {
-      this.snakeLength = Math.min(this.maxSnakeLength, this.snakeLength + dt * 15);
+      this.snakeLength = Math.min(this.maxSnakeLength, this.snakeLength + dt * growthRate);
     }
 
     // Grow size slowly
@@ -119,12 +176,40 @@ class Day20Demo extends Game {
 
     // Smooth ouroboros transition
     if (this.isOuroboros) {
-      this.ouroborosBlend = Math.min(1, this.ouroborosBlend + dt * 0.5);
+      this.ouroborosBlend = Math.min(1, this.ouroborosBlend + dt * 0.8);
+      
+      // Calculate perfection based on consumption
+      const targetPerfection = Math.min(1, this.totalEaten / 15);
+      this.perfection += (targetPerfection - this.perfection) * dt * 0.5;
+
+      // Smooth animations
+      this.lungeOffset += (this.targetLungeOffset - this.lungeOffset) * dt * 5;
+      this.coils += (this.targetCoils - this.coils) * dt * 2;
+      
+      // Smooth radius return to default
+      const targetR = CONFIG.baseRadius * this.size;
+      this.currentRadius += (targetR - this.currentRadius) * dt * 2;
     }
 
-    // Decay eat pulse
+    // Decay eat pulse and screen flash
     if (this.eatPulse > 0) {
       this.eatPulse = Math.max(0, this.eatPulse - dt * 3);
+    }
+    if (this.screenFlash > 0) {
+      this.screenFlash = Math.max(0, this.screenFlash - dt * 4);
+    }
+    
+    // Update particles
+    for (let i = this.particles.length - 1; i >= 0; i--) {
+      const p = this.particles[i];
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vx *= 0.96;
+      p.vy *= 0.96;
+      p.life -= dt * 1.5;
+      if (p.life <= 0) {
+        this.particles.splice(i, 1);
+      }
     }
 
     if (!this.isOuroboros) {
@@ -170,8 +255,21 @@ class Day20Demo extends Game {
           );
 
           // Caught the tail! (generous hitbox)
-          if (headToTail < 0.15) {
+          if (headToTail < 0.2) {
             this.isOuroboros = true;
+            
+            // Align phase
+            const currentHeadAngle = Math.atan2(this.headY, this.headX);
+            // Angle at t=1 (head) based on ring logic:
+            const baseRingAngle = Math.PI * 2 * this.coils - this.time * 0.5; 
+            this.phaseOffset = currentHeadAngle - baseRingAngle;
+            
+            // Align radius
+            this.currentRadius = Math.sqrt(this.headX ** 2 + this.headY ** 2);
+            
+            // Initialize offsets
+            this.lungeOffset = 0;
+            this.targetLungeOffset = 0;
           }
         }
       }
@@ -183,11 +281,16 @@ class Day20Demo extends Game {
     // t goes from 0 (tail) to 1 (head)
 
     // Ouroboros circle position (used when head catches tail)
-    // eatAngleOffset makes the head lunge forward when eating
+    // lungeOffset makes the head lunge forward when eating
     // coils determines how many times it wraps around
-    const angle = t * Math.PI * 2 * this.coils - time * 0.5 + this.eatAngleOffset;
-    const baseR = CONFIG.baseRadius * this.size;
-    const undulation = Math.sin(t * Math.PI * 8 * this.coils + time * 2) * 0.05 * this.size;
+    const angle = t * Math.PI * 2 * this.coils - time * 0.5 + this.phaseOffset + this.lungeOffset;
+    
+    // Smooth radius transition
+    // As perfection increases, the shape becomes a perfect circle
+    const chaos = 1 - this.perfection;
+    const baseR = this.isOuroboros ? this.currentRadius : (CONFIG.baseRadius * this.size);
+    
+    const undulation = Math.sin(t * Math.PI * 8 * this.coils + time * 2) * 0.05 * this.size * chaos;
     const r = baseR + undulation;
 
     const circleX = Math.cos(angle) * r;
@@ -207,7 +310,8 @@ class Day20Demo extends Game {
     const y = followY * (1 - blend) + circleY * blend;
 
     // Z undulation for 3D effect (only in ouroboros mode)
-    const z = Math.sin(t * Math.PI * 6 * this.coils + time * 1.5) * 0.08 * this.size * blend;
+    // Flattens out as perfection increases
+    const z = Math.sin(t * Math.PI * 6 * this.coils + time * 1.5) * 0.08 * this.size * blend * chaos;
 
     return { x, y, z, t };
   }
@@ -252,7 +356,7 @@ class Day20Demo extends Game {
     const scale = Math.min(w, h) * 0.7;
 
     // Fade trail
-    ctx.fillStyle = "rgba(0, 0, 0, 0.1)";
+    ctx.fillStyle = "rgba(0, 0, 0, 0.12)";
     ctx.fillRect(0, 0, w, h);
 
     const numPoints = CONFIG.segments;
@@ -272,11 +376,39 @@ class Day20Demo extends Game {
       });
     }
 
-    // Draw the snake body
+    // Draw the snake body with psychedelic effects
     this.drawSnake(ctx, points);
+
+    // Draw comet tail glow behind head
+    this.drawCometTail(ctx, points);
 
     // Draw the head (eating the tail)
     this.drawHead(ctx, points);
+    
+    // Draw particles (additive)
+    ctx.globalCompositeOperation = 'lighter';
+    for (const p of this.particles) {
+      const alpha = p.life / p.maxLife;
+      const size = p.size * alpha;
+      
+      const grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, size * 3);
+      grad.addColorStop(0, `hsla(${p.hue}, 100%, 70%, ${alpha})`);
+      grad.addColorStop(0.5, `hsla(${p.hue}, 100%, 50%, ${alpha * 0.4})`);
+      grad.addColorStop(1, 'transparent');
+      
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, size * 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalCompositeOperation = 'source-over';
+    
+    // Screen flash on eat
+    if (this.screenFlash > 0) {
+      const flashHue = this.hueOffset + this.totalEaten * 25;
+      ctx.fillStyle = `hsla(${flashHue}, 100%, 80%, ${this.screenFlash * 0.3})`;
+      ctx.fillRect(0, 0, w, h);
+    }
 
     // UI hints
     ctx.fillStyle = "rgba(255, 255, 255, 0.4)";
@@ -297,14 +429,16 @@ class Day20Demo extends Game {
           const tailScreenX = cx + tail.x * scale;
           const tailScreenY = cy + tail.y * scale;
 
-          // Pulsing glow on tail
-          const pulse = 0.5 + Math.sin(this.time * 4) * 0.3;
-          const gradient = ctx.createRadialGradient(tailScreenX, tailScreenY, 0, tailScreenX, tailScreenY, 30);
-          gradient.addColorStop(0, `rgba(255, 200, 100, ${pulse})`);
+          // Pulsing glow on tail - rainbow when close
+          const pulse = 0.6 + Math.sin(this.time * 6) * 0.4;
+          const tailHue = this.hueOffset + 60;
+          const gradient = ctx.createRadialGradient(tailScreenX, tailScreenY, 0, tailScreenX, tailScreenY, 40);
+          gradient.addColorStop(0, `hsla(${tailHue}, 100%, 70%, ${pulse})`);
+          gradient.addColorStop(0.5, `hsla(${tailHue + 30}, 100%, 50%, ${pulse * 0.5})`);
           gradient.addColorStop(1, "transparent");
           ctx.fillStyle = gradient;
           ctx.beginPath();
-          ctx.arc(tailScreenX, tailScreenY, 30, 0, Math.PI * 2);
+          ctx.arc(tailScreenX, tailScreenY, 40, 0, Math.PI * 2);
           ctx.fill();
         }
       }
@@ -314,14 +448,19 @@ class Day20Demo extends Game {
       ctx.fillText("Click to consume • Drag to rotate", cx, h - 20);
 
       if (this.totalEaten > 0) {
-        ctx.fillStyle = `hsla(${CONFIG.colors.baseHue}, 80%, 60%, 0.6)`;
-        ctx.fillText(`Consumed: ${this.totalEaten}`, cx, 30);
+        const uiHue = this.hueOffset;
+        ctx.fillStyle = `hsla(${uiHue}, 80%, 60%, 0.6)`;
+        const perfectionPct = Math.floor(this.perfection * 100);
+        ctx.fillText(`Consumed: ${this.totalEaten} • Form: ${perfectionPct}%`, cx, 30);
       }
     }
   }
 
   drawSnake(ctx, points) {
     if (points.length < 2) return;
+
+    // Rainbow hue shift based on consumption
+    const hueShift = this.hueOffset + this.totalEaten * 25;
 
     // Draw from tail to head with varying thickness
     for (let i = 1; i < points.length; i++) {
@@ -330,36 +469,43 @@ class Day20Demo extends Game {
 
       // Thickness varies - thin at tail, thick at head
       const t = i / points.length;
-      const baseThickness = 2 + t * 12 + this.totalEaten * 0.5;
+      
+      const naturalThickness = 2 + t * 14 + this.totalEaten * 0.6;
+      const uniformThickness = 7 + this.totalEaten * 0.4;
+      
+      const baseThickness = naturalThickness * (1 - this.perfection) + uniformThickness * this.perfection;
 
-      // Breathing effect + eat pulse
-      const breathe = 1 + Math.sin(this.time * 2 + t * 10) * 0.1;
-      const eatWave = this.eatPulse * Math.sin(t * Math.PI * 8 + this.time * 20) * 0.3;
+      // Breathing effect + eat pulse wave
+      const breathe = 1 + Math.sin(this.time * 2 + t * 10) * 0.1 * (1 - this.perfection);
+      const eatWave = this.eatPulse * Math.sin(t * Math.PI * 12 + this.time * 25) * 0.4;
       const thickness = baseThickness * (breathe + eatWave);
 
       // Depth affects brightness
       const depthFade = 0.5 + (p1.z + 0.5) * 0.5;
 
-      // Color shifts along body - flash brighter when eating
-      const eatFlash = this.eatPulse * 30;
-      const hue = CONFIG.colors.baseHue + t * 40 + Math.sin(this.time + t * 5) * 10;
-      const sat = 70 + t * 20;
-      const light = 40 + t * 20 + eatFlash;
+      // Psychedelic rainbow along body
+      const eatFlash = this.eatPulse * 40;
+      const hue = (hueShift + t * 80 + Math.sin(this.time * 2 + t * 8) * 30) % 360;
+      const sat = 85 + t * 15;
+      const light = 35 + t * 25 + eatFlash;
 
-      // Glow layer
+      // Outer glow (additive)
+      ctx.globalCompositeOperation = 'lighter';
       ctx.beginPath();
       ctx.moveTo(p0.x, p0.y);
       ctx.lineTo(p1.x, p1.y);
-      ctx.strokeStyle = `hsla(${hue}, ${sat}%, ${light}%, ${0.3 * depthFade})`;
-      ctx.lineWidth = thickness + 8;
+      ctx.strokeStyle = `hsla(${hue}, 100%, ${light}%, ${0.25 * depthFade})`;
+      ctx.lineWidth = thickness + 12;
       ctx.lineCap = "round";
       ctx.stroke();
+      
+      ctx.globalCompositeOperation = 'source-over';
 
       // Main body
       ctx.beginPath();
       ctx.moveTo(p0.x, p0.y);
       ctx.lineTo(p1.x, p1.y);
-      ctx.strokeStyle = `hsla(${hue}, ${sat}%, ${light + 15}%, ${depthFade})`;
+      ctx.strokeStyle = `hsla(${hue}, ${sat}%, ${light + 10}%, ${depthFade})`;
       ctx.lineWidth = thickness;
       ctx.lineCap = "round";
       ctx.stroke();
@@ -368,8 +514,8 @@ class Day20Demo extends Game {
       ctx.beginPath();
       ctx.moveTo(p0.x, p0.y);
       ctx.lineTo(p1.x, p1.y);
-      ctx.strokeStyle = `hsla(${hue}, ${sat - 20}%, ${light + 35}%, ${0.6 * depthFade})`;
-      ctx.lineWidth = thickness * 0.3;
+      ctx.strokeStyle = `hsla(${hue}, ${sat - 10}%, ${Math.min(85, light + 30)}%, ${0.7 * depthFade})`;
+      ctx.lineWidth = thickness * 0.35;
       ctx.lineCap = "round";
       ctx.stroke();
     }
@@ -380,21 +526,61 @@ class Day20Demo extends Game {
 
   drawScales(ctx, points) {
     const scaleSpacing = Math.max(3, Math.floor(points.length / 50));
+    const hueShift = this.hueOffset + this.totalEaten * 25;
 
+    ctx.globalCompositeOperation = 'lighter';
     for (let i = scaleSpacing; i < points.length - scaleSpacing; i += scaleSpacing) {
       const p = points[i];
       const t = i / points.length;
 
-      const size = 2 + t * 4;
+      const size = 2 + t * 5;
       const depthFade = 0.5 + (p.z + 0.5) * 0.5;
 
-      const hue = CONFIG.colors.baseHue + t * 40;
+      const hue = (hueShift + t * 80) % 360;
 
       ctx.beginPath();
       ctx.arc(p.x, p.y, size, 0, Math.PI * 2);
-      ctx.fillStyle = `hsla(${hue + 20}, 60%, 70%, ${0.3 * depthFade})`;
+      ctx.fillStyle = `hsla(${hue + 40}, 80%, 65%, ${0.35 * depthFade})`;
       ctx.fill();
     }
+    ctx.globalCompositeOperation = 'source-over';
+  }
+  
+  /**
+   * Draw comet tail glow behind head
+   */
+  drawCometTail(ctx, points) {
+    if (points.length < CONFIG.cometLength) return;
+    
+    const hueShift = this.hueOffset + this.totalEaten * 25;
+    
+    ctx.globalCompositeOperation = 'lighter';
+    
+    // Draw fading glow circles from head backwards
+    for (let i = 0; i < CONFIG.cometLength; i++) {
+      const idx = points.length - 1 - i;
+      if (idx < 0) break;
+      
+      const p = points[idx];
+      const progress = 1 - i / CONFIG.cometLength;
+      
+      const glowSize = CONFIG.glowSize * (0.3 + 0.7 * progress) * (1 + this.eatPulse * 0.5);
+      const alpha = progress * 0.4 * (1 + this.eatPulse);
+      
+      const hue = (hueShift + 60 + i * 2) % 360;
+      
+      const grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, glowSize);
+      grad.addColorStop(0, `hsla(${hue}, 100%, 60%, ${alpha})`);
+      grad.addColorStop(0.5, `hsla(${hue + 20}, 100%, 50%, ${alpha * 0.3})`);
+      grad.addColorStop(1, 'transparent');
+      
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, glowSize, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    
+    ctx.globalCompositeOperation = 'source-over';
   }
 
   drawHead(ctx, points) {
@@ -406,21 +592,31 @@ class Day20Demo extends Game {
     // Head direction
     const angle = Math.atan2(head.y - neck.y, head.x - neck.x);
 
-    const headSize = 8 + 10 * this.size;
+    const headScale = 1 - this.perfection * 0.2; 
+    const headSize = (10 + 12 * this.size) * headScale * (1 + this.eatPulse * 0.2);
     const depthFade = 0.5 + (head.z + 0.5) * 0.5;
+    
+    // Rainbow hue
+    const hueShift = this.hueOffset + this.totalEaten * 25;
+    const headHue = (hueShift + 60) % 360;
 
     ctx.save();
     ctx.translate(head.x, head.y);
     ctx.rotate(angle);
 
-    // Head glow
-    const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, headSize * 2);
-    gradient.addColorStop(0, `hsla(${CONFIG.colors.baseHue + 40}, 100%, 60%, ${0.5 * depthFade})`);
+    // Head glow (additive)
+    ctx.globalCompositeOperation = 'lighter';
+    const glowRadius = headSize * 3 * (1 + this.eatPulse * 0.5);
+    const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, glowRadius);
+    gradient.addColorStop(0, `hsla(${headHue}, 100%, 65%, ${0.6 * depthFade})`);
+    gradient.addColorStop(0.4, `hsla(${headHue + 30}, 100%, 50%, ${0.2 * depthFade})`);
     gradient.addColorStop(1, "transparent");
     ctx.fillStyle = gradient;
     ctx.beginPath();
-    ctx.arc(0, 0, headSize * 2, 0, Math.PI * 2);
+    ctx.arc(0, 0, glowRadius, 0, Math.PI * 2);
     ctx.fill();
+    
+    ctx.globalCompositeOperation = 'source-over';
 
     // Head shape (triangle-ish)
     ctx.beginPath();
@@ -428,37 +624,69 @@ class Day20Demo extends Game {
     ctx.lineTo(-headSize * 0.5, -headSize * 0.6);
     ctx.lineTo(-headSize * 0.5, headSize * 0.6);
     ctx.closePath();
-    ctx.fillStyle = `hsla(${CONFIG.colors.baseHue + 40}, 80%, 55%, ${depthFade})`;
+    ctx.fillStyle = `hsla(${headHue}, 85%, 50%, ${depthFade})`;
+    ctx.fill();
+    
+    // Head highlight
+    ctx.beginPath();
+    ctx.moveTo(headSize * 0.8, 0);
+    ctx.lineTo(-headSize * 0.3, -headSize * 0.35);
+    ctx.lineTo(-headSize * 0.3, headSize * 0.35);
+    ctx.closePath();
+    ctx.fillStyle = `hsla(${headHue}, 70%, 65%, ${0.5 * depthFade})`;
     ctx.fill();
 
-    // Eye
+    // Eye - glows when eating
     const eyeX = headSize * 0.2;
     const eyeY = -headSize * 0.2;
+    const minEyeSize = 2;
+    const eyeSize = Math.max(minEyeSize, 4 * (1 - this.perfection * 0.4)) * (1 + this.eatPulse * 0.5);
+    
+    // Eye glow
+    ctx.globalCompositeOperation = 'lighter';
+    const eyeGlow = ctx.createRadialGradient(eyeX, eyeY, 0, eyeX, eyeY, eyeSize * 3);
+    eyeGlow.addColorStop(0, `hsla(50, 100%, 80%, ${0.8 + this.eatPulse * 0.2})`);
+    eyeGlow.addColorStop(1, 'transparent');
+    ctx.fillStyle = eyeGlow;
     ctx.beginPath();
-    ctx.arc(eyeX, eyeY, 3, 0, Math.PI * 2);
-    ctx.fillStyle = `hsla(60, 100%, 70%, ${depthFade})`;
+    ctx.arc(eyeX, eyeY, eyeSize * 3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalCompositeOperation = 'source-over';
+    
+    ctx.beginPath();
+    ctx.arc(eyeX, eyeY, eyeSize, 0, Math.PI * 2);
+    ctx.fillStyle = `hsla(50, 100%, 85%, ${depthFade})`;
     ctx.fill();
 
-    // Mouth (open, eating)
+    // Mouth - opens WIDE when eating
+    const baseOpen = 0.2 * (1 - this.perfection);
+    const pulseOpen = this.eatPulse * 0.6;
+    const mouthOpen = Math.max(0.03, baseOpen + pulseOpen);
+    
     ctx.beginPath();
     ctx.moveTo(headSize, 0);
-    ctx.lineTo(headSize * 0.3, -headSize * 0.15);
-    ctx.lineTo(headSize * 0.3, headSize * 0.15);
+    ctx.lineTo(headSize * 0.25, -headSize * mouthOpen);
+    ctx.lineTo(headSize * 0.25, headSize * mouthOpen);
     ctx.closePath();
-    ctx.fillStyle = `hsla(0, 70%, 30%, ${depthFade})`;
+    ctx.fillStyle = `hsla(0, 60%, 20%, ${depthFade})`;
     ctx.fill();
 
     ctx.restore();
 
-    // Tail being eaten (at the start)
+    // Tail being eaten - rainbow glow
     const tail = points[0];
-    const tailGlow = ctx.createRadialGradient(tail.x, tail.y, 0, tail.x, tail.y, 15);
-    tailGlow.addColorStop(0, `hsla(${CONFIG.colors.baseHue}, 100%, 50%, 0.5)`);
+    const tailHue = (hueShift + 120) % 360;
+    
+    ctx.globalCompositeOperation = 'lighter';
+    const tailGlow = ctx.createRadialGradient(tail.x, tail.y, 0, tail.x, tail.y, 25);
+    tailGlow.addColorStop(0, `hsla(${tailHue}, 100%, 60%, 0.6)`);
+    tailGlow.addColorStop(0.5, `hsla(${tailHue + 40}, 100%, 50%, 0.2)`);
     tailGlow.addColorStop(1, "transparent");
     ctx.fillStyle = tailGlow;
     ctx.beginPath();
-    ctx.arc(tail.x, tail.y, 15, 0, Math.PI * 2);
+    ctx.arc(tail.x, tail.y, 25, 0, Math.PI * 2);
     ctx.fill();
+    ctx.globalCompositeOperation = 'source-over';
   }
 }
 
