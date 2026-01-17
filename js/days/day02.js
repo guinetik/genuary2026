@@ -2,124 +2,357 @@
  * Genuary 2026 - Day 2
  * Prompt: "Twelve principles of animation"
  *
- * THE FOLLOW-THROUGH CHAIN
- *
- * A mesmerizing chain/tentacle that follows your cursor.
- * Each segment follows the previous with physics-based delay.
+ * ORIGAMI MURMURATION
+ * 
+ * A flock of paper cranes demonstrating animation principles
+ * through emergent flocking behavior (boids algorithm).
  *
  * Principles demonstrated:
- * 1. Follow Through - Each segment drags behind with inertia
- * 2. Overlapping Action - Segments move at different times
- * 3. Arcs - Natural curved motion paths
- * 4. Slow In/Slow Out - Eased acceleration/deceleration
- * 5. Secondary Action - Size pulsing, color shifts
- * 6. Squash & Stretch - Segments elongate based on velocity
+ * 1. Follow Through - Birds bank into turns, body lags behind
+ * 2. Overlapping Action - Turns ripple through the flock in waves
+ * 3. Arcs - Natural curved flight paths
+ * 4. Slow In/Slow Out - Eased acceleration in turns
+ * 5. Secondary Action - Wing angle shifts, subtle rotation
+ * 6. Squash & Stretch - Bodies elongate in flight direction
+ * 7. Anticipation - Leaders turn, followers react
+ * 8. Staging - Flock creates dramatic shapes
+ * 9. Timing - Rhythm of collective movement
  *
- * Move mouse/touch to lead the chain.
+ * Move mouse to guide the wind. Click to scatter.
  */
 
 import { Game } from '@guinetik/gcanvas';
 
 const CONFIG = {
-  // Chain geometry
-  segmentCount: 40,
-  segmentSpacing: 12,
-  baseRadius: 8,
-  radiusFalloff: 0.85,  // Each segment is this % of previous
-
-  // Physics
-  followSpeed: 0.15,    // How quickly segments follow (0-1)
-  velocityStretch: 0.4, // How much velocity stretches segments
-  maxStretch: 2.5,      // Maximum stretch multiplier
-
+  // Flock
+  birdDensity: 0.00015,  // Birds per square pixel (scales with canvas size)
+  
+  // Boids physics
+  maxSpeed: 180,
+  maxForce: 4,
+  separationDist: 25,
+  alignmentDist: 50,
+  cohesionDist: 80,
+  
+  // Weights
+  separationWeight: 1.8,
+  alignmentWeight: 1.0,
+  cohesionWeight: 1.0,
+  mouseAvoidWeight: 2.5,
+  mouseAvoidDist: 120,
+  
   // Visuals
-  hueStart: 280,        // Purple
-  hueEnd: 180,          // Cyan
-  glowIntensity: 0.6,
-  trailAlpha: 0.08,
+  birdSizeRatio: 0.018,    // Size relative to canvas
+  
+  // Day/night cycle
+  cycleDuration: 60,       // Seconds for full day/night cycle
+  
+  // Sky colors for different times
+  sky: {
+    dawn: { top: '#4a3f6b', bottom: '#f4a460', sun: '#ff6b4a' },
+    day: { top: '#e8e0d0', bottom: '#f5f0e6', sun: '#f4d03f' },
+    dusk: { top: '#4a3055', bottom: '#ff7f50', sun: '#ff4500' },
+    night: { top: '#0a0a1a', bottom: '#1a1a3a', moon: '#e8e8f0' },
+  },
+  colors: [
+    '#c41e3a',  // Crimson red
+    '#1e5aa8',  // Deep blue  
+    '#d4a84b',  // Gold
+    '#2d5a45',  // Forest green
+    '#8b4557',  // Dusty rose
+    '#4a6fa5',  // Steel blue
+    '#c9722e',  // Burnt orange
+  ],
 };
 
-class Segment {
-  constructor(x, y, radius, index) {
+/**
+ * A single origami crane in the flock
+ */
+class Bird {
+  constructor(x, y, color) {
     this.x = x;
     this.y = y;
-    this.targetX = x;
-    this.targetY = y;
-    this.vx = 0;
-    this.vy = 0;
-    this.radius = radius;
-    this.index = index;
-    this.angle = 0;
+    this.vx = (Math.random() - 0.5) * CONFIG.maxSpeed;
+    this.vy = (Math.random() - 0.5) * CONFIG.maxSpeed;
+    this.ax = 0;
+    this.ay = 0;
+    this.angle = Math.atan2(this.vy, this.vx);
+    this.targetAngle = this.angle;
+    this.color = color;
+    this.wingPhase = Math.random() * Math.PI * 2;
   }
 
-  follow(targetX, targetY, speed) {
-    // Store previous position for velocity calc
-    const prevX = this.x;
-    const prevY = this.y;
+  /**
+   * Apply a steering force
+   */
+  applyForce(fx, fy) {
+    this.ax += fx;
+    this.ay += fy;
+  }
 
-    // Smooth follow with easing (slow in/slow out)
-    this.x += (targetX - this.x) * speed;
-    this.y += (targetY - this.y) * speed;
-
-    // Calculate velocity for stretch effect
-    this.vx = this.x - prevX;
-    this.vy = this.y - prevY;
-
-    // Calculate angle toward target for orientation
-    const dx = targetX - this.x;
-    const dy = targetY - this.y;
-    if (Math.abs(dx) > 0.01 || Math.abs(dy) > 0.01) {
-      this.angle = Math.atan2(dy, dx);
+  /**
+   * Boids: Separation - avoid crowding neighbors
+   */
+  separate(birds) {
+    let steerX = 0, steerY = 0, count = 0;
+    
+    for (const other of birds) {
+      if (other === this) continue;
+      const dx = this.x - other.x;
+      const dy = this.y - other.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      
+      if (dist < CONFIG.separationDist && dist > 0) {
+        // Weight by distance (closer = stronger repulsion)
+        steerX += (dx / dist) / dist;
+        steerY += (dy / dist) / dist;
+        count++;
+      }
     }
+    
+    if (count > 0) {
+      const mag = Math.sqrt(steerX * steerX + steerY * steerY);
+      if (mag > 0) {
+        steerX = (steerX / mag) * CONFIG.maxSpeed - this.vx;
+        steerY = (steerY / mag) * CONFIG.maxSpeed - this.vy;
+        // Limit force
+        const forceMag = Math.sqrt(steerX * steerX + steerY * steerY);
+        if (forceMag > CONFIG.maxForce) {
+          steerX = (steerX / forceMag) * CONFIG.maxForce;
+          steerY = (steerY / forceMag) * CONFIG.maxForce;
+        }
+      }
+    }
+    
+    return { x: steerX * CONFIG.separationWeight, y: steerY * CONFIG.separationWeight };
   }
 
-  getSpeed() {
-    return Math.sqrt(this.vx * this.vx + this.vy * this.vy);
+  /**
+   * Boids: Alignment - steer towards average heading of neighbors
+   */
+  align(birds) {
+    let avgVx = 0, avgVy = 0, count = 0;
+    
+    for (const other of birds) {
+      if (other === this) continue;
+      const dx = other.x - this.x;
+      const dy = other.y - this.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      
+      if (dist < CONFIG.alignmentDist) {
+        avgVx += other.vx;
+        avgVy += other.vy;
+        count++;
+      }
+    }
+    
+    if (count > 0) {
+      avgVx /= count;
+      avgVy /= count;
+      
+      const mag = Math.sqrt(avgVx * avgVx + avgVy * avgVy);
+      if (mag > 0) {
+        avgVx = (avgVx / mag) * CONFIG.maxSpeed;
+        avgVy = (avgVy / mag) * CONFIG.maxSpeed;
+      }
+      
+      let steerX = avgVx - this.vx;
+      let steerY = avgVy - this.vy;
+      
+      const forceMag = Math.sqrt(steerX * steerX + steerY * steerY);
+      if (forceMag > CONFIG.maxForce) {
+        steerX = (steerX / forceMag) * CONFIG.maxForce;
+        steerY = (steerY / forceMag) * CONFIG.maxForce;
+      }
+      
+      return { x: steerX * CONFIG.alignmentWeight, y: steerY * CONFIG.alignmentWeight };
+    }
+    
+    return { x: 0, y: 0 };
+  }
+
+  /**
+   * Boids: Cohesion - steer towards center of neighbors
+   */
+  cohere(birds) {
+    let centerX = 0, centerY = 0, count = 0;
+    
+    for (const other of birds) {
+      if (other === this) continue;
+      const dx = other.x - this.x;
+      const dy = other.y - this.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      
+      if (dist < CONFIG.cohesionDist) {
+        centerX += other.x;
+        centerY += other.y;
+        count++;
+      }
+    }
+    
+    if (count > 0) {
+      centerX /= count;
+      centerY /= count;
+      
+      return this.seek(centerX, centerY, CONFIG.cohesionWeight);
+    }
+    
+    return { x: 0, y: 0 };
+  }
+
+  /**
+   * Seek a target position
+   */
+  seek(targetX, targetY, weight = 1) {
+    let dx = targetX - this.x;
+    let dy = targetY - this.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    
+    if (dist > 0) {
+      dx = (dx / dist) * CONFIG.maxSpeed;
+      dy = (dy / dist) * CONFIG.maxSpeed;
+      
+      let steerX = dx - this.vx;
+      let steerY = dy - this.vy;
+      
+      const forceMag = Math.sqrt(steerX * steerX + steerY * steerY);
+      if (forceMag > CONFIG.maxForce) {
+        steerX = (steerX / forceMag) * CONFIG.maxForce;
+        steerY = (steerY / forceMag) * CONFIG.maxForce;
+      }
+      
+      return { x: steerX * weight, y: steerY * weight };
+    }
+    
+    return { x: 0, y: 0 };
+  }
+
+  /**
+   * Flee from a position
+   */
+  flee(targetX, targetY, weight = 1, radius = 100) {
+    const dx = this.x - targetX;
+    const dy = this.y - targetY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    
+    if (dist < radius && dist > 0) {
+      const strength = (1 - dist / radius) * weight;
+      const mag = Math.sqrt(dx * dx + dy * dy);
+      return { 
+        x: (dx / mag) * CONFIG.maxForce * strength, 
+        y: (dy / mag) * CONFIG.maxForce * strength 
+      };
+    }
+    
+    return { x: 0, y: 0 };
+  }
+
+  /**
+   * Update physics
+   */
+  update(dt, width, height) {
+    // Apply acceleration
+    this.vx += this.ax;
+    this.vy += this.ay;
+    
+    // Limit speed
+    const speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
+    if (speed > CONFIG.maxSpeed) {
+      this.vx = (this.vx / speed) * CONFIG.maxSpeed;
+      this.vy = (this.vy / speed) * CONFIG.maxSpeed;
+    }
+    
+    // Update position
+    this.x += this.vx * dt;
+    this.y += this.vy * dt;
+    
+    // Wrap around edges
+    if (this.x < -50) this.x = width + 50;
+    if (this.x > width + 50) this.x = -50;
+    if (this.y < -50) this.y = height + 50;
+    if (this.y > height + 50) this.y = -50;
+    
+    // Smooth angle transition (follow-through)
+    this.targetAngle = Math.atan2(this.vy, this.vx);
+    let angleDiff = this.targetAngle - this.angle;
+    while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+    while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+    this.angle += angleDiff * 0.15; // Lag creates follow-through
+    
+    // Update wing phase
+    this.wingPhase += dt * 8;
+    
+    // Reset acceleration
+    this.ax = 0;
+    this.ay = 0;
   }
 }
 
-class FollowChainDemo extends Game {
+class OrigamiMurmurationDemo extends Game {
   constructor(canvas) {
     super(canvas);
-    this.backgroundColor = '#000';
+    this.backgroundColor = CONFIG.bgColor;
   }
 
   init() {
     super.init();
+    
+    // Bird size proportional to canvas
+    this.birdSize = Math.min(this.width, this.height) * CONFIG.birdSizeRatio;
 
-    const cx = this.width / 2;
-    const cy = this.height / 2;
+    // Bird count proportional to canvas area
+    const canvasArea = this.width * this.height;
+    const birdCount = Math.floor(canvasArea * CONFIG.birdDensity);
 
-    // Create chain segments
-    this.segments = [];
-    let radius = CONFIG.baseRadius;
-
-    for (let i = 0; i < CONFIG.segmentCount; i++) {
-      this.segments.push(new Segment(cx, cy, radius, i));
-      radius *= CONFIG.radiusFalloff;
+    // Create flock
+    this.birds = [];
+    for (let i = 0; i < birdCount; i++) {
+      const x = Math.random() * this.width;
+      const y = Math.random() * this.height;
+      const color = CONFIG.colors[i % CONFIG.colors.length];
+      this.birds.push(new Bird(x, y, color));
     }
 
-    // Mouse/touch position (head follows this)
-    this.targetX = cx;
-    this.targetY = cy;
+    // Mouse position
+    this.mouseX = this.width / 2;
+    this.mouseY = this.height / 2;
+    this.mouseActive = false;
 
-    // Track mouse
     this.canvas.addEventListener('mousemove', (e) => {
       const rect = this.canvas.getBoundingClientRect();
-      this.targetX = (e.clientX - rect.left) * (this.width / rect.width);
-      this.targetY = (e.clientY - rect.top) * (this.height / rect.height);
+      this.mouseX = (e.clientX - rect.left) * (this.width / rect.width);
+      this.mouseY = (e.clientY - rect.top) * (this.height / rect.height);
+      this.mouseActive = true;
     });
 
-    // Track touch
+    this.canvas.addEventListener('mouseleave', () => {
+      this.mouseActive = false;
+    });
+
+    this.canvas.addEventListener('click', () => {
+      // Scatter! Add burst of force away from center
+      for (const bird of this.birds) {
+        const dx = bird.x - this.mouseX;
+        const dy = bird.y - this.mouseY;
+        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+        bird.vx += (dx / dist) * CONFIG.maxSpeed * 0.8;
+        bird.vy += (dy / dist) * CONFIG.maxSpeed * 0.8;
+      }
+    });
+
     this.canvas.addEventListener('touchmove', (e) => {
       e.preventDefault();
       const rect = this.canvas.getBoundingClientRect();
       const touch = e.touches[0];
-      this.targetX = (touch.clientX - rect.left) * (this.width / rect.width);
-      this.targetY = (touch.clientY - rect.top) * (this.height / rect.height);
+      this.mouseX = (touch.clientX - rect.left) * (this.width / rect.width);
+      this.mouseY = (touch.clientY - rect.top) * (this.height / rect.height);
+      this.mouseActive = true;
     }, { passive: false });
 
-    // Time for secondary animations
+    this.canvas.addEventListener('touchend', () => {
+      this.mouseActive = false;
+    });
+
     this.time = 0;
   }
 
@@ -127,24 +360,23 @@ class FollowChainDemo extends Game {
     super.update(dt);
     this.time += dt;
 
-    // Head segment follows cursor
-    const head = this.segments[0];
-    head.follow(this.targetX, this.targetY, CONFIG.followSpeed * 2);
-
-    // Each subsequent segment follows the one before it
-    // With progressively slower follow speed (overlapping action)
-    for (let i = 1; i < this.segments.length; i++) {
-      const segment = this.segments[i];
-      const leader = this.segments[i - 1];
-
-      // Calculate target position (behind the leader)
-      const dist = CONFIG.segmentSpacing;
-      const targetX = leader.x - Math.cos(leader.angle) * dist;
-      const targetY = leader.y - Math.sin(leader.angle) * dist;
-
-      // Follow with decreasing speed for more drag (follow through)
-      const followSpeed = CONFIG.followSpeed * (1 - i * 0.01);
-      segment.follow(targetX, targetY, Math.max(0.05, followSpeed));
+    // Apply boids rules to each bird
+    for (const bird of this.birds) {
+      const sep = bird.separate(this.birds);
+      const ali = bird.align(this.birds);
+      const coh = bird.cohere(this.birds);
+      
+      bird.applyForce(sep.x, sep.y);
+      bird.applyForce(ali.x, ali.y);
+      bird.applyForce(coh.x, coh.y);
+      
+      // Avoid mouse (predator)
+      if (this.mouseActive) {
+        const flee = bird.flee(this.mouseX, this.mouseY, CONFIG.mouseAvoidWeight, CONFIG.mouseAvoidDist);
+        bird.applyForce(flee.x, flee.y);
+      }
+      
+      bird.update(dt, this.width, this.height);
     }
   }
 
@@ -153,68 +385,438 @@ class FollowChainDemo extends Game {
     const w = this.width;
     const h = this.height;
 
-    // Motion blur trail
-    ctx.fillStyle = `rgba(0, 0, 0, ${CONFIG.trailAlpha})`;
+    // Calculate time of day (0 = midnight, 0.25 = dawn, 0.5 = noon, 0.75 = dusk)
+    const dayProgress = (this.time % CONFIG.cycleDuration) / CONFIG.cycleDuration;
+    
+    // Get sky colors based on time
+    const skyColors = this.getSkyColors(dayProgress);
+    
+    // Sky gradient
+    const gradient = ctx.createLinearGradient(0, 0, 0, h);
+    gradient.addColorStop(0, skyColors.top);
+    gradient.addColorStop(1, skyColors.bottom);
+    ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, w, h);
-
-    // Draw segments from tail to head (so head is on top)
-    for (let i = this.segments.length - 1; i >= 0; i--) {
-      const segment = this.segments[i];
-      const t = i / (this.segments.length - 1); // 0 = head, 1 = tail
-
-      // Calculate stretch based on velocity (squash & stretch)
-      const speed = segment.getSpeed();
-      const stretch = Math.min(CONFIG.maxStretch, 1 + speed * CONFIG.velocityStretch);
-      const squash = 1 / Math.sqrt(stretch); // Preserve volume
-
-      // Secondary action: gentle pulse
-      const pulse = 1 + Math.sin(this.time * 3 + i * 0.3) * 0.1;
-
-      // Calculate stretched dimensions
-      const stretchRadius = segment.radius * stretch * pulse;
-      const squashRadius = segment.radius * squash * pulse;
-
-      // Color gradient from head to tail
-      const hue = CONFIG.hueStart + (CONFIG.hueEnd - CONFIG.hueStart) * t;
-      const lightness = 60 - t * 20; // Head brighter
-      const alpha = 1 - t * 0.3; // Tail more transparent
-
-      // Draw with glow
-      ctx.save();
-      ctx.translate(segment.x, segment.y);
-      ctx.rotate(segment.angle);
-
-      // Outer glow
-      const glowSize = stretchRadius * 2;
-      const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, glowSize);
-      gradient.addColorStop(0, `hsla(${hue}, 100%, ${lightness}%, ${alpha})`);
-      gradient.addColorStop(0.5, `hsla(${hue}, 100%, ${lightness}%, ${alpha * 0.5})`);
-      gradient.addColorStop(1, `hsla(${hue}, 100%, ${lightness}%, 0)`);
-
-      ctx.beginPath();
-      ctx.ellipse(0, 0, glowSize, glowSize * squash / stretch, 0, 0, Math.PI * 2);
-      ctx.fillStyle = gradient;
-      ctx.fill();
-
-      // Core ellipse (stretched in direction of motion)
-      ctx.beginPath();
-      ctx.ellipse(0, 0, stretchRadius, squashRadius, 0, 0, Math.PI * 2);
-      ctx.fillStyle = `hsla(${hue}, 100%, ${lightness + 20}%, ${alpha})`;
-      ctx.fill();
-
-      ctx.restore();
+    
+    // Draw stars at night
+    if (dayProgress > 0.8 || dayProgress < 0.2) {
+      const nightIntensity = dayProgress > 0.5 
+        ? Math.min(1, (dayProgress - 0.8) / 0.15)
+        : Math.min(1, (0.2 - dayProgress) / 0.15);
+      this.drawStars(ctx, w, h, nightIntensity);
     }
 
-    // Draw connecting lines between segments for extra visual
+    // Calculate celestial body position (arc across sky, from offscreen to offscreen)
+    const celestialRadius = Math.min(w, h) * 0.07;
+    
+    // Arc parameters - extend beyond screen edges
+    const arcCenterX = w * 0.5;
+    const arcCenterY = h * 2.0; // Center further below screen for higher arc
+    const arcRadiusX = w * 0.9; // Horizontal spread
+    const arcRadiusY = h * 1.9; // Taller arc - peaks higher in the sky
+    
+    // Sun: travels from offscreen left-bottom to offscreen right-bottom
+    // Visible portion roughly 0.15 to 0.85, but we draw the full arc
+    const sunProgress = dayProgress; // 0-1 over full day
+    // Map to angle: start at ~200° (below left), peak at 90° (top), end at ~-20° (below right)
+    const sunAngle = Math.PI * 1.15 - sunProgress * Math.PI * 1.3; // ~207° to ~-27°
+    
+    const sunX = arcCenterX + Math.cos(sunAngle) * arcRadiusX;
+    const sunY = arcCenterY - Math.sin(sunAngle) * arcRadiusY;
+    
+    // Only draw sun if it's above the bottom edge (with some margin)
+    if (sunY < h + celestialRadius * 2) {
+      this.drawSun(ctx, sunX, sunY, celestialRadius, skyColors.celestial);
+    }
+    
+    // Moon: opposite phase from sun (offset by 0.5)
+    const moonPhase = (dayProgress + 0.5) % 1;
+    const moonAngle = Math.PI * 1.15 - moonPhase * Math.PI * 1.3;
+    
+    const moonX = arcCenterX + Math.cos(moonAngle) * arcRadiusX * 0.9;
+    const moonY = arcCenterY - Math.sin(moonAngle) * arcRadiusY * 0.85;
+    
+    // Only draw moon if it's above the bottom edge
+    if (moonY < h + celestialRadius * 2) {
+      this.drawMoon(ctx, moonX, moonY, celestialRadius * 0.85);
+    }
+
+    // Calculate bird size proportional to canvas
+    this.birdSize = Math.min(w, h) * CONFIG.birdSizeRatio;
+    
+    // Store day progress for bird rendering
+    this.dayProgress = dayProgress;
+
+    // Draw birds
+    for (const bird of this.birds) {
+      this.drawOrigamiBird(ctx, bird);
+    }
+  }
+  
+  /**
+   * Convert any color to rgba
+   */
+  toRgba(color, alpha) {
+    // Handle hex colors
+    if (color.startsWith('#')) {
+      const r = parseInt(color.slice(1, 3), 16);
+      const g = parseInt(color.slice(3, 5), 16);
+      const b = parseInt(color.slice(5, 7), 16);
+      return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    }
+    // Handle rgb() colors from lerpColor
+    if (color.startsWith('rgb(')) {
+      const match = color.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+      if (match) {
+        return `rgba(${match[1]}, ${match[2]}, ${match[3]}, ${alpha})`;
+      }
+    }
+    // Fallback
+    return `rgba(200, 200, 200, ${alpha})`;
+  }
+  
+  /**
+   * Interpolate between two hex colors
+   */
+  lerpColor(color1, color2, t) {
+    const r1 = parseInt(color1.slice(1, 3), 16);
+    const g1 = parseInt(color1.slice(3, 5), 16);
+    const b1 = parseInt(color1.slice(5, 7), 16);
+    const r2 = parseInt(color2.slice(1, 3), 16);
+    const g2 = parseInt(color2.slice(3, 5), 16);
+    const b2 = parseInt(color2.slice(5, 7), 16);
+    
+    const r = Math.round(r1 + (r2 - r1) * t);
+    const g = Math.round(g1 + (g2 - g1) * t);
+    const b = Math.round(b1 + (b2 - b1) * t);
+    
+    return `rgb(${r}, ${g}, ${b})`;
+  }
+  
+  /**
+   * Get sky colors based on time of day
+   */
+  getSkyColors(progress) {
+    const sky = CONFIG.sky;
+    
+    // 0.0-0.15: night to dawn
+    // 0.15-0.35: dawn to day
+    // 0.35-0.65: day
+    // 0.65-0.85: day to dusk
+    // 0.85-1.0: dusk to night
+    
+    if (progress < 0.15) {
+      // Night to dawn
+      const t = progress / 0.15;
+      return {
+        top: this.lerpColor(sky.night.top, sky.dawn.top, t),
+        bottom: this.lerpColor(sky.night.bottom, sky.dawn.bottom, t),
+        celestial: sky.dawn.sun
+      };
+    } else if (progress < 0.35) {
+      // Dawn to day
+      const t = (progress - 0.15) / 0.2;
+      return {
+        top: this.lerpColor(sky.dawn.top, sky.day.top, t),
+        bottom: this.lerpColor(sky.dawn.bottom, sky.day.bottom, t),
+        celestial: this.lerpColor(sky.dawn.sun, sky.day.sun, t)
+      };
+    } else if (progress < 0.65) {
+      // Day
+      return {
+        top: sky.day.top,
+        bottom: sky.day.bottom,
+        celestial: sky.day.sun
+      };
+    } else if (progress < 0.85) {
+      // Day to dusk
+      const t = (progress - 0.65) / 0.2;
+      return {
+        top: this.lerpColor(sky.day.top, sky.dusk.top, t),
+        bottom: this.lerpColor(sky.day.bottom, sky.dusk.bottom, t),
+        celestial: this.lerpColor(sky.day.sun, sky.dusk.sun, t)
+      };
+    } else {
+      // Dusk to night
+      const t = (progress - 0.85) / 0.15;
+      return {
+        top: this.lerpColor(sky.dusk.top, sky.night.top, t),
+        bottom: this.lerpColor(sky.dusk.bottom, sky.night.bottom, t),
+        celestial: sky.dusk.sun
+      };
+    }
+  }
+  
+  /**
+   * Draw stars for night sky
+   */
+  drawStars(ctx, w, h, intensity) {
+    // Use seeded random for consistent star positions
+    const starCount = 60;
+    ctx.fillStyle = `rgba(255, 255, 255, ${intensity * 0.8})`;
+    
+    for (let i = 0; i < starCount; i++) {
+      // Pseudo-random based on index
+      const x = ((i * 7919) % 1000) / 1000 * w;
+      const y = ((i * 6271) % 1000) / 1000 * h * 0.6; // Stars in upper portion
+      const size = ((i * 3571) % 100) / 100 * 2 + 0.5;
+      const twinkle = Math.sin(this.time * 3 + i) * 0.3 + 0.7;
+      
+      ctx.globalAlpha = intensity * twinkle;
+      ctx.beginPath();
+      ctx.arc(x, y, size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+  
+  /**
+   * Draw the sun
+   */
+  drawSun(ctx, x, y, radius, color) {
+    // Outer glow
+    const outerGlow = ctx.createRadialGradient(x, y, 0, x, y, radius * 4);
+    outerGlow.addColorStop(0, this.toRgba(color, 0.3));
+    outerGlow.addColorStop(0.5, this.toRgba(color, 0.1));
+    outerGlow.addColorStop(1, this.toRgba(color, 0));
+    ctx.fillStyle = outerGlow;
     ctx.beginPath();
-    ctx.moveTo(this.segments[0].x, this.segments[0].y);
-    for (let i = 1; i < this.segments.length; i++) {
-      const segment = this.segments[i];
-      ctx.lineTo(segment.x, segment.y);
+    ctx.arc(x, y, radius * 4, 0, Math.PI * 2);
+    ctx.fill();
+    
+    // Middle glow
+    const midGlow = ctx.createRadialGradient(x, y, 0, x, y, radius * 2);
+    midGlow.addColorStop(0, this.toRgba(color, 0.5));
+    midGlow.addColorStop(0.6, this.toRgba(color, 0.2));
+    midGlow.addColorStop(1, this.toRgba(color, 0));
+    ctx.fillStyle = midGlow;
+    ctx.beginPath();
+    ctx.arc(x, y, radius * 2, 0, Math.PI * 2);
+    ctx.fill();
+    
+    // Sun core
+    const sunCore = ctx.createRadialGradient(x, y, 0, x, y, radius);
+    sunCore.addColorStop(0, '#fffbe6');
+    sunCore.addColorStop(0.5, color);
+    sunCore.addColorStop(1, this.toRgba(color, 0.8));
+    ctx.fillStyle = sunCore;
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  
+  /**
+   * Draw the moon
+   */
+  drawMoon(ctx, x, y, radius) {
+    // Soft glow
+    const glow = ctx.createRadialGradient(x, y, 0, x, y, radius * 3);
+    glow.addColorStop(0, 'rgba(200, 210, 230, 0.3)');
+    glow.addColorStop(0.5, 'rgba(200, 210, 230, 0.1)');
+    glow.addColorStop(1, 'rgba(200, 210, 230, 0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(x, y, radius * 3, 0, Math.PI * 2);
+    ctx.fill();
+    
+    // Moon body
+    const moonGrad = ctx.createRadialGradient(x - radius * 0.3, y - radius * 0.3, 0, x, y, radius);
+    moonGrad.addColorStop(0, '#f8f8ff');
+    moonGrad.addColorStop(0.8, '#e8e8f0');
+    moonGrad.addColorStop(1, '#d0d0e0');
+    ctx.fillStyle = moonGrad;
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fill();
+    
+    // Subtle craters
+    ctx.fillStyle = 'rgba(180, 180, 200, 0.3)';
+    ctx.beginPath();
+    ctx.arc(x - radius * 0.3, y + radius * 0.2, radius * 0.15, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + radius * 0.25, y - radius * 0.25, radius * 0.1, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + radius * 0.1, y + radius * 0.4, radius * 0.12, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  /**
+   * Darken a color by a percentage
+   */
+  darkenColor(color, amount) {
+    if (color.startsWith('#')) {
+      let r = parseInt(color.slice(1, 3), 16);
+      let g = parseInt(color.slice(3, 5), 16);
+      let b = parseInt(color.slice(5, 7), 16);
+      r = Math.round(r * (1 - amount));
+      g = Math.round(g * (1 - amount));
+      b = Math.round(b * (1 - amount));
+      return `rgb(${r}, ${g}, ${b})`;
     }
-    ctx.strokeStyle = `hsla(${CONFIG.hueStart}, 80%, 50%, 0.2)`;
-    ctx.lineWidth = 2;
-    ctx.stroke();
+    return color;
+  }
+  
+  /**
+   * Lighten a color by a percentage
+   */
+  lightenColor(color, amount) {
+    if (color.startsWith('#')) {
+      let r = parseInt(color.slice(1, 3), 16);
+      let g = parseInt(color.slice(3, 5), 16);
+      let b = parseInt(color.slice(5, 7), 16);
+      r = Math.min(255, Math.round(r + (255 - r) * amount));
+      g = Math.min(255, Math.round(g + (255 - g) * amount));
+      b = Math.min(255, Math.round(b + (255 - b) * amount));
+      return `rgb(${r}, ${g}, ${b})`;
+    }
+    return color;
+  }
+
+  /**
+   * Draw a single origami bird (4-part geometric style)
+   */
+  drawOrigamiBird(ctx, bird) {
+    const size = this.birdSize;
+    const speed = Math.sqrt(bird.vx * bird.vx + bird.vy * bird.vy);
+    
+    // Squash & stretch based on speed
+    const stretch = 1 + (speed / CONFIG.maxSpeed) * 0.3;
+    const squash = 1 / Math.sqrt(stretch);
+    
+    // Wing flap animation (0 to 1, smooth)
+    const flapT = (Math.sin(bird.wingPhase) + 1) / 2; // 0-1
+    
+    // Adjust color based on time of day
+    let baseColor = bird.color;
+    const progress = this.dayProgress || 0.5;
+    
+    // Night: birds become silhouettes
+    if (progress > 0.85 || progress < 0.15) {
+      const nightAmount = progress > 0.5 
+        ? Math.min(1, (progress - 0.85) / 0.1)
+        : Math.min(1, (0.15 - progress) / 0.1);
+      baseColor = this.lerpColor(bird.color, '#1a1a2e', nightAmount * 0.85);
+    }
+    // Dawn/dusk: warm tint
+    else if (progress < 0.25 || progress > 0.75) {
+      const warmAmount = progress < 0.5
+        ? 1 - (progress - 0.15) / 0.1
+        : (progress - 0.75) / 0.1;
+      const warmColor = progress < 0.5 ? '#ff9966' : '#ff6644';
+      baseColor = this.lerpColor(bird.color, warmColor, Math.max(0, warmAmount) * 0.3);
+    }
+    
+    // Create 4 color variations for different parts
+    const bodyColor = this.darkenColor(baseColor, 0.15);
+    const headColor = baseColor;
+    const wingBackColor = this.lightenColor(baseColor, 0.1);
+    const wingFrontColor = this.darkenColor(baseColor, 0.05);
+    
+    ctx.save();
+    ctx.translate(bird.x, bird.y);
+    ctx.rotate(bird.angle);
+    ctx.scale(stretch, squash);
+    
+    // Normalized coordinates (bird faces right, centered at origin)
+    // Based on the SVG design, scaled to our size
+    const s = size / 50; // Scale factor
+    
+    // Wing positions: interpolate between up and down
+    // Back wing (behind body)
+    const backWing1 = { // Up position
+      p1: { x: -40 * s, y: -45 * s },
+      p2: { x: 15 * s, y: 5 * s },
+      p3: { x: -15 * s, y: 20 * s }
+    };
+    const backWing2 = { // Down position
+      p1: { x: -15 * s, y: 50 * s },
+      p2: { x: 15 * s, y: -5 * s },
+      p3: { x: -10 * s, y: 15 * s }
+    };
+    
+    // Front wing
+    const frontWing1 = { // Up position
+      p1: { x: 15 * s, y: 5 * s },
+      p2: { x: -5 * s, y: 20 * s },
+      p3: { x: -30 * s, y: -50 * s }
+    };
+    const frontWing2 = { // Down position
+      p1: { x: 15 * s, y: -5 * s },
+      p2: { x: -10 * s, y: 15 * s },
+      p3: { x: 5 * s, y: 50 * s }
+    };
+    
+    // Interpolate wing positions
+    const lerp = (a, b, t) => a + (b - a) * t;
+    
+    const backWing = {
+      p1: { x: lerp(backWing1.p1.x, backWing2.p1.x, flapT), y: lerp(backWing1.p1.y, backWing2.p1.y, flapT) },
+      p2: { x: lerp(backWing1.p2.x, backWing2.p2.x, flapT), y: lerp(backWing1.p2.y, backWing2.p2.y, flapT) },
+      p3: { x: lerp(backWing1.p3.x, backWing2.p3.x, flapT), y: lerp(backWing1.p3.y, backWing2.p3.y, flapT) }
+    };
+    
+    const frontWing = {
+      p1: { x: lerp(frontWing1.p1.x, frontWing2.p1.x, flapT), y: lerp(frontWing1.p1.y, frontWing2.p1.y, flapT) },
+      p2: { x: lerp(frontWing1.p2.x, frontWing2.p2.x, flapT), y: lerp(frontWing1.p2.y, frontWing2.p2.y, flapT) },
+      p3: { x: lerp(frontWing1.p3.x, frontWing2.p3.x, flapT), y: lerp(frontWing1.p3.y, frontWing2.p3.y, flapT) }
+    };
+    
+    // Body (static, lerp slightly for breathing)
+    const bodyBreath = lerp(0, 3 * s, flapT);
+    const body = {
+      p1: { x: -50 * s, y: bodyBreath },
+      p2: { x: 20 * s, y: -10 * s },
+      p3: { x: 15 * s, y: 5 * s - bodyBreath * 0.5 }
+    };
+    
+    // Head (static)
+    const head = {
+      p1: { x: 20 * s, y: -10 * s },
+      p2: { x: 50 * s, y: 0 },  // Beak tip
+      p3: { x: 15 * s, y: 3 * s }
+    };
+    
+    // Draw in order: back wing, body, head, front wing
+    
+    // Back wing
+    ctx.beginPath();
+    ctx.moveTo(backWing.p1.x, backWing.p1.y);
+    ctx.lineTo(backWing.p2.x, backWing.p2.y);
+    ctx.lineTo(backWing.p3.x, backWing.p3.y);
+    ctx.closePath();
+    ctx.fillStyle = wingBackColor;
+    ctx.fill();
+    
+    // Body
+    ctx.beginPath();
+    ctx.moveTo(body.p1.x, body.p1.y);
+    ctx.lineTo(body.p2.x, body.p2.y);
+    ctx.lineTo(body.p3.x, body.p3.y);
+    ctx.closePath();
+    ctx.fillStyle = bodyColor;
+    ctx.fill();
+    
+    // Head
+    ctx.beginPath();
+    ctx.moveTo(head.p1.x, head.p1.y);
+    ctx.lineTo(head.p2.x, head.p2.y);
+    ctx.lineTo(head.p3.x, head.p3.y);
+    ctx.closePath();
+    ctx.fillStyle = headColor;
+    ctx.fill();
+    
+    // Front wing
+    ctx.beginPath();
+    ctx.moveTo(frontWing.p1.x, frontWing.p1.y);
+    ctx.lineTo(frontWing.p2.x, frontWing.p2.y);
+    ctx.lineTo(frontWing.p3.x, frontWing.p3.y);
+    ctx.closePath();
+    ctx.fillStyle = wingFrontColor;
+    ctx.fill();
+
+    ctx.restore();
   }
 }
 
@@ -224,7 +826,7 @@ class FollowChainDemo extends Game {
  * @returns {Object} Game instance with stop() method
  */
 export default function day02(canvas) {
-  const game = new FollowChainDemo(canvas);
+  const game = new OrigamiMurmurationDemo(canvas);
   game.start();
 
   return {
