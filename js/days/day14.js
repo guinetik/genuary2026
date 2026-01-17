@@ -20,749 +20,14 @@ import {
   StateMachine,
 } from "@guinetik/gcanvas";
 
-// ============================================
-// Tangram Geometry Constants
-// ============================================
-
-const SQRT2 = Math.sqrt(2);
-
-// ============================================
-// Configuration
-// ============================================
-
-const CONFIG = {
-  animDuration: 0.8,
-  staggerDelay: 0.1,
-  colors: {
-    largeTriangle1: "#2196F3", // Blue
-    largeTriangle2: "#E91E63", // Magenta/Pink
-    mediumTriangle: "#9C27B0", // Purple
-    smallTriangle1: "#FFEB3B", // Yellow
-    smallTriangle2: "#4CAF50", // Green
-    square: "#E53935", // Red
-    parallelogram: "#FF9800", // Orange
-  },
-  strokeColor: "#FFFFFF",
-  strokeWidth: 2,
-  trailAlpha: 0.12,
-  button: {
-    width: 140,
-    height: 40,
-    spacing: 20,
-  },
-};
-
-const TANGRAM = {
-  LARGE_LEG: 1 / SQRT2, // ≈ 0.7071
-  MEDIUM_LEG: 0.5,
-  SMALL_LEG: 1 / (2 * SQRT2), // ≈ 0.3536
-  SQUARE_SIDE: 1 / (2 * SQRT2), // ≈ 0.3536
-  PARA_BASE: 0.5, // Parallelogram base
-  PARA_HEIGHT: 0.25, // Parallelogram height (area = 1/8 = 0.5 * 0.25)
-};
-
-// ============================================
-// Square Configurations (s₀ through s₅)
-// ============================================
-
-const Ll = TANGRAM.LARGE_LEG; // 0.7071
-const Ml = TANGRAM.MEDIUM_LEG; // 0.5
-const Sl = TANGRAM.SMALL_LEG; // 0.3536
-
-/**
- * All 6 canonical square tangram configurations.
- * Piece order: [large1, large2, medium, small1, small2, square, parallelogram]
- */
-const SQUARE_CONFIGS = [
-  // s₀ - Two large triangles share vertex at center, pointing to TL and BL corners
-  {
-    name: "s₀",
-    pieces: [
-      trianglePosition(0, 0, Ll, 225), // Large 1 - top, right angle at center
-      trianglePosition(0, 0, Ll, 135), // Large 2 - left, right angle at center
-      trianglePosition(0.5, 0.5, Ml, 180), // Medium - bottom-right corner
-      trianglePosition(0.25, -0.25, Sl, 315), // Small 1 - upper right area
-      trianglePosition(0, 0, Sl, 45), // Small 2 - center
-      { x: 0.25, y: 0, rotation: 45 }, // Square - center-right
-      { x: -0.125, y: 0.375, rotation: 0 }, // Parallelogram - bottom-left
-    ],
-  },
-
-  // s₁ - s₀ rotated 45° clockwise
-  {
-    name: "s₁",
-    pieces: [
-      trianglePosition(0, 0, Ll, 45), // Large 1
-      trianglePosition(0, 0, Ll, 135), // Large 2
-      trianglePosition(0.5, -0.5, Ml, 90), // Medium
-      trianglePosition(0, 0, Sl, 315), // Small 1
-      trianglePosition(-0.25, -0.25, Sl, 225), // Small 2
-      { x: 0, y: -0.25, rotation: 45 }, // Square
-      { x: 0.375, y: 0.125, rotation: 90 }, // Parallelogram
-    ],
-  },
-
-  /* // s₂ - s₁ mirrored horizontally
-  {
-    name: "s₂",
-    pieces: [
-      trianglePosition(0, 0, Ll, 45), // Large 1
-      trianglePosition(0, 0, Ll, 315), // Large 2
-      trianglePosition(-0.5, -0.5, Ml, 0), // Medium 
-      trianglePosition(0, 0, Sl, 225), // Small 1 
-      trianglePosition(-0.25, 0.25, Sl, 135), // Small 2
-      { x: -0.25, y: 0, rotation: 45 }, // Square
-      { x: 0.125, y: -0.375, rotation: 0 }, // Parallelogram 
-    ],
-  },
-
-  // s₃ - continuing rotation: medium at bottom-left
-  {
-    name: "s₃",
-    pieces: [
-      trianglePosition(0, 0, Ll, 225), // Large 1
-      trianglePosition(0, 0, Ll, 315), // Large 2
-      trianglePosition(-0.5, 0.5, Ml, 270), // Medium - bottom-left
-      trianglePosition(0, 0, Sl, 135), // Small 1
-      trianglePosition(0.25, 0.25, Sl, 45), // Small 2
-      { x: 0, y: 0.25, rotation: 45 }, // Square - bottom
-      { x: -0.375, y: -0.125, rotation: 90 }, // Parallelogram - left side
-    ],
-  },
-
-  // s₄ - continuing rotation: medium at bottom-right again, different angles
-  {
-    name: "s₄",
-    pieces: [
-      trianglePosition(0, 0, Ll, 135), // Large 1
-      trianglePosition(0, 0, Ll, 225), // Large 2
-      trianglePosition(0.5, 0.5, Ml, 180),
-      trianglePosition(0, 0, Sl, 45), // Small 1
-      trianglePosition(0.25, -0.25, Sl, 315), // Small 2
-      { x: 0.25, y: 0, rotation: 45 }, // Square - right
-      { x: -0.125, y: 0.375, rotation: 0 }, // Parallelogram - left side
-    ],
-  },
-
-  // s₅ - final variation
-  {
-    name: "s₅",
-    pieces: [
-      trianglePosition(0, 0, Ll, 45), // Large 1
-      trianglePosition(0, 0, Ll, 315), // Large 2
-      trianglePosition(-0.5, -0.5, Ml, 0), // Medium - top-left
-      trianglePosition(-0.25, 0.25, Sl, 135), // Small 1
-      trianglePosition(0, 0, Sl, 225), // Small 2
-      { x: -0.25, y: 0, rotation: 45 }, // Square
-      { x: 0.125, y: -0.375, rotation: 0 }, // Parallelogram - top-right
-    ],
-  }, */
-];
-
-const DOG_CONFIG = {
-  name: "dog",
-  view: { offsetX: 0, offsetY: -50, scale: 0.90 },
-  pieces: [
-    // Large 1
-    { x: 0.266, y: 0.153, rotation: 180 },
-    // Large 2
-    { x: -0.326, y: 0.275, rotation: 0 },
-    // Medium
-    { x: 0.738, y: 0.389, rotation: 315 },
-    // Small 1
-    { x: 0.621, y: 0.153, rotation: 0 },
-    // Small 2
-    { x: 0.752, y: -0.402, rotation: 45 },
-    // Square
-    { x: 0.679, y: -0.142, rotation: 90 },
-    // Parallelogram
-    { x: -0.717, y: -0.139, rotation: 225 },
-  ],
-}
-
-const CAT_CONFIGS = [
-  {
-    name: "cat",
-    view: { offsetX: -150, offsetY: -50, scale: 0.7 },
-    pieces: [
-      // Large 1
-      { x: 0.416, y: 0.376, rotation: 135 },
-      // Large 2
-      { x: 0.721, y: 0.641, rotation: 180 },
-      // Medium
-      { x: 0.132, y: 0.23, rotation: 315 },
-      // Small 1
-      { x: -0.167, y: -0.375, rotation: 135 },
-      // Small 2
-      { x: 0.167, y: -0.375, rotation: 315 },
-      // Square
-      { x: 0.0, y: -0.124, rotation: 45 },
-      // Parallelogram
-      { x: 1.332, y: 0.751, rotation: 0 },
-    ],
-  },
-  {
-    name: "cat2",
-    view: { offsetX: -50, offsetY: -75, scale: 0.6 },
-    pieces: [
-      // Large 1
-      { x: 0.405, y: 0.958, rotation: 180 },
-      // Large 2
-      { x: 0.307, y: 0.486, rotation: 135 },
-      // Medium
-      { x: 0.021, y: 0.217, rotation: 315 },
-      // Small 1
-      { x: 0.167, y: -0.501, rotation: 315 },
-      // Small 2
-      { x: -0.167, y: -0.501, rotation: 135 },
-      // Square
-      { x: 0.0, y: -0.25, rotation: 45 },
-      // Parallelogram
-      { x: -0.037, y: 0.571, rotation: 225, scaleX: -1 },
-    ],
-  },
-  {
-    name: "cat_sitting",
-    view: { offsetX: 0, offsetY: 0, scale: 0.8 },
-    pieces: [
-      // Large 1
-      { x: 0.469, y: 0.292, rotation: 45 },
-      // Large 2
-      { x: -0.031, y: 0.124, rotation: 225 },
-      // Medium
-      { x: -0.365, y: 0.292, rotation: 270 },
-      // Small 1
-      { x: 0.887, y: -0.292, rotation: 315 },
-      // Small 2
-      { x: 0.552, y: -0.292, rotation: 135 },
-      // Square
-      { x: 0.719, y: -0.041, rotation: 45 },
-      // Parallelogram
-      { x: -0.885, y: 0.282, rotation: 225 },
-    ],
-  },
-];
-
-const BEAR_CONFIG = {
-  name: "bear",
-  view: { offsetX: 0, offsetY: -85, scale: 0.9 },
-  pieces: [
-    // Large 1
-    { x: -0.737, y: 0.149, rotation: 315 },
-    // Large 2
-    { x: -0.335, y: -0.116, rotation: 0 },
-    // Medium
-    { x: -0.03, y: -0.019, rotation: 180 },
-    // Small 1
-    { x: 0.608, y: -0.116, rotation: 270 },
-    // Small 2
-    { x: -0.737, y: 0.649, rotation: 135 },
-    // Square
-    { x: 0.313, y: -0.174, rotation: 0 },
-    // Parallelogram
-    { x: 0.137, y: 0.326, rotation: 225 },
-  ],
-};
-
-const SHARK_CONFIG = {
-  name: "custom",
-  view: { offsetX: 0, offsetY: 0, scale: 0.8 },
-  pieces: [
-    // Large 1
-    { x: -0.501, y: 0.333, rotation: 45 },
-    // Large 2
-    { x: -0.026, y: 0.236, rotation: 90 },
-    // Medium
-    { x: 1.083, y: -0.167, rotation: 270 },
-    // Small 1
-    { x: -0.25, y: 0.584, rotation: 225 },
-    // Small 2
-    { x: 0.182, y: -0.117, rotation: 180 },
-    // Square
-    { x: 0.388, y: 0.177, rotation: 0 },
-    // Parallelogram
-    { x: 0.739, y: 0.0, rotation: 135 },
-  ],
-};
-
-const CAMEL_CONFIG = {
-  name: "camel",
-  view: { offsetX: -175, offsetY: -50, scale: 0.75 },
-  pieces: [
-    // Large 1
-    { x: 0.411, y: 0.413, rotation: 135 },
-    // Large 2
-    { x: 0.963, y: 0.396, rotation: 90 },
-    // Medium
-    { x: 0.845, y: 0.042, rotation: 45 },
-    // Small 1
-    { x: 0.16, y: -0.338, rotation: 315 },
-    // Small 2
-    { x: -0.006, y: -0.504, rotation: 225 },
-    // Square
-    { x: 0.492, y: -0.089, rotation: 45 },
-    // Parallelogram
-    { x: 0.117, y: 0.036, rotation: 90 },
-  ],
-};
-
-const HOUSE_CONFIGS = [
-  {
-    name: "house",
-    view: { offsetX: 0, offsetY: 0, scale: 0.9 },
-    pieces: [
-      // Large 1
-      { x: 0.222, y: -0.026, rotation: 45 },
-      // Large 2
-      { x: -0.024, y: 0.473, rotation: 45 },
-      // Medium
-      { x: -0.358, y: 0.307, rotation: 0 },
-      // Small 1
-      { x: 0.392, y: 0.39, rotation: 315 },
-      // Small 2
-      { x: 0.227, y: 0.225, rotation: 225 },
-      // Square
-      { x: -0.206, y: -0.287, rotation: 0 },
-      // Parallelogram
-      { x: -0.398, y: 0.016, rotation: 0 },
-    ],
-  },
-  {
-    name: "house2",
-    view: { offsetX: 0, offsetY: 105, scale: 0.9 },
-    pieces: [
-      // Large 1
-      { x: 0.22, y: -0.153, rotation: 270 },
-      // Large 2
-      { x: -0.252, y: -0.153, rotation: 180 },
-      // Medium
-      { x: 0.16, y: 0.319, rotation: 45 },
-      // Small 1
-      { x: -0.076, y: 0.202, rotation: 0 },
-      // Small 2
-      { x: 0.396, y: 0.202, rotation: 90 },
-      // Square
-      { x: -0.37, y: 0.26, rotation: 90 },
-      // Parallelogram
-      { x: 0.442, y: -0.416, rotation: 90 },
-    ],
-  },
-];
-
-const HORSERIDER_CONFIG = {
-  name: "horserider",
-  view: { offsetX: -50, offsetY: -55, scale: 0.7 },
-  pieces: [
-    // Large 1
-    { x: 0.034, y: 0.617, rotation: 0 },
-    // Large 2
-    { x: 0.647, y: 0.481, rotation: 180 },
-    // Medium
-    { x: 0.172, y: 0.214, rotation: 270 },
-    // Small 1
-    { x: 1.0, y: 0.244, rotation: 270 },
-    // Small 2
-    { x: 0.765, y: 0.833, rotation: 90 },
-    // Square
-    { x: 0.006, y: -0.369, rotation: 45 },
-    // Parallelogram
-    { x: -0.58, y: 0.507, rotation: 0 },
-  ],
-};
-
-const HORSE_CONFIG = {
-  name: "horse",
-  view: { offsetX: 0, offsetY: -105, scale: 0.65 },
-  pieces: [
-    // Large 1
-    { x: 0.167, y: 0.482, rotation: 135 },
-    // Large 2
-    { x: -0.235, y: 0.217, rotation: 90 },
-    // Medium
-    { x: -0.353, y: -0.489, rotation: 45 },
-    // Small 1
-    { x: -0.707, y: 0.149, rotation: 45 },
-    // Small 2
-    { x: -0.117, y: 0.924, rotation: 180 },
-    // Square
-    { x: -0.176, y: -0.195, rotation: 0 },
-    // Parallelogram
-    { x: 0.678, y: 0.835, rotation: 225, scaleY: -1 },
-  ],
-}
-
-const HELICOPTER_CONFIG = {
-  name: "helicopter",
-  view: { offsetX: -200, offsetY: 75, scale: 0.85 },
-  pieces: [
-    // Large 1
-    { x: 0.167, y: 0.000, rotation: 135 },
-    // Large 2
-    { x: -0.167, y: 0.000, rotation: 315 },
-    // Medium
-    { x: -0.355, y: -0.618, rotation: 45 },
-    // Small 1
-    { x: 0.501, y: 0.167, rotation: 45 },
-    // Small 2
-    { x: 0.751, y: 0.083, rotation: 225 },
-    // Square
-    { x: 1.136, y: -0.120, rotation: 45 },
-    // Parallelogram
-    { x: 0.373, y: -0.625, rotation: 0, scaleX: -1, scaleY: -1 },
-  ],
-};
-
-const PLANE_CONFIG = {
-  name: "plane",
-  view: { offsetX: 0, offsetY: 0, scale: 0.80 },
-  pieces: [
-    // Large 1
-    { x: 0.481, y: -0.216, rotation: 180 },
-    // Large 2
-    { x: -0.245, y: -0.061, rotation: 225 },
-    // Medium
-    { x: 0.092, y: 0.439, rotation: 90 },
-    // Small 1
-    { x: -0.495, y: 0.189, rotation: 45 },
-    // Small 2
-    { x: -0.223, y: -0.312, rotation: 45 },
-    // Square
-    { x: -0.745, y: 0.021, rotation: 45 },
-    // Parallelogram
-    { x: 0.133, y: 0.147, rotation: 180 },
-  ],
-}
-
-const BOAT_CONFIG = {
-  name: "boat",
-  view: { offsetX: 0, offsetY: 140, scale: 0.7 },
-  pieces: [
-    // Large 1
-    { x: 0.157, y: -0.166, rotation: 135 },
-    // Large 2
-    { x: -0.245, y: 0.006, rotation: 180 },
-    // Medium
-    { x: 0.157, y: -0.832, rotation: 270 },
-    // Small 1
-    { x: 0.24, y: 0.25, rotation: 45 },
-    // Small 2
-    { x: 0.24, y: 0.418, rotation: 225 },
-    // Square
-    { x: 0.491, y: 0.083, rotation: 45 },
-    // Parallelogram
-    { x: -0.134, y: 0.459, rotation: 0, scaleY: -1 },
-  ],
-};
-
-const GOOSE_CONFIG = {
-  name: "goose",
-  view: { offsetX: 0, offsetY: -80, scale: 0.72 },
-  pieces: [
-    // Large 1
-    { x: 0.403, y: 0.447, rotation: 225 },
-    // Large 2
-    { x: 0.138, y: 0.751, rotation: 270 },
-    // Medium
-    { x: -0.214, y: 0.633, rotation: 315 },
-    // Small 1
-    { x: -0.317, y: -0.385, rotation: 180 },
-    // Small 2
-    { x: -0.367, y: 0.383, rotation: 135 },
-    // Square
-    { x: -0.2, y: 0.132, rotation: 45 },
-    // Parallelogram
-    { x: -0.074, y: -0.244, rotation: 90 },
-  ],
-};
-
-const RABBIT_CONFIG = {
-  name: "rabbit",
-  view: { offsetX: 0, offsetY: -100, scale: 0.6 },
-  pieces: [
-    // Large 1
-    { x: -0.306, y: 0.483, rotation: 315 },
-    // Large 2
-    { x: 0.094, y: 0.954, rotation: 270 },
-    // Medium
-    { x: 0.026, y: 0.315, rotation: 270 },
-    // Small 1
-    { x: 0.595, y: -0.136, rotation: 180 },
-    // Small 2
-    { x: 0.242, y: 0.599, rotation: 90 },
-    // Square
-    { x: 0.11, y: -0.018, rotation: 45 },
-    // Parallelogram
-    { x: -0.242, y: -0.445, rotation: 45 },
-  ],
-};
-
-const ROCKET_CONFIG = {
-  name: "rocket",
-  view: { offsetX: 50, offsetY: 0, scale: 0.6 },
-  pieces: [
-    // Large 1
-    { x: -0.054, y: 0.267, rotation: 315 },
-    // Large 2
-    { x: -0.222, y: -0.233, rotation: 135 },
-    // Medium
-    { x: -0.054, y: -0.566, rotation: 90 },
-    // Small 1
-    { x: -0.556, y: 0.767, rotation: 135 },
-    // Small 2
-    { x: -0.137, y: -0.817, rotation: 45 },
-    // Square
-    { x: -0.389, y: 0.516, rotation: 45 },
-    // Parallelogram
-    { x: 0.237, y: 0.642, rotation: 270 },
-  ],
-};
-
-const TURTLE_CONFIG = {
-  name: "turtle",
-  view: { offsetX: 0, offsetY: -90, scale: 0.7 },
-  pieces: [
-    // Large 1
-    { x: 0.167, y: 0.326, rotation: 135 },
-    // Large 2
-    { x: -0.166, y: 0.326, rotation: 315 },
-    // Medium
-    { x: -0.539, y: -0.11, rotation: 45 },
-    // Small 1
-    { x: 0.36, y: 0.82, rotation: 90 },
-    // Small 2
-    { x: -0.36, y: 0.82, rotation: 0 },
-    // Square
-    { x: 0.0, y: -0.423, rotation: 45 },
-    // Parallelogram
-    { x: 0.542, y: -0.162, rotation: 315, scaleY: -1 },
-  ],
-};
-
-const CHICKEN_CONFIG = {
-  name: "chicken",
-  view: { offsetX: 0, offsetY: -120, scale: 0.7 },
-  pieces: [
-    // Large 1
-    { x: -0.106, y: 0.253, rotation: 90 },
-    // Large 2
-    { x: 0.366, y: 0.253, rotation: 0 },
-    // Medium
-    { x: -0.41, y: -0.149, rotation: 270 },
-    // Small 1
-    { x: 0.38, y: 0.641, rotation: 45 },
-    // Small 2
-    { x: 0.734, y: -0.419, rotation: 45 },
-    // Square
-    { x: 0.661, y: -0.159, rotation: 90 },
-    // Parallelogram
-    { x: -0.049, y: 0.724, rotation: 45, scaleY: -1 },
-  ],
-};
-
-const PYRAMID_CONFIG = {
-  name: "pyramid",
-  view: { offsetX: 0, offsetY: -50, scale: 0.95 },
-  pieces: [
-    // Large 1
-    { x: 0.489, y: 0.373, rotation: 45 },
-    // Large 2
-    { x: -0.511, y: 0.373, rotation: 45 },
-    // Medium
-    { x: -0.177, y: 0.206, rotation: 90 },
-    // Small 1
-    { x: 0.073, y: 0.289, rotation: 135 },
-    // Small 2
-    { x: -0.011, y: -0.293, rotation: 45 },
-    // Square
-    { x: 0.239, y: 0.04, rotation: 45 },
-    // Parallelogram
-    { x: -0.136, y: -0.084, rotation: 0 },
-  ],
-};
-
-const FROG_CONFIG = {
-  name: "custom",
-  view: { offsetX: 0, offsetY: -100, scale: 0.75 },
-  pieces: [
-    // Large 1
-    { x: 0.169, y: 0.579, rotation: 45 },
-    // Large 2
-    { x: -0.033, y: 0.113, rotation: 225 },
-    // Medium
-    { x: -0.027, y: -0.173, rotation: 45 },
-    // Small 1
-    { x: 0.386, y: -0.472, rotation: 90 },
-    // Small 2
-    { x: 0.269, y: -0.355, rotation: 270 },
-    // Square
-    { x: -0.379, y: -0.413, rotation: 180 },
-    // Parallelogram
-    { x: 0.044, y: 0.871, rotation: 180 },
-  ],
-}
-
-const SEAL_CONFIG = {
-  name: "seal",
-  view: { offsetX: -100, offsetY: -100, scale: 0.85 },
-  pieces: [
-    // Large 1
-    { x: 0.335, y: 0.286, rotation: 180 },
-    // Large 2
-    { x: -0.329, y: 0.380, rotation: 225 },
-    // Medium
-    { x: 0.924, y: -0.303, rotation: 45 },
-    // Small 1
-    { x: 0.688, y: 0.286, rotation: 0 },
-    // Small 2
-    { x: -0.711, y: 0.096, rotation: 270 },
-    // Square
-    { x: 0.747, y: -0.009, rotation: 90 },
-    // Parallelogram
-    { x: 0.747, y: 0.522, rotation: 135 },
-  ],
-}
-
-const CRAB_CONFIG = {
-  name: "crab",
-  view: { offsetX: 0, offsetY: 0, scale: 0.80 },
-  pieces: [
-    // Large 1
-    { x: 0.292, y: 0.044, rotation: 180 },
-    // Large 2
-    { x: -0.295, y: 0.160, rotation: 0 },
-    // Medium
-    { x: 0.646, y: -0.369, rotation: 135 },
-    // Small 1
-    { x: -0.648, y: -0.546, rotation: 180 },
-    // Small 2
-    { x: 0.409, y: 0.398, rotation: 90 },
-    // Square
-    { x: 0.000, y: -0.250, rotation: 90 },
-    // Parallelogram
-    { x: -0.531, y: -0.250, rotation: 225 },
-  ],
-}
-
-const GIRAFFE_CONFIG = {
-  name: "giraffe",
-  view: { offsetX: 0, offsetY: -200, scale: 0.53 },
-  pieces: [
-    // Large 1
-    { x: 0.086, y: 1.127, rotation: 315 },
-    // Large 2
-    { x: -0.415, y: 1.127, rotation: 315 },
-    // Medium
-    { x: 0.419, y: -0.290, rotation: 270 },
-    // Small 1
-    { x: 0.169, y: -0.124, rotation: 315 },
-    // Small 2
-    { x: -0.164, y: 0.877, rotation: 135 },
-    // Square
-    { x: 0.003, y: 0.626, rotation: 45 },
-    // Parallelogram
-    { x: 0.127, y: 0.252, rotation: 270 },
-  ],
-}
-
-const CROW_CONFIG = {
-  name: "crow",
-  view: { offsetX: -275, offsetY: -125, scale: 0.80 },
-  pieces: [
-    // Large 1
-    { x: 0.765, y: 0.236, rotation: 90 },
-    // Large 2
-    { x: 0.501, y: -0.166, rotation: 45 },
-    // Medium
-    { x: 1.167, y: 0.333, rotation: 270 },
-    // Small 1
-    { x: 0.931, y: 0.804, rotation: 45 },
-    // Small 2
-    { x: -0.249, y: -0.083, rotation: 45 },
-    // Square
-    { x: 0.000, y: -0.250, rotation: 45 },
-    // Parallelogram
-    { x: 1.376, y: 0.625, rotation: 180, scaleY: -1 },
-  ],
-}
-
-//const ALL_CONFIGS = [CROW_CONFIG];
-
-const ALL_CONFIGS = [
-  ...SQUARE_CONFIGS,
-  ...CAT_CONFIGS,
-  ...HOUSE_CONFIGS,
-  ROCKET_CONFIG,
-  RABBIT_CONFIG,
-  GOOSE_CONFIG,
-  BOAT_CONFIG,
-  HORSERIDER_CONFIG,
-  CAMEL_CONFIG,
-  BEAR_CONFIG,
-  SHARK_CONFIG,
-  CROW_CONFIG,
-  GIRAFFE_CONFIG,
-  CRAB_CONFIG,
-  TURTLE_CONFIG,
-  PYRAMID_CONFIG,
-  FROG_CONFIG,
-  SEAL_CONFIG,
-  HORSE_CONFIG,
-  HELICOPTER_CONFIG,
-  PLANE_CONFIG,
-];
-
-/**
- * Starting configuration for design mode.
- * Set to null to scatter pieces, or paste a config to start from it.
- */
-const DESIGN_START_CONFIG = SQUARE_CONFIGS[1]; // Set to a config like HOUSE_CONFIG to start from it
-
-/**
- * Default framing for configurations (centered, no scaling).
- * @type {{offsetX:number, offsetY:number, scale:number}}
- */
-const DEFAULT_VIEW = { offsetX: 0, offsetY: 0, scale: 1 };
-
-// ============================================
-// Geometry Utilities
-// ============================================
-
-/**
- * Rotate a point around the origin.
- * @param {number} x Local x coordinate
- * @param {number} y Local y coordinate
- * @param {number} angleDeg Rotation angle in degrees (clockwise)
- * @returns {{x:number,y:number}} Rotated point
- */
-function rotatePoint(x, y, angleDeg) {
-  const rad = (angleDeg * Math.PI) / 180;
-  return {
-    x: x * Math.cos(rad) - y * Math.sin(rad),
-    y: x * Math.sin(rad) + y * Math.cos(rad),
-  };
-}
-
-/**
- * Calculate position for a RightTriangle given where its right angle should be.
- * Assumes the `RightTriangle` shape is defined with its right angle at local (0,0)
- * and legs extending along +X and +Y; the `GameObject` origin is treated as the
- * centroid, so we offset by `(-leg/3, -leg/3)` before rotating.
- *
- * @param {number} cornerX Normalized x where the right angle should land
- * @param {number} cornerY Normalized y where the right angle should land
- * @param {number} leg Normalized leg length for the triangle
- * @param {number} rotationDeg Rotation angle in degrees (clockwise)
- * @returns {{x:number,y:number,rotation:number}} Transform for the piece
- */
-function trianglePosition(cornerX, cornerY, leg, rotationDeg) {
-  const localCorner = { x: -leg / 3, y: -leg / 3 };
-  const rotated = rotatePoint(localCorner.x, localCorner.y, rotationDeg);
-  return {
-    x: cornerX - rotated.x,
-    y: cornerY - rotated.y,
-    rotation: rotationDeg,
-  };
-}
+import {
+  CONFIG,
+  TANGRAM,
+  ALL_CONFIGS,
+  DESIGN_START_CONFIG,
+  DEFAULT_VIEW,
+  rotatePoint,
+} from "./day14.config.js";
 
 /**
  * Resolve the desired Scene framing for a given configuration.
@@ -1060,7 +325,7 @@ class TangramDemo extends Game {
             this.enableDragging();
             this.enableWheelZoom();
             console.log(
-              "[Design Mode] Q/E rotate, W/S flip (mirror), Wheel zoom, Drag to pan, P print"
+              "[Design Mode] Q/E rotate, W/S flip, Wheel zoom, Drag canvas, P print, SHIFT = no snap"
             );
           },
           exit: () => {
@@ -1194,9 +459,22 @@ class TangramDemo extends Game {
         e.preventDefault();
         this.fsm.setState("menu");
       }
+      
+      // Track shift key for snap disable
+      if (e.shiftKey) {
+        this._shiftHeld = true;
+      }
+    };
+    
+    // Track shift release
+    this._onKeyUp = (e) => {
+      if (e.key === 'Shift') {
+        this._shiftHeld = false;
+      }
     };
 
     window.addEventListener("keydown", this._onKeyDown, { capture: true });
+    window.addEventListener("keyup", this._onKeyUp, { capture: true });
   }
 
   /**
@@ -1443,34 +721,102 @@ class TangramDemo extends Game {
   }
 
   /**
+   * Find closest point on a line segment to a point.
+   * @param {Object} p - Point {x, y}
+   * @param {Object} a - Segment start {x, y}
+   * @param {Object} b - Segment end {x, y}
+   * @returns {{x: number, y: number, dist: number}}
+   */
+  _closestPointOnSegment(p, a, b) {
+    const abx = b.x - a.x;
+    const aby = b.y - a.y;
+    const apx = p.x - a.x;
+    const apy = p.y - a.y;
+    
+    const abLenSq = abx * abx + aby * aby;
+    if (abLenSq === 0) {
+      // Degenerate segment (a == b)
+      const dist = Math.sqrt(apx * apx + apy * apy);
+      return { x: a.x, y: a.y, dist };
+    }
+    
+    // Project p onto ab, clamped to [0,1]
+    let t = (apx * abx + apy * aby) / abLenSq;
+    t = Math.max(0, Math.min(1, t));
+    
+    const closestX = a.x + t * abx;
+    const closestY = a.y + t * aby;
+    const dx = p.x - closestX;
+    const dy = p.y - closestY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    
+    return { x: closestX, y: closestY, dist, t };
+  }
+
+  /**
    * Snap a piece to nearby pieces if close enough.
+   * Hold SHIFT to disable snapping.
+   * Supports both vertex-to-vertex and vertex-to-edge snapping.
    * @param {TangramPiece} piece - The piece to snap
    */
   snapPieceToNearby(piece) {
-    const SNAP_THRESHOLD = 25; // Pixels threshold for snapping
+    // Check if SHIFT is held to disable snapping
+    if (this._shiftHeld) {
+      console.log('[Snap] Disabled (SHIFT held)');
+      return;
+    }
+    
+    const VERTEX_SNAP_THRESHOLD = 20; // Pixels for vertex-to-vertex
+    const EDGE_SNAP_THRESHOLD = 15;   // Pixels for vertex-to-edge (tighter)
 
     const pieceVerts = piece.getWorldVertices();
     if (pieceVerts.length === 0) return;
 
     let bestSnap = null;
-    let bestDist = SNAP_THRESHOLD;
+    let bestDist = Math.max(VERTEX_SNAP_THRESHOLD, EDGE_SNAP_THRESHOLD);
+    let snapType = '';
 
     // Check all other pieces
     for (const other of this.pieces) {
       if (other === piece) continue;
 
       const otherVerts = other.getWorldVertices();
+      const numOtherVerts = otherVerts.length;
 
-      // Find closest vertex pair
+      // 1. Vertex-to-vertex snapping (corners)
       for (const pv of pieceVerts) {
         for (const ov of otherVerts) {
           const dx = ov.x - pv.x;
           const dy = ov.y - pv.y;
           const dist = Math.sqrt(dx * dx + dy * dy);
 
-          if (dist < bestDist) {
+          if (dist < bestDist && dist < VERTEX_SNAP_THRESHOLD) {
             bestDist = dist;
             bestSnap = { dx, dy };
+            snapType = 'vertex';
+          }
+        }
+      }
+
+      // 2. Vertex-to-edge snapping (for edges like hypotenuse)
+      // Only check if we haven't found a very close vertex snap
+      if (bestDist > EDGE_SNAP_THRESHOLD * 0.5) {
+        for (const pv of pieceVerts) {
+          for (let i = 0; i < numOtherVerts; i++) {
+            const a = otherVerts[i];
+            const b = otherVerts[(i + 1) % numOtherVerts];
+            
+            const closest = this._closestPointOnSegment(pv, a, b);
+            
+            // Skip if closest point is at a vertex (t near 0 or 1)
+            // This prevents double-snapping and prioritizes vertex snaps
+            if (closest.t < 0.05 || closest.t > 0.95) continue;
+            
+            if (closest.dist < bestDist && closest.dist < EDGE_SNAP_THRESHOLD) {
+              bestDist = closest.dist;
+              bestSnap = { dx: closest.x - pv.x, dy: closest.y - pv.y };
+              snapType = 'edge';
+            }
           }
         }
       }
@@ -1481,9 +827,7 @@ class TangramDemo extends Game {
       piece.x += bestSnap.dx;
       piece.y += bestSnap.dy;
       console.log(
-        `[Snap] Snapped piece by (${bestSnap.dx.toFixed(
-          1
-        )}, ${bestSnap.dy.toFixed(1)})`
+        `[Snap] ${snapType} snap by (${bestSnap.dx.toFixed(1)}, ${bestSnap.dy.toFixed(1)})`
       );
     }
   }
@@ -1587,16 +931,17 @@ ${this.pieces
 
   /**
    * Apply scene framing (position + scale) for the current configuration.
-   * Offsets scale proportionally with screen size for consistent framing.
+   * Offsets scale proportionally with the tangram size (baseSize).
    * @param {boolean} animate Whether to tween into the framing
    */
   applySceneView(animate = true) {
     const view = getViewForConfig(this.configuration);
     
-    // Scale offsets proportionally to screen size (base reference: 800px)
-    const baseSize = 800;
-    const minDim = Math.min(this.width, this.height);
-    const offsetScale = minDim / baseSize;
+    // Scale offsets relative to baseSize so figures stay centered at any screen size
+    // baseSize = minDim * 0.8, so a 100px offset at 800px canvas = 0.125 * baseSize
+    // This approach works regardless of aspect ratio
+    const referenceBase = 640; // baseSize at 800px canvas (800 * 0.8)
+    const offsetScale = this.baseSize / referenceBase;
     
     const target = {
       x: this.width / 2 + view.offsetX * offsetScale,
@@ -1856,10 +1201,31 @@ ${this.pieces
     this.fsm.update(dt);
   }
 
+  render() {
+    super.render();
+    
+    // Draw figure name in showcase mode
+    if (this.fsm?.state === 'showcase' && this.configuration?.name) {
+      const ctx = this.ctx;
+      const name = this.configuration.name;
+      
+      ctx.save();
+      ctx.font = '14px "Fira Code", monospace';
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText(name, 16, this.height - 16);
+      ctx.restore();
+    }
+  }
+
   stop() {
     // Cleanup
     if (this._onKeyDown) {
       window.removeEventListener("keydown", this._onKeyDown, { capture: true });
+    }
+    if (this._onKeyUp) {
+      window.removeEventListener("keyup", this._onKeyUp, { capture: true });
     }
     this.removeCanvasClickHandler();
     this.disableDragging();
