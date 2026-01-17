@@ -23,7 +23,7 @@ void main() {
 }
 `;
 
-// Fragment shader - Poincaré hyperbolic tiling
+// Fragment shader - Infinite nested Poincaré hyperbolic tiling
 const FRAGMENT_SHADER = `
 precision highp float;
 
@@ -39,7 +39,7 @@ uniform int uN1;  // Polygon sides
 uniform int uN2;  // Polygons at vertex
 
 const float PI = 3.14159265359;
-const int MAX_ITER = 40;
+const int MAX_ITER = 80;
 
 // HSV to RGB
 vec3 hsv2rgb(vec3 c) {
@@ -59,12 +59,6 @@ mat2 rot2D(float a) {
 vec3 tessellate(vec2 p, float a1, float tana1, float cosda1, float sinda1, float radius, vec2 center) {
   float radius2 = radius * radius;
   float iterations = 0.0;
-  
-  // Invert if outside unit disk
-  float p2 = dot(p, p);
-  if (p2 > 1.0) {
-    p /= p2;
-  }
   
   for (int j = 0; j < MAX_ITER; j++) {
     vec2 ctop = p - center;
@@ -126,8 +120,34 @@ void main() {
   float sinda1 = sin(da1);
   float tana1 = tan(a1);
   
+  // INFINITE NESTED DISKS - works in both zoom directions
+  // Use log-polar coordinates for seamless infinite tiling
+  float r = length(uv);
+  float angle = atan(uv.y, uv.x);
+  
+  // Protect against log(0)
+  float safeR = max(r, 1e-10);
+  
+  // Map radius to repeating bands using log
+  // This creates infinite disks both inward and outward
+  float logR = log(safeR);
+  float diskScale = log(3.0); // e^diskScale = ratio between disk radii (3x)
+  
+  // Get which "level" we're on and position within that level
+  float levelF = logR / diskScale;
+  float level = floor(levelF);
+  float frac = fract(levelF); // 0-1 position within this disk band
+  
+  // Map frac back to radius within unit disk
+  // Use non-linear mapping to show more of the visible pattern
+  // frac 0->1 maps to localR 0.2->0.98 (avoid very center where tiles are tiny)
+  float localR = 0.2 + frac * 0.78;
+  
+  // Reconstruct point within normalized disk
+  vec2 localP = vec2(cos(angle), sin(angle)) * localR;
+  
   // Tessellate the point
-  vec3 result = tessellate(uv, a1, tana1, cosda1, sinda1, radius, center);
+  vec3 result = tessellate(localP, a1, tana1, cosda1, sinda1, radius, center);
   vec2 tp = result.xy;
   float iter = result.z;
   
@@ -135,21 +155,24 @@ void main() {
   float distToCircle = abs(length(tp - center) - radius);
   float edgeFactor = exp(-distToCircle * 20.0);
   
-  // Color based on iteration count and position
-  float hue = mod(uHue + iter * 0.07, 1.0);
+  // Color based on iteration count, position, and nesting level
+  float hue = mod(uHue + iter * 0.07 + level * 0.12, 1.0);
   float sat = 0.7 + edgeFactor * 0.2;
   float val = 0.4 + edgeFactor * 0.5;
   
-  // Darker outside the main disk for depth
-  float diskDist = length(uv);
-  float diskFade = smoothstep(0.8, 2.0, diskDist);
-  val *= 1.0 - diskFade * 0.5;
+  // Draw circle boundaries at each disk edge
+  // Boundaries occur where frac is near 0 or 1
+  float boundaryWidth = 0.02;
+  float nearInner = smoothstep(boundaryWidth, 0.0, frac);
+  float nearOuter = smoothstep(1.0 - boundaryWidth, 1.0, frac);
+  float boundaryLine = max(nearInner, nearOuter) * 0.6;
+  val += boundaryLine;
   
   vec3 col = hsv2rgb(vec3(hue, sat, val));
   
-  // Edge lines
+  // Edge lines within tiling
   float line = smoothstep(0.02, 0.0, distToCircle);
-  col = mix(col, vec3(1.0), line * 0.5);
+  col = mix(col, vec3(1.0), line * 0.4);
   
   gl_FragColor = vec4(col, 1.0);
 }
@@ -157,10 +180,10 @@ void main() {
 
 const CONFIG = {
   tilings: [
+    { n1: 3, n2: 7, name: 'Triangles' },  // First - homage to Poincaré
     { n1: 7, n2: 3, name: 'Heptagons' },
     { n1: 5, n2: 4, name: 'Pentagons' },
     { n1: 4, n2: 5, name: 'Squares' },
-    { n1: 3, n2: 7, name: 'Triangles' },
     { n1: 6, n2: 4, name: 'Hexagons' },
     { n1: 8, n2: 3, name: 'Octagons' },
   ],
@@ -179,8 +202,8 @@ class PoincareDemo extends Game {
     super.init();
     this.time = 0;
     this.hue = 0.38; // Green-ish
-    this.zoom = 1.5;
-    this.targetZoom = 1.5;
+    this.zoom = 10;
+    this.targetZoom = 10;
     this.offsetX = 0;
     this.offsetY = 0;
     this.targetOffsetX = 0;
@@ -206,8 +229,14 @@ class PoincareDemo extends Game {
     this._glRenderer.useProgram('poincare', VERTEX_SHADER, FRAGMENT_SHADER);
     
     // Mouse controls
+    this._hasDragged = false;
+    this._lastTilingChange = 0;
+    this._mouseDownTime = 0;
+    
     this.canvas.addEventListener('mousedown', (e) => {
       this.isDragging = true;
+      this._hasDragged = false;
+      this._mouseDownTime = Date.now();
       const rect = this.canvas.getBoundingClientRect();
       this.lastMouseX = e.clientX - rect.left;
       this.lastMouseY = e.clientY - rect.top;
@@ -219,6 +248,14 @@ class PoincareDemo extends Game {
       const mx = e.clientX - rect.left;
       const my = e.clientY - rect.top;
       
+      const moveX = Math.abs(mx - this.lastMouseX);
+      const moveY = Math.abs(my - this.lastMouseY);
+      
+      // Mark as dragged if moved more than 5 pixels
+      if (moveX > 5 || moveY > 5) {
+        this._hasDragged = true;
+      }
+      
       const dx = (mx - this.lastMouseX) / Math.min(this.width, this.height) * this.zoom * 2;
       const dy = (my - this.lastMouseY) / Math.min(this.width, this.height) * this.zoom * 2;
       
@@ -229,23 +266,31 @@ class PoincareDemo extends Game {
       this.lastMouseY = my;
     });
     
-    this.canvas.addEventListener('mouseup', () => { this.isDragging = false; });
-    this.canvas.addEventListener('mouseleave', () => { this.isDragging = false; });
-    
-    // Click to change tiling
-    this._clickStart = 0;
-    this.canvas.addEventListener('mousedown', () => { this._clickStart = Date.now(); });
-    this.canvas.addEventListener('mouseup', (e) => {
-      if (Date.now() - this._clickStart < 200) {
+    this.canvas.addEventListener('mouseup', () => {
+      const now = Date.now();
+      const clickDuration = now - this._mouseDownTime;
+      const timeSinceLastChange = now - this._lastTilingChange;
+      
+      // Only change tiling if:
+      // - Not a drag
+      // - Click was quick (< 300ms)
+      // - At least 500ms since last change (debounce)
+      if (!this._hasDragged && clickDuration < 300 && timeSinceLastChange > 500) {
         CONFIG.currentTiling = (CONFIG.currentTiling + 1) % CONFIG.tilings.length;
+        this._lastTilingChange = now;
       }
+      this.isDragging = false;
     });
     
-    // Scroll to zoom (infinite - no limits)
+    this.canvas.addEventListener('mouseleave', () => { this.isDragging = false; });
+    
+    // Scroll to zoom (with limits to prevent black edges)
     this.canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
       const zoomFactor = e.deltaY > 0 ? 1.1 : 0.9;
       this.targetZoom *= zoomFactor;
+      // Cap zoom out only (no limit on zoom in)
+      this.targetZoom = Math.min(50, this.targetZoom);
     }, { passive: false });
   }
 
@@ -258,6 +303,12 @@ class PoincareDemo extends Game {
     
     // Auto-rotate (always)
     this.rotation += CONFIG.rotationSpeed * dt;
+    
+    // Gradually return to center when not dragging
+    if (!this.isDragging) {
+      this.targetOffsetX *= 0.98; // Slowly drift back to 0
+      this.targetOffsetY *= 0.98;
+    }
     
     // Smooth zoom/pan
     this.zoom += (this.targetZoom - this.zoom) * 0.1;
