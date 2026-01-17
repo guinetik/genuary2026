@@ -85,10 +85,10 @@ genuary2026/
 
 ## License
 
-See LICENSE file for details.
+CC0 1.0 Universal (Public Domain). See LICENSE file for details.
 
 ## Links
 
-- [Live Site](https://yourusername.github.io/genuary2026/)
+- [Live Site](https://genuary2026.guinetik.com/)
 - [GCanvas Documentation](https://gcanvas.guinetik.com)
 - [Genuary Official Site](https://genuary.art)
