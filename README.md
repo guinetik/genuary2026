@@ -6,7 +6,7 @@ A month-long generative art challenge showcasing the capabilities of the [@guine
 
 [Genuary](https://genuary.art) is a month-long generative art challenge where artists create one piece per day following official prompts. This project implements Genuary 2026 prompts as an interactive showcase, demonstrating particle systems, 3D cameras, motion animations, and more.
 
-Each day features an interactive canvas demo with a terminal-inspired aesthetic (green on black) and mouse-reactive controls.
+Each day features an interactive canvas demo with my interpretation of the prompt.
 
 ## Getting Started
 
