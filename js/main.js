@@ -24,7 +24,7 @@ const CONFIG = {
 // ============================================
 
 const state = {
-  currentDay: 1,
+  currentDay: 0,
   games: new Map(), // dayNumber -> game instance
   mounting: new Set(), // days currently being mounted (prevent race condition)
   sections: [],
@@ -57,6 +57,9 @@ const elements = {
  * @param {number} day - Day number to mount
  */
 async function mountDay(day) {
+  // Day 0 is Intro - no game to mount
+  if (day === 0) return;
+
   // Already mounted or currently mounting? Skip (prevents race condition)
   if (state.games.has(day) || state.mounting.has(day)) {
     return;
@@ -225,12 +228,66 @@ function generateSections() {
   elements.main = document.getElementById('main-content');
   elements.navLinks = document.getElementById('nav-links');
 
+  // ------------------------------------------
+  // 1. Generate INTRO Section (Day 0)
+  // ------------------------------------------
+  const introSection = document.createElement('section');
+  introSection.className = 'day-section intro-section active'; // Active by default
+  introSection.dataset.day = 0;
+  
+  introSection.innerHTML = `
+    <div class="intro-container">
+      <div class="intro-content">
+        <div class="intro-header">
+          <div class="intro-logo">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="32.9 174.743 71.888 63.576" width="60" height="52">
+              <path d="M 57.971 224.292 L 57.971 203.374 L 57.971 194.861 L 75.109 194.861 L 75.109 188.769 L 63.16 188.769 L 63.16 174.743 L 57.971 174.743 L 57.971 189.041 L 57.971 194.861 L 32.9 194.861 L 32.9 203.773 L 50.377 203.773 L 50.377 224.292 L 57.971 224.292 Z M 79.717 238.319 L 79.717 224.02 L 79.717 218.2 L 104.788 218.2 L 104.788 209.287 L 87.31 209.287 L 87.31 188.769 L 79.717 188.769 L 79.717 209.686 L 79.717 218.2 L 62.579 218.2 L 62.579 224.293 L 74.526 224.293 L 74.526 238.319 L 79.717 238.319 Z" style="fill: #0f0; fill-rule: evenodd;"/>
+            </svg>
+          </div>
+          <h1 class="intro-title">GENUARY 2026</h1>
+          <p class="intro-subtitle">31 days of Generative Art studies by Guinetik</p>
+        </div>
+
+        <div class="intro-body">
+          <div class="intro-avatar-wrapper">
+            <img src="./avatar.jpeg" alt="Guinetik" class="intro-avatar">
+            <div class="avatar-glitch"></div>
+          </div>
+          
+          <div class="intro-text">
+            <p><strong>Hi, I'm Guinetik.</strong></p>
+            <p>I'm a software engineer from the banking space, trying out generative art for the first time.</p>
+            <p>This project is a showcase for <a href="https://gcanvas.guinetik.com" target="_blank">@guinetik/gcanvas</a>, a lightweight creative coding framework I built for the HTML5 Canvas.</p>
+          </div>
+
+          <div class="intro-links">
+            <a href="https://guinetik.com" target="_blank" class="intro-link">
+              <span class="link-icon">🌐</span> guinetik.com
+            </a>
+            <a href="https://github.com/guinetik" target="_blank" class="intro-link">
+              <span class="link-icon">🐙</span> github/guinetik
+            </a>
+            <a href="https://github.com/guinetik/genuary2026" target="_blank" class="intro-link">
+              <span class="link-icon">📦</span> Project Repo
+            </a>
+          </div>
+          
+          <button class="intro-start-btn" onclick="document.getElementById('nav-links').firstElementChild.click()">
+            START JOURNEY <span class="arrow">↓</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+  elements.main.appendChild(introSection);
+  state.sections.push(introSection);
+
   for (let day = 1; day <= TOTAL_DAYS; day++) {
     // Create section
     const section = document.createElement('section');
     section.className = 'day-section';
     section.dataset.day = day;
-    if (day === 1) section.classList.add('active');
+    // if (day === 1) section.classList.add('active'); // No longer default active
 
     section.innerHTML = `
       <div class="day-bg-number">${String(day).padStart(2, '0')}</div>
@@ -302,7 +359,12 @@ function handleNavClick(e, day) {
  * @param {number} day
  */
 function scrollToDay(day) {
-  const section = state.sections[day - 1];
+  const section = state.sections[day]; // Index matches day (since Intro is at 0, but sections array includes intro at 0... wait)
+  // Logic check:
+  // state.sections[0] is Intro (day 0)
+  // state.sections[1] is Day 1
+  // So yes, state.sections[day] is correct.
+  
   if (section) {
     // Mark as programmatic scroll to prevent IntersectionObserver interference
     state.isProgrammaticScroll = true;
@@ -318,7 +380,11 @@ function scrollToDay(day) {
     clearTimeout(state.programmaticScrollTimeout);
     state.programmaticScrollTimeout = setTimeout(() => {
       mountDay(day);
-      history.replaceState(null, '', `#day-${day}`);
+      if (day > 0) {
+        history.replaceState(null, '', `#day-${day}`);
+      } else {
+        history.replaceState(null, '', ' ');
+      }
       state.isProgrammaticScroll = false;
     }, 700);
   }
@@ -337,11 +403,11 @@ function updateActiveNav(day) {
 
   // Update sections
   state.sections.forEach((section, i) => {
-    section.classList.toggle('active', i + 1 === day);
+    section.classList.toggle('active', i === day);
   });
 
   // Update arrow buttons
-  elements.navUp.disabled = day === 1;
+  elements.navUp.disabled = day === 0;
   elements.navDown.disabled = day === TOTAL_DAYS;
 }
 
@@ -349,7 +415,7 @@ function updateActiveNav(day) {
  * Navigate to previous day
  */
 function navigatePrev() {
-  if (state.currentDay > 1) {
+  if (state.currentDay > 0) {
     scrollToDay(state.currentDay - 1);
   }
 }
@@ -431,8 +497,10 @@ function handleScrollEnd() {
   if (sectionHeight <= 0) return; // Safety check
 
   // Calculate which day is currently visible
-  const newDay = Math.round(scrollTop / sectionHeight) + 1;
-  const clampedDay = Math.max(1, Math.min(TOTAL_DAYS, newDay));
+  // Index 0 = Intro (Day 0)
+  // Index 1 = Day 1
+  const newDay = Math.round(scrollTop / sectionHeight);
+  const clampedDay = Math.max(0, Math.min(TOTAL_DAYS, newDay));
 
   if (clampedDay !== state.currentDay) {
     transitionToDay(clampedDay);
@@ -457,7 +525,11 @@ async function transitionToDay(newDay) {
   updateActiveNav(newDay);
 
   // Update URL hash without scrolling
-  history.replaceState(null, '', `#day-${newDay}`);
+  if (newDay > 0) {
+    history.replaceState(null, '', `#day-${newDay}`);
+  } else {
+    history.replaceState(null, '', ' ');
+  }
 }
 
 // ============================================
@@ -516,6 +588,16 @@ function setupCanvasControls() {
       toggleFullscreen(day);
     }
   });
+
+  // LOGO CLICK -> Go to Intro
+  const logo = document.querySelector('.nav-logo');
+  if (logo) {
+    logo.style.cursor = 'pointer';
+    logo.addEventListener('click', () => {
+      scrollToDay(0);
+      closeMobileMenu();
+    });
+  }
 
   // Listen for fullscreen changes to update button icon
   document.addEventListener('fullscreenchange', handleFullscreenChange);

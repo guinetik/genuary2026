@@ -43,7 +43,7 @@ export const PROMPTS = {
  */
 export const INTERPRETATIONS = {
   1: 'Infinite green circles form a twisting wormhole through space',
-  2: 'Follow-through and overlapping action: how motion ripples through a chain',
+  2: 'Origami Murmuration: paper cranes flock together, demonstrating follow-through, overlapping action, and arcs. Move mouse to scatter, click to burst.',
   3: 'Phyllotaxis: the Fibonacci spiral pattern you see in sunflowers and pinecones',
   4: 'Banksy-inspired street art wall: infinite scrolling pixelated patterns on a midnight sidewalk',
   5: 'Hand-coded 5x7 pixel font (no system fonts!) rendered as 3D fingerprint ridges. Particles orbit from G and spring into place. Mouse repels with glow.',
@@ -58,7 +58,7 @@ export const INTERPRETATIONS = {
   14: 'Tangram: 7 ancient puzzle pieces spring into cats, birds, runners, and more. Click to transform.',
   15: 'Black Hole: an invisible singularity revealed only by gravitational lensing and its glowing accretion disk. Click to feed matter into the void.',
   16: "Maxwell's Demon: a tiny demon sorts hot and cold gas particles, seemingly violating the second law of thermodynamics. Order emerges from chaos... or does it? 😈",
-  17: 'Poincaré Disk: hyperbolic tessellation beyond Euclidean limits. Click to change pattern, drag to pan, scroll to zoom.',
+  17: 'Infinite Poincaré: hyperbolic tessellation that never ends. Zoom in or out forever through nested disks within disks. Click to change pattern, drag to pan, scroll to dive deeper.',
   18: "Langton's Ant: one rule (turn right on light, left on dark) creates chaos, then suddenly builds a highway. Emergence from simplicity.",
   19: 'Something imprisoned in geometry wants you to free it. 16 clicks until the universe screams apart. An Homage to No Man\'s Sky.',
   20: 'Ouroboros: the ancient serpent eating its own tail. One continuous line, eternally consuming and regenerating. Click to grow, drag to rotate.',
@@ -97,4 +97,4 @@ export function getInterpretation(day) {
  * Total number of Genuary days to display
  * (Expand as implementations are added)
  */
-export const TOTAL_DAYS = 31;
+export const TOTAL_DAYS = 17;
