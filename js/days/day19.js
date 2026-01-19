@@ -2,527 +2,650 @@
  * Day 19: 16×16
  * Prompt: "16×16"
  *
- * THE ATLAS - No Man's Sky inspired cosmic entity
+ * GROKKING NEURAL NETWORK
  *
- * In NMS lore, 16 is sacred: 16 minutes until reset, 16 iterations of the simulation.
- * The Atlas is the cosmic overseer, an ancient machine-god running the universe.
+ * A neural network learns modular arithmetic: (a + b) mod p = c
+ * The 16×16 grid visualizes the hidden layer activations (256 neurons).
+ * Watch the network transition from memorization to generalization (grokking).
  *
- * A rotating octahedron with glowing red core and circuit glyphs.
- * Click to commune with the Atlas.
+ * The network starts by memorizing training examples, then suddenly
+ * discovers the underlying pattern and generalizes to unseen examples.
+ *
+ * Click to restart training. Hover to see current test case.
  */
 
-import { Game, Camera3D, Painter, StickFigure, StateMachine, Easing } from '@guinetik/gcanvas';
+import { Game, Painter, Motion, StateMachine, Tweenetik, Easing } from '@guinetik/gcanvas';
+import {NeuralNetwork, generateDataset, splitDataset, oneHot, calculateAccuracy} from './neural';
 
-const CONFIG = {
-  background: '#000',
-
-  // Atlas geometry
-  atlas: {
-    size: 120,              // Octahedron size
-    rotationSpeed: 0.15,    // Slow, ominous rotation
-    hoverAmplitude: 5,      // Gentle floating motion
-    hoverSpeed: 0.4,
-  },
-
-  // Central orb (the "eye")
-  orb: {
-    radius: 25,
-    pulseMin: 0.8,
-    pulseMax: 1.2,
-    pulseSpeed: 1.5,
-    glowRadius: 80,
-  },
-
-  // Circuit glyphs on faces
-  glyphs: {
-    nodeCount: 16,          // The sacred number
-    lineWidth: 1.5,
-    glowIntensity: 0.6,
-    flickerSpeed: 3,
-  },
-
-  // Starfield
-  stars: {
-    count: 200,
-    radius: 500,
-  },
-
-  // Orbiting figures (the 16 travelers)
-  figures: {
-    count: 16,                // The sacred number
-    orbitRadius: 220,         // Distance from Atlas
-    orbitSpeed: 0.08,         // How fast they orbit
-    scale: 0.15,              // Small stick figures
-  },
-
-  // Colors - Atlas red palette
-  colors: {
-    surface: '#1a1a1a',
-    surfaceLight: '#2a2a2a',
-    edge: '#333',
-    glow: '#ff2200',
-    glowBright: '#ff4422',
-    orb: '#ff0000',
-    orbCore: '#ffffff',
-    glyph: '#ff3311',
-    glyphDim: '#661100',
-    nebula: 'rgba(255, 20, 0, 0.03)',
-  },
-
-  // Commune effect (click response)
-  commune: {
-    duration: 2.0,
-    flashIntensity: 3,
-  },
-
-  // Transcendence (16 clicks triggers psychedelic journey)
-  transcendence: {
-    clicksRequired: 16,
-    zoomInDuration: 4.0,     // Atlas faces camera and zooms in
-    flashDuration: 1.0,      // White flash
-    tunnelDuration: 10.0,    // Psychedelic tunnel phase
-    fadeToBlackDuration: 2.0, // Tunnel fades to black
-    iterationDuration: 3.0,  // "ITERATION #XXXXX" display
-    atlasAppearDuration: 1.5, // Atlas fades in
-    starsAppearDuration: 1.0, // Stars fade in
-    figuresAppearDuration: 4.0, // Figures arrive one by one
-  },
-
-  // Camera
-  camera: {
-    perspective: 600,
-    distance: 400,
-    autoRotateSpeed: 0.08,
-    friction: 0.95,
-    initialTilt: 0,       // Slight downward tilt to see orb
-    initialRotationY: -2.3879,  // Face the orb on start (22.5 degrees)
-  },
-};
-
-// ============================================================================
-// OCTAHEDRON GEOMETRY
-// ============================================================================
-
-class Octahedron {
-  constructor(size) {
-    this.size = size;
-
-    // 6 vertices - stretched bottom like the Atlas reference
-    const topHeight = size * 0.7;      // Shorter top pyramid
-    const bottomHeight = size * 1.6;   // Elongated bottom point
-    const waistWidth = size * 0.9;     // Slightly narrower waist
-
-    this.vertices = [
-      { x: 0, y: -topHeight, z: 0 },       // Top (shorter)
-      { x: 0, y: bottomHeight, z: 0 },     // Bottom (elongated)
-      { x: -waistWidth, y: 0, z: 0 },      // Left
-      { x: waistWidth, y: 0, z: 0 },       // Right
-      { x: 0, y: 0, z: -waistWidth },      // Back
-      { x: 0, y: 0, z: waistWidth },       // Front
-    ];
-
-    // 8 triangular faces (vertex indices)
-    this.faces = [
-      [0, 5, 3],  // Top-front-right
-      [0, 3, 4],  // Top-right-back
-      [0, 4, 2],  // Top-back-left
-      [0, 2, 5],  // Top-left-front
-      [1, 3, 5],  // Bottom-front-right
-      [1, 4, 3],  // Bottom-right-back
-      [1, 2, 4],  // Bottom-back-left
-      [1, 5, 2],  // Bottom-left-front
-    ];
-
-    // Generate circuit glyph patterns for each face
-    this.glyphs = this.faces.map(() => this.generateGlyphPattern());
+/**
+ * Neuron class to represent neuron state and rendering
+ */
+class Neuron {
+  constructor(x, y, baseSize = 4) {
+    this.x = x;
+    this.y = y;
+    this.targetX = x; // Target position for spawn animation
+    this.targetY = y;
+    this.baseSize = baseSize;
+    this.activation = 0;
+    this.isActive = false;
+    this.isSelected = false; // For highlighting (e.g., predicted output)
+    this.isTarget = false; // For highlighting (e.g., target output)
+    this.isError = false; // For error state (red)
+    this.spawnScale = 1; // Scale for spawn animation (0 = hidden, 1 = full)
   }
-
-  generateGlyphPattern() {
-    // Generate angular circuit-like pattern
-    const nodes = [];
-    const lines = [];
-    const nodeCount = Math.floor(CONFIG.glyphs.nodeCount / 8) + 2; // Per face
-
-    // Random nodes within triangle (using barycentric coords)
-    for (let i = 0; i < nodeCount; i++) {
-      let u = Math.random();
-      let v = Math.random();
-      if (u + v > 1) {
-        u = 1 - u;
-        v = 1 - v;
+  
+  /**
+   * Render the neuron
+   */
+  render(ctx, colors) {
+    const { neuronIdle, neuronActive, neuronBright } = colors;
+    
+    if (this.isActive) {
+      // Activated neuron: white core with small green glow
+      const size = this.baseSize;
+      const glowRadius = size * 1.1;
+      const glowAlpha = 0.2;
+      
+      ctx.fillStyle = `rgba(0, 255, 0, ${glowAlpha})`;
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, glowRadius, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // Determine color based on selection/target
+      let color = neuronActive;
+      if (this.isSelected || this.isTarget) {
+        color = neuronBright; // White for selected/target
       }
-      nodes.push({ u, v, w: 1 - u - v, flicker: Math.random() * Math.PI * 2 });
+      
+      ctx.fillStyle = color;
+      ctx.globalAlpha = 1.0;
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, size, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    } else {
+      // Inactive neuron: dim dot
+      ctx.fillStyle = 'rgba(0, 255, 0, 0.1)';
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, this.baseSize * 0.5, 0, Math.PI * 2);
+      ctx.fill();
     }
-
-    // Connect some nodes with angular lines
-    for (let i = 0; i < nodes.length - 1; i++) {
-      if (Math.random() < 0.7) {
-        const j = Math.min(i + 1 + Math.floor(Math.random() * 2), nodes.length - 1);
-        lines.push({ from: i, to: j });
-      }
+  }
+  
+  /**
+   * Render as grid neuron with flash effect when synapse arrives
+   */
+  renderGrid(ctx, colors, maxActivation = 1, flashIntensity = 0, scale = 1) {
+    // Skip if not spawned yet
+    if (this.spawnScale <= 0.01) return;
+    
+    const { neuronActive, neuronBright } = colors;
+    
+    // Normalize activation and combine with flash
+    const normalizedActivation = Math.min(1, this.activation / maxActivation);
+    const effectiveActivation = Math.min(1, normalizedActivation + flashIntensity * 0.5);
+    const isFlashing = flashIntensity > 0.1;
+    
+    // Base sizes scaled (including spawn scale)
+    const spawnMult = this.spawnScale;
+    const baseSize = 4 * scale * spawnMult;
+    const minDotSize = 2 * scale * spawnMult;
+    
+    // Skip very dim neurons (unless flashing)
+    if (effectiveActivation < 0.05 && !isFlashing) {
+      ctx.fillStyle = `rgba(0, 255, 0, ${0.1 * spawnMult})`;
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, minDotSize, 0, Math.PI * 2);
+      ctx.fill();
+      return;
     }
-
-    // Add some edge-aligned segments
-    if (Math.random() < 0.5) {
-      lines.push({ edge: true, t1: Math.random() * 0.3, t2: 0.3 + Math.random() * 0.4, side: Math.floor(Math.random() * 3) });
+    
+    // Size: base + activation + flash boost (all scaled)
+    const size = (baseSize + effectiveActivation * 3 * scale + flashIntensity * 2 * scale) * spawnMult;
+    
+    // Determine colors
+    let coreColor, glowColor;
+    
+    if (isFlashing) {
+      const flashWhite = Math.floor(flashIntensity * 255);
+      coreColor = `rgb(${flashWhite}, 255, ${flashWhite})`;
+      glowColor = `rgba(0, 255, 255, ${(0.3 + flashIntensity * 0.4) * spawnMult})`;
+    } else if (effectiveActivation > 0.5) {
+      coreColor = neuronBright;
+      glowColor = `rgba(0, 255, 0, ${(0.1 + effectiveActivation * 0.25) * spawnMult})`;
+    } else {
+      coreColor = neuronActive;
+      glowColor = `rgba(0, 255, 0, ${(0.1 + effectiveActivation * 0.25) * spawnMult})`;
     }
-
-    return { nodes, lines };
+    
+    // Draw glow
+    const glowMult = 1.6 + flashIntensity * 0.5;
+    ctx.fillStyle = glowColor;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, size * glowMult, 0, Math.PI * 2);
+    ctx.fill();
+    
+    // Draw neuron core
+    ctx.fillStyle = coreColor;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, size, 0, Math.PI * 2);
+    ctx.fill();
+    
+    // White center dot
+    if ((effectiveActivation > 0.2 || isFlashing) && spawnMult > 0.5) {
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, size * 0.3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  
+  /**
+   * Render as output neuron with flash effect when synapse arrives
+   */
+  renderOutput(ctx, colors, flashIntensity = 0, scale = 1) {
+    // Skip if not spawned yet
+    if (this.spawnScale <= 0.01) return;
+    
+    const { neuronActive, neuronBright } = colors;
+    
+    // Combine activation with flash for visual boost
+    const effectiveActivation = Math.min(1, this.activation + flashIntensity * 0.5);
+    const isFlashing = flashIntensity > 0.1;
+    
+    // Base sizes scaled (including spawn scale)
+    const spawnMult = this.spawnScale;
+    const baseSize = 4 * scale * spawnMult;
+    const minDotSize = 2 * scale * spawnMult;
+    
+    // Dim dot for truly inactive
+    if (effectiveActivation < 0.05 && !isFlashing) {
+      ctx.fillStyle = `rgba(0, 255, 0, ${0.1 * spawnMult})`;
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, minDotSize, 0, Math.PI * 2);
+      ctx.fill();
+      return;
+    }
+    
+    // Size: base + activation + flash boost (all scaled)
+    const size = (baseSize + effectiveActivation * 3 * scale + flashIntensity * 2 * scale) * spawnMult;
+    
+    // Determine colors
+    let coreColor, glowColor;
+    
+    if (this.isError && this.activation > 0.1) {
+      coreColor = '#f00';
+      glowColor = `rgba(255, 0, 0, ${(0.3 + flashIntensity * 0.3) * spawnMult})`;
+    } else if ((this.isSelected && this.isTarget) && this.activation > 0.1) {
+      coreColor = neuronBright;
+      glowColor = `rgba(0, 255, 0, ${(0.35 + flashIntensity * 0.3) * spawnMult})`;
+    } else if (isFlashing) {
+      const flashWhite = Math.floor(flashIntensity * 255);
+      coreColor = `rgb(${flashWhite}, 255, ${flashWhite})`;
+      glowColor = `rgba(0, 255, 255, ${(0.3 + flashIntensity * 0.4) * spawnMult})`;
+    } else if (effectiveActivation > 0.5) {
+      coreColor = neuronBright;
+      glowColor = `rgba(0, 255, 0, ${0.25 * spawnMult})`;
+    } else {
+      coreColor = neuronActive;
+      glowColor = `rgba(0, 255, 0, ${(0.1 + effectiveActivation * 0.25) * spawnMult})`;
+    }
+    
+    // Draw glow
+    const glowMult = 1.6 + flashIntensity * 0.5;
+    ctx.fillStyle = glowColor;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, size * glowMult, 0, Math.PI * 2);
+    ctx.fill();
+    
+    // Draw neuron core
+    ctx.fillStyle = coreColor;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, size, 0, Math.PI * 2);
+    ctx.fill();
+    
+    // White center dot (only when mostly spawned)
+    if (effectiveActivation > 0.2 || isFlashing) {
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, size * 0.3, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 }
 
-// ============================================================================
-// ATLAS DEMO
-// ============================================================================
+const CONFIG = {
+  background: '#000',
+  // Neural network architecture
+  network: {
+    inputSize: 2,        // Two inputs: a and b
+    hiddenSize: 256,     // 16×16 = 256 hidden neurons
+    outputSize: 97,       // Mod 97 (prime number for cleaner patterns)
+    learningRate: 0.001, // Lower for stable grokking convergence
+    weightDecay: 1e-3,   // Weight decay coefficient (λ) - L2 regularization
+  },
+  // Training
+  training: {
+    // Use 50% of all possible pairs for training (grokking paper methodology)
+    // For mod 97: 97 * 97 = 9,409 total pairs
+    // 50% = ~4,705 training examples, ~4,704 test examples
+    useAllPairs: true,   // Generate all possible (a, b) pairs
+    trainSplit: 0.5,     // 50% for training, 50% for testing
+    batchSize: 32,
+    epochsPerFrame: 10,   // Multiple epochs per frame for faster training
+    showGrokking: true,  // Track grokking transition
+  },
+  // Grid visualization
+  grid: {
+    rows: 16,
+    cols: 16,
+    baseSpacing: 30, // Base spacing at reference size
+    referenceSize: 800, // Reference canvas size for scaling
+  },
+  // Colors
+  colors: {
+    neuronIdle: '#0a0',
+    neuronActive: '#0f0',
+    neuronBright: '#fff',
+    text: '#0f0',
+    testCase: 'rgba(0, 255, 0, 0.3)',
+  },
+};
 
+/**
+ * Grokking Neural Network Demo
+ */
 class Day19Demo extends Game {
   constructor(canvas) {
     super(canvas);
-    this.backgroundColor = null; // Manual clear for effects
+    this.backgroundColor = CONFIG.background;
   }
 
   init() {
     super.init();
-    Painter.init(this.ctx);
-
-    // Camera setup
-    this.camera = new Camera3D({
-      perspective: CONFIG.camera.perspective,
-      rotationX: CONFIG.camera.initialTilt,
-      rotationY: CONFIG.camera.initialRotationY,
-      autoRotate: true,
-      autoRotateSpeed: CONFIG.camera.autoRotateSpeed,
-      autoRotateAxis: 'y',
-      inertia: true,
-      friction: CONFIG.camera.friction,
-      sensitivity: 0.003,
-    });
-    this.camera.enableMouseControl(this.canvas);
-
-    // Disable double-click reset
-    if (this.camera._boundHandlers?.dblclick) {
-      this.canvas.removeEventListener('dblclick', this.camera._boundHandlers.dblclick);
+    
+    // Initialize network
+    const { inputSize, hiddenSize, outputSize, learningRate, weightDecay } = CONFIG.network;
+    this.network = new NeuralNetwork(inputSize, hiddenSize, outputSize, learningRate, weightDecay);
+    
+    // Generate datasets using grokking paper methodology
+    const { useAllPairs, trainSplit } = CONFIG.training;
+    
+    if (useAllPairs) {
+      // Generate all possible pairs and split 50/50
+      const allData = generateDataset(0, outputSize, true);
+      const split = splitDataset(allData, trainSplit);
+      this.trainData = split.train;
+      this.testData = split.test;
+      console.log(`Generated all ${allData.length} possible pairs: ${this.trainData.length} training, ${this.testData.length} test`);
+    } else {
+      // Fallback to random sampling (old method)
+      const { trainSize, testSize } = CONFIG.training;
+      this.trainData = generateDataset(trainSize, outputSize, false);
+      this.testData = generateDataset(testSize, outputSize, false);
     }
-
-    // Create octahedron
-    this.octahedron = new Octahedron(CONFIG.atlas.size);
-
-    // The orb is fixed to face index 4 (bottom-front-right, on the inverted pyramid)
-    this.orbFaceIndex = 4;
-
-    // Animation state
-    this.time = 0;
-    this.communeTime = -10; // Time since last commune
-    this.communeActive = false;
-
-    // Transcendence state (16 clicks = psychedelic journey)
-    this.clickCount = 0;
-    this.transcendenceFSM = null;
-    this.tunnelTime = 0;
-    this.tunnelParticles = [];
-
-    // Generate starfield
-    this.stars = [];
-    for (let i = 0; i < CONFIG.stars.count; i++) {
-      const theta = Math.random() * Math.PI * 2;
-      const phi = Math.acos(2 * Math.random() - 1);
-      const r = CONFIG.stars.radius * (0.8 + Math.random() * 0.4);
-      this.stars.push({
-        x: r * Math.sin(phi) * Math.cos(theta),
-        y: r * Math.sin(phi) * Math.sin(theta),
-        z: r * Math.cos(phi),
-        size: 0.5 + Math.random() * 1.5,
-        brightness: 0.3 + Math.random() * 0.7,
-      });
+    
+    // Training state
+    this.epoch = 0;
+    this.trainAccuracy = 0;
+    this.testAccuracy = 0;
+    this.trainLoss = 0;
+    this.testLoss = 0;
+    
+    // Grokking tracking
+    this.grokkingDetected = false;
+    this.grokkingEpoch = -1;
+    this.accuracyHistory = [];
+    
+    // Current test case for visualization
+    this.currentTestCase = null;
+    this.testCaseTime = 0;
+    
+    // Scale factor for responsive sizing
+    const minDim = Math.min(this.width, this.height);
+    this.scale = minDim / CONFIG.grid.referenceSize;
+    this.gridSpacing = CONFIG.grid.baseSpacing * this.scale;
+    
+    // Synapse animation
+    this.synapseAnimationTime = 0;
+    this.outputFlashes = new Map(); // Track flash effects on output neurons
+    this.gridFlashes = new Map(); // Track flash effects on grid neurons
+    this.synapseTrails = new Map(); // Track fading synapse trails
+    this.lastGridFlashIdx = -1; // Track last grid neuron that was flashed
+    this.lastOutputFlashIdx = -1; // Track last output neuron that was flashed
+    
+    // Cached output neurons (avoid creating new objects every frame)
+    this.outputNeurons = [];
+    this.outputNeuronsInitialized = false;
+    
+    // Animation time for stateless animations
+    this.animTime = 0;
+    
+    // Cache forward pass results to avoid multiple calls
+    this.cachedOutput = null;
+    this.cachedPrediction = null;
+    
+    // Initialize with a forward pass so grid shows something immediately
+    if (this.trainData.length > 0) {
+      this.network.forward(this.trainData[0].input);
     }
-
-    // Generate the 16 orbiting figures (travelers/worshippers)
-    this.figures = [];
-    for (let i = 0; i < CONFIG.figures.count; i++) {
-      const angle = (i / CONFIG.figures.count) * Math.PI * 2;
-      // Distribute in a tilted ring around the Atlas
-      const tilt = (i % 2 === 0) ? 0.2 : -0.2; // Alternating slight tilt
-      this.figures.push({
-        index: i,
-        baseAngle: angle,
-        tilt: tilt,
-        figure: new StickFigure(CONFIG.figures.scale, {
-          stroke: '#ffffff',
-          headColor: '#ffffff',
-          jointColor: '#ffffff',
-          lineWidth: 1,
-          showJoints: false,
-        }),
-      });
-    }
-
-    // Debug: print camera rotation on mouse release
-    this.canvas.addEventListener('mouseup', () => {
-      console.log(`Camera rotation - X: ${this.camera.rotationX.toFixed(4)}, Y: ${this.camera.rotationY.toFixed(4)}`);
-      console.log(`CONFIG: initialTilt: ${this.camera.rotationX.toFixed(4)}, initialRotationY: ${this.camera.rotationY.toFixed(4)}`);
-    });
-
-    // Mouse tracking for tunnel effect
-    this.tunnelMouseX = this.width / 2;
-    this.tunnelMouseY = this.height / 2;
-    this.tunnelOffsetX = 0;
-    this.tunnelOffsetY = 0;
-    this.tunnelTargetOffsetX = 0;
-    this.tunnelTargetOffsetY = 0;
-
-    this.canvas.addEventListener('mousemove', (e) => {
-      const rect = this.canvas.getBoundingClientRect();
-      this.tunnelMouseX = e.clientX - rect.left;
-      this.tunnelMouseY = e.clientY - rect.top;
-
-      // Offset based on mouse distance from center
-      const cx = this.width / 2;
-      const cy = this.height / 2;
-      this.tunnelTargetOffsetX = (this.tunnelMouseX - cx) * 0.5;
-      this.tunnelTargetOffsetY = (this.tunnelMouseY - cy) * 0.5;
-    });
-
-    this.canvas.addEventListener('mouseleave', () => {
-      this.tunnelTargetOffsetX = 0;
-      this.tunnelTargetOffsetY = 0;
-    });
-
-    // Click to commune (16 clicks triggers transcendence)
-    this.canvas.addEventListener('click', () => {
-      if (this.transcendenceFSM) return; // Ignore during transcendence
-
-      this.clickCount++;
-      this.communeTime = this.time;
-      this.communeActive = true;
-
-      // Check for transcendence trigger
-      if (this.clickCount >= CONFIG.transcendence.clicksRequired) {
-        this.startTranscendence();
-      }
-    });
-  }
-
-  startTranscendence() {
-    const { transcendence } = CONFIG;
-
-    // Track restore animation state
-    this.restoreState = {
-      atlasAlpha: 0,
-      starsAlpha: 0,
-      visibleFigures: 0,
-    };
-
-    // Generate iteration number (big random number, increments each transcendence)
-    if (!this.iterationBase) {
-      this.iterationBase = 10000 + Math.floor(Math.random() * 90000);
-    }
-    this.iterationBase++;
-    this.iterationNumber = this.iterationBase;
-
-    // Store initial camera state for zoom-in animation
-    this.zoomInState = {
-      startRotationX: this.camera.rotationX,
-      startRotationY: this.camera.rotationY,
-      scale: 1,
-    };
-
-    // Stop auto rotation
-    this.camera.autoRotate = false;
-
-    // Create state machine for transcendence sequence
-    this.transcendenceFSM = StateMachine.fromSequence([
-      {
-        name: 'zoomIn',
-        duration: transcendence.zoomInDuration,
-        update: (dt) => this.updateZoomIn(dt),
-      },
-      {
-        name: 'flash',
-        duration: transcendence.flashDuration,
-        enter: () => this.initFlashPhase(),
-      },
-      {
-        name: 'tunnel',
-        duration: transcendence.tunnelDuration,
-        enter: () => this.initTunnelPhase(),
-        update: (dt) => this.updateTunnel(dt),
-      },
-      {
-        name: 'fadeToBlack',
-        duration: transcendence.fadeToBlackDuration,
-        update: (dt) => this.updateTunnel(dt), // Keep tunnel updating
-      },
-      {
-        name: 'iteration',
-        duration: transcendence.iterationDuration,
-      },
-      {
-        name: 'atlasAppear',
-        duration: transcendence.atlasAppearDuration,
-        enter: () => { this.restoreState.atlasAlpha = 0; },
-      },
-      {
-        name: 'starsAppear',
-        duration: transcendence.starsAppearDuration,
-        enter: () => { this.restoreState.starsAlpha = 0; },
-      },
-      {
-        name: 'figuresAppear',
-        duration: transcendence.figuresAppearDuration,
-        enter: () => {
-          this.restoreState.visibleFigures = 0;
-          // Store current camera rotation for smooth transition back
-          this.restoreState.startRotationX = this.camera.rotationX;
-          this.restoreState.startRotationY = this.camera.rotationY;
-        },
-        update: (dt) => this.updateFiguresAppear(dt),
-      },
-    ], {
+    
+    // Grid positioning
+    this.gridOffsetX = 0;
+    this.gridOffsetY = 0;
+    
+    // Input dots for spawn animation
+    this.inputDots = [];
+    this.outputDots = [];
+    
+    // State machine for intro → training
+    this.fsm = new StateMachine({
+      initial: 'intro',
       context: this,
-      onComplete: () => this.resetScene(),
+      states: {
+        intro: {
+          enter: () => this.startIntroAnimation(),
+          update: (dt) => this.updateIntro(dt),
+        },
+        training: {
+          enter: () => this.startTraining(),
+          update: (dt) => this.updateTraining(dt),
+        }
+      }
+    });
+    
+    // Training UI opacity (for fade-in)
+    this.trainingOpacity = 0;
+    
+    // Click to restart
+    this.canvas.addEventListener('click', () => {
+      this.restart();
     });
   }
-
-  initFlashPhase() {
-    // Nothing special needed, render handles it
-  }
-
-  updateZoomIn(dt) {
-    const progress = this.transcendenceFSM.progress;
-    const { startRotationX, startRotationY } = this.zoomInState;
-
-    // Use easeInBack for dramatic zoom effect
-    const eased = Easing.easeInBack(progress);
-
-    // Rotate camera to face the orb on face 4 (bottom-front-right)
-    const targetRotationY = -2.3879;  // 45 degrees to the right
-    const targetRotationX = 0.3;           // Slight downward tilt to see bottom face
-    this.camera.rotationX = startRotationX + (targetRotationX - startRotationX) * eased;
-    this.camera.rotationY = startRotationY + (targetRotationY - startRotationY) * eased;
-
-    // Zoom into the Atlas during this phase
-    this.zoomInState.scale = 1 + eased * 2; // Zoom from 1x to 3x
-
-    // Offset zoom center toward the orb (lower on screen)
-    this.zoomInState.offsetY = eased * 80; // Move zoom center down toward orb
-  }
-
-  initTunnelPhase() {
-    this.tunnelTime = 2; // Start with some time so things are already moving
-
-    // Generate tunnel particles - lots of them for crazy effect
-    this.tunnelParticles = [];
-    for (let i = 0; i < 500; i++) {
-      this.tunnelParticles.push({
-        angle: Math.random() * Math.PI * 2,
-        z: Math.random() * 1000,       // Depth in tunnel
-        radius: 50 + Math.random() * 300,
-        speed: 100 + Math.random() * 400,
-        hue: Math.random() * 360,
-        size: 2 + Math.random() * 8,
-        type: Math.floor(Math.random() * 4), // Different shapes
-      });
-    }
-
-    // Generate kaleidoscope segments
-    this.kaleidoSegments = 8 + Math.floor(Math.random() * 8);
-
-    // Ring waves
-    this.tunnelRings = [];
-    for (let i = 0; i < 20; i++) {
-      this.tunnelRings.push({
-        z: i * 100,
-        hue: (i * 30) % 360,
-        thickness: 2 + Math.random() * 6,
-      });
-    }
-  }
-
-  updateFiguresAppear(dt) {
-    const progress = this.transcendenceFSM.progress;
-    const { startRotationX, startRotationY } = this.restoreState;
-
-    // Smooth ease out for camera transition back to initial position
-    const eased = 1 - Math.pow(1 - progress, 2);
-
-    // Animate camera back to initial rotation
-    const targetX = CONFIG.camera.initialTilt;
-    const targetY = CONFIG.camera.initialRotationY;
-
-    this.camera.rotationX = startRotationX + (targetX - startRotationX) * eased;
-    this.camera.rotationY = startRotationY + (targetY - startRotationY) * eased;
-  }
-
-  updateTunnel(dt) {
-    this.tunnelTime += dt * 3; // 3x faster animation time
-
-    // Smooth mouse offset for tunnel panning
-    const ease = 1 - Math.pow(0.05, dt);
-    this.tunnelOffsetX += (this.tunnelTargetOffsetX - this.tunnelOffsetX) * ease;
-    this.tunnelOffsetY += (this.tunnelTargetOffsetY - this.tunnelOffsetY) * ease;
-
-    // Move particles toward viewer (faster)
-    for (const p of this.tunnelParticles) {
-      p.z -= p.speed * dt * 2.5;
-      if (p.z < -100) {
-        p.z = 1000;
-        p.hue = (p.hue + 30) % 360;
-      }
-      // Spiral motion (faster)
-      p.angle += dt * (1.5 + p.speed / 300);
-    }
-
-    // Move rings toward viewer (faster)
-    for (const r of this.tunnelRings) {
-      r.z -= 500 * dt;
-      if (r.z < -50) {
-        r.z = 2000;
-        r.hue = (r.hue + 60) % 360;
+  
+  /**
+   * Start the intro spawn animation
+   */
+  startIntroAnimation() {
+    const centerX = this.width / 2;
+    const centerY = this.height / 2;
+    const { rows, cols } = CONFIG.grid;
+    
+    // Track pending tweens - only transition when all complete
+    this.pendingTweens = 0;
+    
+    // Calculate final positions
+    this.gridOffsetX = this.width / 2 - (cols * this.gridSpacing) / 2;
+    this.gridOffsetY = this.height / 2 - (rows * this.gridSpacing) / 2;
+    
+    // Create grid neurons at center with scale 0
+    this.gridNeurons = [];
+    for (let row = 0; row < rows; row++) {
+      for (let col = 0; col < cols; col++) {
+        const targetX = this.gridOffsetX + col * this.gridSpacing;
+        const targetY = this.gridOffsetY + row * this.gridSpacing;
+        const neuron = new Neuron(centerX, centerY, 4 * this.scale);
+        neuron.targetX = targetX;
+        neuron.targetY = targetY;
+        neuron.spawnScale = 0;
+        this.gridNeurons.push(neuron);
+        
+        // Staggered spawn animation - wave from center
+        const distFromCenter = Math.sqrt(
+          Math.pow(col - cols/2, 2) + Math.pow(row - rows/2, 2)
+        );
+        const delay = distFromCenter * 0.3; // Stagger by distance
+        
+        this.pendingTweens++;
+        Tweenetik.to(neuron, { 
+          x: targetX, 
+          y: targetY, 
+          spawnScale: 1 
+        }, 1, Easing.easeInOutBack, { 
+          delay: 1 + delay,
+          onComplete: () => this.onTweenComplete()
+        });
       }
     }
+    
+    // Create input dots at center
+    const gridWidth = cols * this.gridSpacing;
+    const leftX = centerX - gridWidth / 2 - 100 * this.scale;
+    const rightX = centerX + gridWidth / 2 + 100 * this.scale;
+    
+    // Input A dots (7 bits)
+    this.inputDots = [];
+    for (let i = 0; i < 14; i++) { // 7 bits for A, 7 bits for B
+      const dot = { x: centerX, y: centerY, spawnScale: 0 };
+      this.inputDots.push(dot);
+      this.pendingTweens++;
+      Tweenetik.to(dot, { spawnScale: 1 }, 0.5, Easing.easeOutBack, { 
+        delay: 0.3 + i * 0.02,
+        onComplete: () => this.onTweenComplete()
+      });
+    }
+    
+    // Output dots (7 bits)
+    this.outputDots = [];
+    for (let i = 0; i < 7; i++) {
+      const dot = { x: centerX, y: centerY, spawnScale: 0 };
+      this.outputDots.push(dot);
+      this.pendingTweens++;
+      Tweenetik.to(dot, { spawnScale: 1 }, 0.5, Easing.easeOutBack, { 
+        delay: 0.5 + i * 0.02,
+        onComplete: () => this.onTweenComplete()
+      });
+    }
   }
-
-  resetScene() {
-    // Reset all state
-    this.clickCount = 0;
-    this.transcendenceFSM = null;
-    this.communeActive = false;
-    this.communeTime = -10;
-    this.tunnelParticles = [];
-    this.tunnelRings = [];
-    this.tunnelTime = 0;
-
-    // Restore camera settings
-    this.camera.autoRotate = true;
-    this.camera.perspective = CONFIG.camera.perspective;
-    this.camera.rotationX = CONFIG.camera.initialTilt;
-    this.camera.rotationY = CONFIG.camera.initialRotationY;
-
-    // Regenerate glyphs for fresh look
-    this.octahedron.glyphs = this.octahedron.faces.map(() =>
-      this.octahedron.generateGlyphPattern()
-    );
+  
+  /**
+   * Called when a tween completes - transition to training when all done
+   */
+  onTweenComplete() {
+    this.pendingTweens--;
+    if (this.pendingTweens <= 0 && this.fsm.is('intro')) {
+      this.fsm.setState('training');
+    }
+  }
+  
+  /**
+   * Update intro state
+   */
+  updateIntro(dt) {
+    
+  }
+  
+  /**
+   * Start training state - fade in UI elements
+   */
+  startTraining() {
+    this.trainingOpacity = 0;
+    Tweenetik.to(this, { trainingOpacity: 1 }, 0.8, Easing.easeOutQuad);
+  }
+  
+  /**
+   * Update training state
+   */
+  updateTraining(dt) {
+    // Update tweens (for fade-in)
+    Tweenetik.updateAll(dt);
+    // Normal training logic
+    this.trainNetwork();
+    this.synapseAnimationTime += dt;
+  }
+  
+  restart() {
+    const { inputSize, hiddenSize, outputSize, learningRate, weightDecay } = CONFIG.network;
+    this.network = new NeuralNetwork(inputSize, hiddenSize, outputSize, learningRate, weightDecay);
+    
+    // Generate datasets using grokking paper methodology
+    const { useAllPairs, trainSplit } = CONFIG.training;
+    
+    if (useAllPairs) {
+      // Generate all possible pairs and split 50/50
+      const allData = generateDataset(0, outputSize, true);
+      const split = splitDataset(allData, trainSplit);
+      this.trainData = split.train;
+      this.testData = split.test;
+    } else {
+      // Fallback to random sampling (old method)
+      const { trainSize, testSize } = CONFIG.training;
+      this.trainData = generateDataset(trainSize, outputSize, false);
+      this.testData = generateDataset(testSize, outputSize, false);
+    }
+    
+    this.epoch = 0;
+    this.trainAccuracy = 0;
+    this.testAccuracy = 0;
+    this.grokkingDetected = false;
+    this.grokkingEpoch = -1;
+    this.accuracyHistory = [];
+    this.outputNeuronsInitialized = false;
+    this.outputNeuronsKeys = null;
+    this.gridNeurons = null;
+    this.animTime = 0;
+    this.cachedOutput = null;
+    this.cachedPrediction = null;
+    this.synapseTrails = new Map(); // Reset synapse trails
+    this.trainingOpacity = 0; // Reset opacity for fade-in
+    
+    // Kill any active tweens and restart intro
+    Tweenetik.killAll();
+    this.fsm.setState('intro');
   }
 
   update(dt) {
     super.update(dt);
-    this.time += dt;
-
-    // Update camera during normal play and restore phases (not during zoomIn - we control that manually)
-    const inRestorePhase = this.transcendenceFSM &&
-      ['atlasAppear', 'starsAppear', 'figuresAppear'].includes(this.transcendenceFSM.state);
-    if (!this.transcendenceFSM || inRestorePhase) {
-      this.camera.update(dt);
+    
+    // Calculate scale factor based on canvas size
+    const minDim = Math.min(this.width, this.height);
+    this.scale = minDim / CONFIG.grid.referenceSize;
+    
+    // Calculate dynamic grid spacing
+    this.gridSpacing = CONFIG.grid.baseSpacing * this.scale;
+    
+    // Update grid offset
+    this.gridOffsetX = this.width / 2 - (CONFIG.grid.cols * this.gridSpacing) / 2;
+    this.gridOffsetY = this.height / 2 - (CONFIG.grid.rows * this.gridSpacing) / 2;
+    
+    // Update state machine
+    this.fsm.update(dt);
+    
+    // Update animation time for stateless animations
+    this.animTime += dt;
+    
+    // Update test case visualization (cycle through examples)
+    this.testCaseTime += dt;
+    if (this.testCaseTime > 2.0) {
+      this.testCaseTime = 0;
+      // Pick random test case
+      const idx = Math.floor(Math.random() * this.testData.length);
+      this.currentTestCase = this.testData[idx];
+      // Reset output neurons when test case changes
+      this.outputNeuronsInitialized = false;
+      this.cachedOutput = null;
+      this.cachedPrediction = null;
     }
-
-    // Check commune end
-    if (this.communeActive && this.time - this.communeTime > CONFIG.commune.duration) {
-      this.communeActive = false;
+    
+    // Do forward pass ONCE per frame and cache results
+    // Always update so we see changes as network trains
+    if (this.currentTestCase) {
+      // Recalculate - network weights are changing during training!
+      this.cachedOutput = this.network.forward(this.currentTestCase.input);
+      // Calculate prediction from cached output
+      let maxIdx = 0;
+      let maxVal = this.cachedOutput[0];
+      for (let i = 1; i < this.cachedOutput.length; i++) {
+        if (this.cachedOutput[i] > maxVal) {
+          maxVal = this.cachedOutput[i];
+          maxIdx = i;
+        }
+      }
+      this.cachedPrediction = maxIdx;
+    } else if (this.trainData.length > 0) {
+      // Initialize with first example
+      this.currentTestCase = this.trainData[0];
+      this.cachedOutput = this.network.forward(this.currentTestCase.input);
+      let maxIdx = 0;
+      let maxVal = this.cachedOutput[0];
+      for (let i = 1; i < this.cachedOutput.length; i++) {
+        if (this.cachedOutput[i] > maxVal) {
+          maxVal = this.cachedOutput[i];
+          maxIdx = i;
+        }
+      }
+      this.cachedPrediction = maxIdx;
+      this.outputNeuronsInitialized = false;
     }
-
-    // Update transcendence state machine
-    if (this.transcendenceFSM) {
-      this.transcendenceFSM.update(dt);
+  }
+  
+  trainNetwork() {
+    const { epochsPerFrame, batchSize } = CONFIG.training;
+    const { outputSize } = CONFIG.network;
+    
+    // With GPU, we can train more frequently
+    const trainInterval = this.network.useGPU ? 1 : 2;
+    this.trainCounter = (this.trainCounter || 0) + 1;
+    if (this.trainCounter < trainInterval) return;
+    this.trainCounter = 0;
+    
+    // With GPU, process more batches per frame
+    const batchesPerFrame = this.network.useGPU ? 10 : 5;
+    
+    for (let e = 0; e < epochsPerFrame; e++) {
+      // Don't shuffle every time - just iterate through data
+      const startIdx = (this.epoch * batchSize) % this.trainData.length;
+      
+      // Train in batches
+      for (let i = 0; i < batchSize * batchesPerFrame; i++) {
+        const idx = (startIdx + i) % this.trainData.length;
+        const example = this.trainData[idx];
+        
+        const output = this.network.forward(example.input);
+        const target = oneHot(example.target, outputSize);
+        this.network.backward(example.input, target, output);
+      }
+      
+      this.epoch++;
+    }
+    
+    // Calculate accuracies (only every few epochs for performance)
+    // Sample a subset for faster calculation
+    if (this.epoch % 20 === 0) {
+      // Sample 100 examples instead of all for faster calculation
+      const trainSample = this.trainData.slice(0, Math.min(100, this.trainData.length));
+      const testSample = this.testData.slice(0, Math.min(100, this.testData.length));
+      this.trainAccuracy = calculateAccuracy(this.network, trainSample);
+      this.testAccuracy = calculateAccuracy(this.network, testSample);
+    }
+    
+    // Track grokking (only store every Nth point for performance)
+    if (this.epoch % 5 === 0) {
+      this.accuracyHistory.push({
+        epoch: this.epoch,
+        train: this.trainAccuracy,
+        test: this.testAccuracy,
+      });
+      
+      // Keep only last 500 points
+      if (this.accuracyHistory.length > 500) {
+        this.accuracyHistory.shift();
+      }
+    }
+    
+    // Detect grokking: test accuracy suddenly jumps while train is already high
+    if (!this.grokkingDetected && this.epoch > 100) {
+      const recent = this.accuracyHistory.slice(-50);
+      if (recent.length >= 50) {
+        const oldTest = recent[0].test;
+        const newTest = recent[recent.length - 1].test;
+        // Grokking: test accuracy jumps significantly (>0.3) while train is high (>0.8)
+        if (this.trainAccuracy > 0.8 && newTest - oldTest > 0.3) {
+          this.grokkingDetected = true;
+          this.grokkingEpoch = this.epoch;
+        }
+      }
     }
   }
 
@@ -530,1059 +653,1039 @@ class Day19Demo extends Game {
     const ctx = this.ctx;
     const w = this.width;
     const h = this.height;
-    const cx = w / 2;
-    const cy = h / 2;
-
-    // If in transcendence, render ONLY the transcendence effect
-    if (this.transcendenceFSM) {
-      this.renderTranscendence(ctx, cx, cy, w, h);
-      return;
-    }
-
-    // === NORMAL SCENE RENDERING ===
-
-    // Clear
-    ctx.fillStyle = CONFIG.background;
+    
+    // Motion blur trail (lighter for better performance)
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
     ctx.fillRect(0, 0, w, h);
-
-    // Red nebula ambience
-    const nebulaGradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(w, h) * 0.7);
-    nebulaGradient.addColorStop(0, 'rgba(60, 5, 0, 0.3)');
-    nebulaGradient.addColorStop(0.5, 'rgba(30, 2, 0, 0.2)');
-    nebulaGradient.addColorStop(1, 'transparent');
-    ctx.fillStyle = nebulaGradient;
-    ctx.fillRect(0, 0, w, h);
-
-    // Render starfield
-    this.renderStars(ctx, cx, cy);
-
-    // Render orbiting figures (sorted by depth with Atlas)
-    this.renderFigures(ctx, cx, cy);
-
-    // Floating motion offset
-    const hover = Math.sin(this.time * CONFIG.atlas.hoverSpeed) * CONFIG.atlas.hoverAmplitude;
-
-    // Get projected and sorted faces (back to front)
-    const projectedFaces = this.projectFaces(cx, cy, hover);
-
-    // Find the orb face (fixed to bottom-front-right face on the inverted pyramid)
-    const orbFace = projectedFaces.find(f => f.faceIndex === this.orbFaceIndex);
-    const orbPosition = orbFace ? this.getOrbPosition(orbFace.verts) : { x: cx, y: cy };
-    const orbFaceDepth = orbFace ? orbFace.depth : 0;
-
-    // Render faces in depth order, inserting orb at correct depth
-    let orbRendered = false;
-
-    for (const face of projectedFaces) {
-      // If this face is in front of the orb face and orb hasn't been rendered yet, render orb first
-      if (!orbRendered && face.depth < orbFaceDepth) {
-        this.renderOrb(ctx, orbPosition.x, orbPosition.y);
-        orbRendered = true;
-      }
-
-      // Render face (orb face gets special treatment - slightly transparent)
-      const isOrbFace = face.faceIndex === this.orbFaceIndex;
-      this.renderFace(ctx, face, isOrbFace);
-    }
-
-    // If orb is on the front-most face, render it last
-    if (!orbRendered) {
-      this.renderOrb(ctx, orbPosition.x, orbPosition.y);
-    }
-
-    // Commune flash effect
-    if (this.communeActive) {
-      this.renderCommuneEffect(ctx, orbPosition.x, orbPosition.y);
-    }
-
-    // Subtle vignette
-    const vignette = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(w, h) * 0.7);
-    vignette.addColorStop(0, 'transparent');
-    vignette.addColorStop(0.7, 'transparent');
-    vignette.addColorStop(1, 'rgba(0, 0, 0, 0.7)');
-    ctx.fillStyle = vignette;
-    ctx.fillRect(0, 0, w, h);
-
-    // Click counter display (subtle)
-    if (this.clickCount > 0) {
-      ctx.fillStyle = `rgba(255, 50, 20, ${0.3 + this.clickCount / 32})`;
-      ctx.font = '12px monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText(`${this.clickCount}/16`, cx, h - 20);
-    }
+    
+    // Draw synapses (connections) first, behind neurons
+    this.drawSynapses(ctx);
+    
+    // Draw grid of hidden neurons
+    this.drawNeuronGrid(ctx);
+    
+    // Draw input/output neurons
+    this.drawInputOutputNeurons(ctx);
+    
+    // Draw input/output/result around grid
+    this.drawInputOutput(ctx);
+    
+    // Draw stats (compact)
+    this.drawStats(ctx);
   }
-
-  getFaceCenter(verts) {
-    return {
-      x: (verts[0].x + verts[1].x + verts[2].x) / 3,
-      y: (verts[0].y + verts[1].y + verts[2].y) / 3,
-    };
-  }
-
-  // Get orb position on the face
-  // For bottom faces (4-7): verts[0] is the bottom tip, verts[1] and verts[2] are waist points
-  // Position the orb near the top of the bottom face (near the waist)
-  getOrbPosition(verts) {
-    // For bottom faces: low weight on tip (verts[0]), high weight on waist (verts[1], verts[2])
-    // This places the orb near the top edge of the bottom face
-    const tipWeight = 0.15;      // Small weight toward the elongated bottom tip
-    const waistWeight = (1 - tipWeight) / 2;  // Split remaining between waist vertices
-    return {
-      x: verts[0].x * tipWeight + verts[1].x * waistWeight + verts[2].x * waistWeight,
-      y: verts[0].y * tipWeight + verts[1].y * waistWeight + verts[2].y * waistWeight,
-    };
-  }
-
-  renderStars(ctx, cx, cy) {
-    for (const star of this.stars) {
-      const proj = this.camera.project(star.x, star.y, star.z);
-      const x = cx + proj.x;
-      const y = cy + proj.y;
-
-      // Skip if behind camera
-      if (proj.scale <= 0) continue;
-
-      const size = star.size * proj.scale;
-      const alpha = star.brightness * Math.min(1, proj.scale);
-
-      ctx.beginPath();
-      ctx.arc(x, y, size, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(255, 220, 220, ${alpha})`;
-      ctx.fill();
+  
+  drawNeuronGrid(ctx) {
+    const { rows, cols } = CONFIG.grid;
+    const spacing = this.gridSpacing;
+    
+    // Get current activations (from last forward pass)
+    const activations = this.network.hiddenActivations;
+    
+    if (!activations || activations.length === 0) return;
+    
+    // Cache normalization calculation (only recalculate every few frames)
+    if (!this._normCache || this._normFrameCount % 5 === 0) {
+      const sorted = [...activations].sort((a, b) => a - b);
+      this._normCache = Math.max(sorted[Math.floor(sorted.length * 0.95)], 0.001);
+      this._normFrameCount = 0;
     }
-  }
-
-  renderFigures(ctx, cx, cy) {
-    const { figures } = CONFIG;
-    const communeFlash = this.communeActive
-      ? Math.max(0, 1 - (this.time - this.communeTime) / CONFIG.commune.duration)
-      : 0;
-
-    // Calculate 3D positions for all figures and sort by depth
-    const projectedFigures = this.figures.map(fig => {
-      // Orbit around Y axis
-      const angle = fig.baseAngle + this.time * figures.orbitSpeed;
-      const tiltAngle = fig.tilt;
-
-      // Position on tilted orbit ring (no vertical bobbing)
-      const x = Math.cos(angle) * figures.orbitRadius;
-      const z = Math.sin(angle) * figures.orbitRadius;
-      const y = Math.sin(angle) * figures.orbitRadius * tiltAngle;
-
-      // Project to screen
-      const proj = this.camera.project(x, y, z);
-
-      return {
-        ...fig,
-        screenX: cx + proj.x,
-        screenY: cy + proj.y,
-        scale: proj.scale,
-        depth: proj.z,
-      };
-    });
-
-    // Sort back to front (render furthest first)
-    projectedFigures.sort((a, b) => b.depth - a.depth);
-
-    // Render each figure
-    for (const fig of projectedFigures) {
-      if (fig.scale <= 0) continue; // Behind camera
-
-      const figScale = fig.scale * (1 + communeFlash * 0.3);
-      const alpha = Math.min(1, fig.scale) * (0.7 + communeFlash * 0.3);
-
-      ctx.save();
-      ctx.translate(fig.screenX, fig.screenY);
-      ctx.scale(figScale, figScale);
-      ctx.globalAlpha = alpha;
-
-      // Add subtle white glow
-      ctx.shadowColor = '#ffffff';
-      ctx.shadowBlur = 5 + communeFlash * 15;
-
-      // Draw the stick figure
-      fig.figure.draw();
-
-      ctx.restore();
-    }
-
-    ctx.shadowBlur = 0;
-    ctx.globalAlpha = 1;
-  }
-
-  // Render only first N figures (for arrival animation)
-  renderFiguresPartial(ctx, cx, cy, count, overallProgress) {
-    const { figures } = CONFIG;
-
-    // Calculate 3D positions for figures
-    const projectedFigures = this.figures.slice(0, count).map((fig, i) => {
-      const angle = fig.baseAngle + this.time * figures.orbitSpeed;
-      const tiltAngle = fig.tilt;
-
-      const x = Math.cos(angle) * figures.orbitRadius;
-      const z = Math.sin(angle) * figures.orbitRadius;
-      const y = Math.sin(angle) * figures.orbitRadius * tiltAngle;
-
-      const proj = this.camera.project(x, y, z);
-
-      // Calculate individual figure's fade-in
-      const figureProgress = overallProgress * CONFIG.figures.count;
-      const figureIndex = i;
-      const localProgress = Math.min(1, Math.max(0, figureProgress - figureIndex));
-
-      return {
-        ...fig,
-        screenX: cx + proj.x,
-        screenY: cy + proj.y,
-        scale: proj.scale,
-        depth: proj.z,
-        fadeIn: localProgress,
-      };
-    });
-
-    // Sort back to front
-    projectedFigures.sort((a, b) => b.depth - a.depth);
-
-    // Render each visible figure
-    for (const fig of projectedFigures) {
-      if (fig.scale <= 0 || fig.fadeIn <= 0) continue;
-
-      // Scale up from 0 as figure arrives
-      const arrivalScale = 0.5 + fig.fadeIn * 0.5;
-      const figScale = fig.scale * arrivalScale;
-      const alpha = Math.min(1, fig.scale) * fig.fadeIn * 0.7;
-
-      ctx.save();
-      ctx.translate(fig.screenX, fig.screenY);
-      ctx.scale(figScale, figScale);
-      ctx.globalAlpha = alpha;
-
-      // Brighter glow for newly arriving figures
-      const glowIntensity = fig.fadeIn < 1 ? 15 : 5;
-      ctx.shadowColor = '#ffffff';
-      ctx.shadowBlur = glowIntensity;
-
-      fig.figure.draw();
-      ctx.restore();
-    }
-
-    ctx.shadowBlur = 0;
-    ctx.globalAlpha = 1;
-  }
-
-  projectFaces(cx, cy, hover = 0) {
-    const oct = this.octahedron;
-    const projected = [];
-
-    for (let fi = 0; fi < oct.faces.length; fi++) {
-      const face = oct.faces[fi];
-      const verts = face.map(vi => {
-        const v = oct.vertices[vi];
-        // Apply hover offset to Y before projection
-        const proj = this.camera.project(v.x, v.y + hover, v.z);
-        return {
-          x: cx + proj.x,
-          y: cy + proj.y,
-          z: proj.z,
-          scale: proj.scale,
-          world: v,
-        };
-      });
-
-      // Calculate face center depth for sorting
-      const avgZ = verts.reduce((sum, v) => sum + v.z, 0) / 3;
-
-      // Calculate face normal for lighting (in world space, before projection)
-      const normal = this.calculateNormal(
-        oct.vertices[face[0]],
-        oct.vertices[face[1]],
-        oct.vertices[face[2]]
-      );
-
-      projected.push({
-        verts,
-        depth: avgZ,
-        normal,
-        faceIndex: fi,
-        glyph: oct.glyphs[fi],
-      });
-    }
-
-    // Sort back to front (highest depth = furthest = render first)
-    projected.sort((a, b) => b.depth - a.depth);
-
-    return projected;
-  }
-
-  calculateNormal(v0, v1, v2) {
-    const ax = v1.x - v0.x, ay = v1.y - v0.y, az = v1.z - v0.z;
-    const bx = v2.x - v0.x, by = v2.y - v0.y, bz = v2.z - v0.z;
-    const nx = ay * bz - az * by;
-    const ny = az * bx - ax * bz;
-    const nz = ax * by - ay * bx;
-    const len = Math.sqrt(nx * nx + ny * ny + nz * nz);
-    return { x: nx / len, y: ny / len, z: nz / len };
-  }
-
-  renderFace(ctx, face, isFrontFace = false) {
-    const communeFlash = this.communeActive
-      ? Math.max(0, 1 - (this.time - this.communeTime) / CONFIG.commune.duration)
-      : 0;
-
-    const { verts, normal, glyph } = face;
-
-    // Simple lighting based on normal
-    const lightDir = { x: 0.3, y: -0.5, z: 0.8 };
-    const dot = normal.x * lightDir.x + normal.y * lightDir.y + normal.z * lightDir.z;
-    const lighting = 0.3 + Math.max(0, dot) * 0.4;
-
-    // Face color with lighting
-    const baseColor = Math.floor(26 * (lighting + communeFlash * 0.5));
-
-    // Front face is more transparent to show orb
-    const alpha = isFrontFace ? 0.7 : 1.0;
-    const faceColor = isFrontFace
-      ? `rgba(${baseColor + communeFlash * 40}, ${baseColor}, ${baseColor}, ${alpha})`
-      : `rgb(${baseColor + communeFlash * 40}, ${baseColor}, ${baseColor})`;
-
-    // Draw face
-    ctx.beginPath();
-    ctx.moveTo(verts[0].x, verts[0].y);
-    ctx.lineTo(verts[1].x, verts[1].y);
-    ctx.lineTo(verts[2].x, verts[2].y);
-    ctx.closePath();
-
-    ctx.fillStyle = faceColor;
-    ctx.fill();
-
-    // Edge highlight
-    ctx.strokeStyle = `rgba(100, 100, 100, ${0.6 + communeFlash * 0.4})`;
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-
-    // Render glyphs on face
-    this.renderGlyphs(ctx, verts, glyph, communeFlash);
-  }
-
-  renderGlyphs(ctx, verts, glyph, communeFlash) {
-    const { nodes, lines } = glyph;
-    const intensity = CONFIG.glyphs.glowIntensity + communeFlash * 0.4;
-
-    // Convert barycentric to screen coords
-    const toScreen = (u, v, w) => ({
-      x: verts[0].x * w + verts[1].x * u + verts[2].x * v,
-      y: verts[0].y * w + verts[1].y * u + verts[2].y * v,
-    });
-
-    // Draw lines
-    ctx.strokeStyle = CONFIG.colors.glyph;
-    ctx.lineWidth = CONFIG.glyphs.lineWidth;
-    ctx.shadowColor = CONFIG.colors.glow;
-    ctx.shadowBlur = 8 + communeFlash * 12;
-
-    for (const line of lines) {
-      if (line.edge) {
-        // Edge-aligned segment
-        const side = line.side;
-        const v1 = verts[side];
-        const v2 = verts[(side + 1) % 3];
-        const x1 = v1.x + (v2.x - v1.x) * line.t1;
-        const y1 = v1.y + (v2.y - v1.y) * line.t1;
-        const x2 = v1.x + (v2.x - v1.x) * line.t2;
-        const y2 = v1.y + (v2.y - v1.y) * line.t2;
-
-        ctx.beginPath();
-        ctx.moveTo(x1, y1);
-        ctx.lineTo(x2, y2);
-        ctx.stroke();
-      } else {
-        // Node to node
-        const from = nodes[line.from];
-        const to = nodes[line.to];
-        const p1 = toScreen(from.u, from.v, from.w);
-        const p2 = toScreen(to.u, to.v, to.w);
-
-        // Angular path (not straight line)
-        const midX = (p1.x + p2.x) / 2 + (Math.random() - 0.5) * 5;
-        const midY = (p1.y + p2.y) / 2;
-
-        ctx.beginPath();
-        ctx.moveTo(p1.x, p1.y);
-        ctx.lineTo(midX, p1.y);
-        ctx.lineTo(midX, p2.y);
-        ctx.lineTo(p2.x, p2.y);
-        ctx.stroke();
-      }
-    }
-
-    // Draw nodes
-    for (const node of nodes) {
-      const p = toScreen(node.u, node.v, node.w);
-      const flicker = Math.sin(this.time * CONFIG.glyphs.flickerSpeed + node.flicker);
-      const alpha = 0.4 + flicker * 0.3 + communeFlash * 0.3;
-
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, 2 + communeFlash * 2, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(255, 50, 20, ${alpha})`;
-      ctx.fill();
-    }
-
-    ctx.shadowBlur = 0;
-  }
-
-  renderOrb(ctx, cx, cy) {
-    const { orb, colors } = CONFIG;
-    const communeFlash = this.communeActive
-      ? Math.max(0, 1 - (this.time - this.communeTime) / CONFIG.commune.duration)
-      : 0;
-
-    // Pulse animation
-    const pulse = orb.pulseMin + (Math.sin(this.time * orb.pulseSpeed) * 0.5 + 0.5) * (orb.pulseMax - orb.pulseMin);
-    const radius = orb.radius * pulse * (1 + communeFlash * 0.5);
-
-    // Project orb center (at origin)
-    const proj = this.camera.project(0, 0, 0);
-    const orbX = cx + proj.x;
-    const orbY = cy + proj.y;
-
-    // Outer glow
-    const glowGradient = ctx.createRadialGradient(orbX, orbY, 0, orbX, orbY, orb.glowRadius * (1 + communeFlash));
-    glowGradient.addColorStop(0, `rgba(255, 30, 0, ${0.6 + communeFlash * 0.4})`);
-    glowGradient.addColorStop(0.3, `rgba(255, 20, 0, ${0.3 + communeFlash * 0.2})`);
-    glowGradient.addColorStop(0.6, `rgba(200, 10, 0, ${0.1 + communeFlash * 0.1})`);
-    glowGradient.addColorStop(1, 'transparent');
-
-    ctx.beginPath();
-    ctx.arc(orbX, orbY, orb.glowRadius * (1 + communeFlash), 0, Math.PI * 2);
-    ctx.fillStyle = glowGradient;
-    ctx.fill();
-
-    // Inner orb
-    const orbGradient = ctx.createRadialGradient(
-      orbX - radius * 0.2, orbY - radius * 0.2, 0,
-      orbX, orbY, radius
-    );
-    orbGradient.addColorStop(0, colors.orbCore);
-    orbGradient.addColorStop(0.3, colors.glowBright);
-    orbGradient.addColorStop(0.7, colors.orb);
-    orbGradient.addColorStop(1, 'rgba(150, 0, 0, 0.8)');
-
-    ctx.beginPath();
-    ctx.arc(orbX, orbY, radius, 0, Math.PI * 2);
-    ctx.fillStyle = orbGradient;
-    ctx.fill();
-
-    // Inner swirl detail
-    ctx.save();
-    ctx.translate(orbX, orbY);
-    ctx.rotate(this.time * 0.5);
-
-    ctx.strokeStyle = `rgba(255, 100, 50, ${0.3 + communeFlash * 0.3})`;
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    for (let i = 0; i < 3; i++) {
-      const angle = (i / 3) * Math.PI * 2;
-      const r1 = radius * 0.3;
-      const r2 = radius * 0.7;
-      ctx.moveTo(Math.cos(angle) * r1, Math.sin(angle) * r1);
-      ctx.quadraticCurveTo(
-        Math.cos(angle + 0.5) * radius * 0.5,
-        Math.sin(angle + 0.5) * radius * 0.5,
-        Math.cos(angle + 1) * r2,
-        Math.sin(angle + 1) * r2
-      );
-    }
-    ctx.stroke();
-    ctx.restore();
-  }
-
-  renderCommuneEffect(ctx, cx, cy) {
-    const progress = (this.time - this.communeTime) / CONFIG.commune.duration;
-    const flash = Math.pow(1 - progress, 2);
-
-    // Screen flash
-    ctx.fillStyle = `rgba(255, 50, 20, ${flash * 0.15})`;
-    ctx.fillRect(0, 0, this.width, this.height);
-
-    // Expanding ring
-    const ringRadius = progress * 300;
-    const ringAlpha = (1 - progress) * 0.5;
-
-    ctx.strokeStyle = `rgba(255, 100, 50, ${ringAlpha})`;
-    ctx.lineWidth = 3 * (1 - progress);
-    ctx.beginPath();
-    ctx.arc(cx, cy, ringRadius, 0, Math.PI * 2);
-    ctx.stroke();
-  }
-
-  renderTranscendence(ctx, cx, cy, w, h) {
-    const state = this.transcendenceFSM.state;
-    const progress = this.transcendenceFSM.progress;
-    const t = this.tunnelTime;
-
-    // === ZOOM IN: Atlas faces camera and zooms in, fading to white ===
-    if (state === 'zoomIn') {
-      // Clear background
-      ctx.fillStyle = CONFIG.background;
-      ctx.fillRect(0, 0, w, h);
-
-      // Apply zoom transform - scale toward the orb
-      const zoomScale = this.zoomInState.scale || 1;
-      const zoomOffsetY = this.zoomInState.offsetY || 0;
-      ctx.save();
-      ctx.translate(cx, cy + zoomOffsetY);
-      ctx.scale(zoomScale, zoomScale);
-      ctx.translate(-cx, -(cy + zoomOffsetY));
-
-      // Red nebula
-      const nebulaGradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(w, h) * 0.7);
-      nebulaGradient.addColorStop(0, 'rgba(60, 5, 0, 0.3)');
-      nebulaGradient.addColorStop(0.5, 'rgba(30, 2, 0, 0.2)');
-      nebulaGradient.addColorStop(1, 'transparent');
-      ctx.fillStyle = nebulaGradient;
-      ctx.fillRect(0, 0, w, h);
-
-      // Stars
-      this.renderStars(ctx, cx, cy);
-
-      // Figures
-      this.renderFigures(ctx, cx, cy);
-
-      // Atlas
-      const hover = Math.sin(this.time * CONFIG.atlas.hoverSpeed) * CONFIG.atlas.hoverAmplitude;
-      const projectedFaces = this.projectFaces(cx, cy, hover);
-      const orbFace = projectedFaces.find(f => f.faceIndex === this.orbFaceIndex);
-      const orbPosition = orbFace ? this.getOrbPosition(orbFace.verts) : { x: cx, y: cy };
-      const orbFaceDepth = orbFace ? orbFace.depth : 0;
-
-      let orbRendered = false;
-      for (const face of projectedFaces) {
-        if (!orbRendered && face.depth < orbFaceDepth) {
-          this.renderOrb(ctx, orbPosition.x, orbPosition.y);
-          orbRendered = true;
-        }
-        this.renderFace(ctx, face, face.faceIndex === this.orbFaceIndex);
-      }
-      if (!orbRendered) {
-        this.renderOrb(ctx, orbPosition.x, orbPosition.y);
-      }
-
-      ctx.restore();
-      return;
-    }
-
-    // === FLASH STATE: Crossfade - Atlas fades out, tunnel fades in ===
-    if (state === 'flash') {
-      // Initialize tunnel if not already
-      if (!this.tunnelParticles || this.tunnelParticles.length === 0) {
-        this.initTunnelPhase();
-      }
-
-      // Speed ramps up quickly during crossfade (easeInQuad)
-      const speedMultiplier = 0.2 + progress * progress * 0.8; // 0.2 -> 1.0
-      const dt = 0.016; // Approximate frame time
-      this.tunnelTime += dt * 3 * speedMultiplier;
-
-      // Update particle/ring positions with ramping speed
-      for (const p of this.tunnelParticles) {
-        p.z -= p.speed * dt * 2.5 * speedMultiplier;
-        if (p.z < -100) {
-          p.z = 1000;
-          p.hue = (p.hue + 30) % 360;
-        }
-        p.angle += dt * (1.5 + p.speed / 300) * speedMultiplier;
-      }
-      for (const r of this.tunnelRings) {
-        r.z -= 500 * dt * speedMultiplier;
-        if (r.z < -50) {
-          r.z = 2000;
-          r.hue = (r.hue + 60) % 360;
+    this._normFrameCount++;
+    
+    // Reinitialize grid neurons if spacing changed significantly (but not during intro)
+    const spacingChanged = this._lastSpacing && Math.abs(this._lastSpacing - spacing) > 1;
+    this._lastSpacing = spacing;
+    const isIntro = this.fsm.is('intro');
+    
+    // Initialize grid neurons cache if needed (skip during intro - already created)
+    if (!this.gridNeurons || this.gridNeurons.length !== rows * cols || (spacingChanged && !isIntro)) {
+      this.gridNeurons = [];
+      for (let row = 0; row < rows; row++) {
+        for (let col = 0; col < cols; col++) {
+          const x = this.gridOffsetX + col * spacing;
+          const y = this.gridOffsetY + row * spacing;
+          this.gridNeurons.push(new Neuron(x, y, 4 * this.scale));
         }
       }
-
-      // Render tunnel fading in
-      ctx.fillStyle = '#000';
-      ctx.fillRect(0, 0, w, h);
-
-      ctx.save();
-      ctx.globalAlpha = progress;
-      const tcx = cx + (this.tunnelOffsetX || 0);
-      const tcy = cy + (this.tunnelOffsetY || 0);
-      this.renderDomainWarp(ctx, tcx, tcy, w, h, this.tunnelTime);
-      this.renderKaleidoscope(ctx, tcx, tcy, w, h, this.tunnelTime);
-      this.renderTunnelRings(ctx, tcx, tcy, w, h, this.tunnelTime);
-      this.renderTunnelParticles(ctx, tcx, tcy, w, h, this.tunnelTime);
-      this.renderVortex(ctx, tcx, tcy, this.tunnelTime);
-      ctx.restore();
-
-      // Render Atlas fading out on top
-      ctx.save();
-      ctx.globalAlpha = 1 - progress;
-
-      const zoomScale = this.zoomInState.scale || 1;
-      const zoomOffsetY = this.zoomInState.offsetY || 0;
-      ctx.translate(cx, cy + zoomOffsetY);
-      ctx.scale(zoomScale, zoomScale);
-      ctx.translate(-cx, -(cy + zoomOffsetY));
-
-      // Render Atlas scene
-      const hover = Math.sin(this.time * CONFIG.atlas.hoverSpeed) * CONFIG.atlas.hoverAmplitude;
-      const projectedFaces = this.projectFaces(cx, cy, hover);
-      const orbFace = projectedFaces.find(f => f.faceIndex === this.orbFaceIndex);
-      const orbPosition = orbFace ? this.getOrbPosition(orbFace.verts) : { x: cx, y: cy };
-      const orbFaceDepth = orbFace ? orbFace.depth : 0;
-
-      let orbRendered = false;
-      for (const face of projectedFaces) {
-        if (!orbRendered && face.depth < orbFaceDepth) {
-          this.renderOrb(ctx, orbPosition.x, orbPosition.y);
-          orbRendered = true;
-        }
-        this.renderFace(ctx, face, face.faceIndex === this.orbFaceIndex);
-      }
-      if (!orbRendered) {
-        this.renderOrb(ctx, orbPosition.x, orbPosition.y);
-      }
-      ctx.restore();
-      return;
     }
-
-    // === TUNNEL STATE: PURE PSYCHEDELIC MADNESS ===
-    if (state === 'tunnel') {
-      // Trail effect - semi-transparent black overlay instead of full clear
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
-      ctx.fillRect(0, 0, w, h);
-
-      // Mouse-reactive center offset
-      const tcx = cx + this.tunnelOffsetX;
-      const tcy = cy + this.tunnelOffsetY;
-
-      // Zoom gradually from 1x to 3x during tunnel (slow zoom)
-      const tunnelZoom = 1 + progress * 2; // Zoom from 1x to 3x
-      ctx.save();
-      ctx.translate(tcx, tcy);
-      ctx.scale(tunnelZoom, tunnelZoom);
-      ctx.translate(-tcx, -tcy);
-
-      this.renderDomainWarp(ctx, tcx, tcy, w, h, t);
-      this.renderKaleidoscope(ctx, tcx, tcy, w, h, t);
-      this.renderTunnelRings(ctx, tcx, tcy, w, h, t);
-      this.renderTunnelParticles(ctx, tcx, tcy, w, h, t);
-      this.renderVortex(ctx, tcx, tcy, t);
-
-      ctx.restore();
-
-      this.renderScreenEffects(ctx, cx, cy, w, h, t);
-
-      // Fade to white at end
-      if (progress > 0.9) {
-        const fadeOut = (progress - 0.9) / 0.1;
-        ctx.fillStyle = `rgba(255, 255, 255, ${fadeOut})`;
-        ctx.fillRect(0, 0, w, h);
-      }
-      return;
-    }
-
-    // === FADE TO BLACK: White fades to black ===
-    if (state === 'fadeToBlack') {
-      // Fade from white to black
-      const whiteAlpha = 1 - progress;
-      ctx.fillStyle = '#000';
-      ctx.fillRect(0, 0, w, h);
-      ctx.fillStyle = `rgba(255, 255, 255, ${whiteAlpha})`;
-      ctx.fillRect(0, 0, w, h);
-      return;
-    }
-
-    // === ITERATION: Display "ITERATION #XXXXX" on black ===
-    if (state === 'iteration') {
-      ctx.fillStyle = '#000';
-      ctx.fillRect(0, 0, w, h);
-
-      // Fade in then out
-      let alpha;
-      if (progress < 0.3) {
-        alpha = progress / 0.3; // Fade in
-      } else if (progress > 0.7) {
-        alpha = (1 - progress) / 0.3; // Fade out
-      } else {
-        alpha = 1; // Full visibility
-      }
-
-      ctx.save();
-      ctx.globalAlpha = alpha;
-      ctx.fillStyle = '#ff2200';
-      ctx.font = 'bold 24px monospace';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-
-      // Glowing text effect
-      ctx.shadowColor = '#ff2200';
-      ctx.shadowBlur = 20;
-
-      ctx.fillText(`ITERATION #${this.iterationNumber}`, cx, cy);
-
-      // Double render for stronger glow
-      ctx.fillText(`ITERATION #${this.iterationNumber}`, cx, cy);
-
-      ctx.restore();
-      return;
-    }
-
-    // === ATLAS APPEAR: Black background, Atlas fades in ===
-    if (state === 'atlasAppear') {
-      ctx.fillStyle = '#000';
-      ctx.fillRect(0, 0, w, h);
-
-      // Atlas fades in
-      ctx.globalAlpha = progress;
-      const hover = Math.sin(this.time * CONFIG.atlas.hoverSpeed) * CONFIG.atlas.hoverAmplitude;
-      const projectedFaces = this.projectFaces(cx, cy, hover);
-      const orbFace = projectedFaces.find(f => f.faceIndex === this.orbFaceIndex);
-      const orbPosition = orbFace ? this.getOrbPosition(orbFace.verts) : { x: cx, y: cy };
-      const orbFaceDepth = orbFace ? orbFace.depth : 0;
-
-      let orbRendered = false;
-      for (const face of projectedFaces) {
-        if (!orbRendered && face.depth < orbFaceDepth) {
-          this.renderOrb(ctx, orbPosition.x, orbPosition.y);
-          orbRendered = true;
-        }
-        this.renderFace(ctx, face, face.faceIndex === this.orbFaceIndex);
-      }
-      if (!orbRendered) {
-        this.renderOrb(ctx, orbPosition.x, orbPosition.y);
-      }
-      ctx.globalAlpha = 1;
-      return;
-    }
-
-    // === STARS APPEAR: Atlas visible, stars fade in ===
-    if (state === 'starsAppear') {
-      ctx.fillStyle = '#000';
-      ctx.fillRect(0, 0, w, h);
-
-      // Red nebula fades in
-      ctx.globalAlpha = progress;
-      const nebulaGradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(w, h) * 0.7);
-      nebulaGradient.addColorStop(0, 'rgba(60, 5, 0, 0.3)');
-      nebulaGradient.addColorStop(0.5, 'rgba(30, 2, 0, 0.2)');
-      nebulaGradient.addColorStop(1, 'transparent');
-      ctx.fillStyle = nebulaGradient;
-      ctx.fillRect(0, 0, w, h);
-
-      // Stars fade in
-      this.renderStars(ctx, cx, cy);
-      ctx.globalAlpha = 1;
-
-      // Atlas fully visible
-      const hover = Math.sin(this.time * CONFIG.atlas.hoverSpeed) * CONFIG.atlas.hoverAmplitude;
-      const projectedFaces = this.projectFaces(cx, cy, hover);
-      const orbFace = projectedFaces.find(f => f.faceIndex === this.orbFaceIndex);
-      const orbPosition = orbFace ? this.getOrbPosition(orbFace.verts) : { x: cx, y: cy };
-      const orbFaceDepth = orbFace ? orbFace.depth : 0;
-
-      let orbRendered = false;
-      for (const face of projectedFaces) {
-        if (!orbRendered && face.depth < orbFaceDepth) {
-          this.renderOrb(ctx, orbPosition.x, orbPosition.y);
-          orbRendered = true;
-        }
-        this.renderFace(ctx, face, face.faceIndex === this.orbFaceIndex);
-      }
-      if (!orbRendered) {
-        this.renderOrb(ctx, orbPosition.x, orbPosition.y);
-      }
-      return;
-    }
-
-    // === FIGURES APPEAR: Everything visible, figures arrive one by one ===
-    if (state === 'figuresAppear') {
-      // Full background
-      ctx.fillStyle = '#000';
-      ctx.fillRect(0, 0, w, h);
-
-      const nebulaGradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(w, h) * 0.7);
-      nebulaGradient.addColorStop(0, 'rgba(60, 5, 0, 0.3)');
-      nebulaGradient.addColorStop(0.5, 'rgba(30, 2, 0, 0.2)');
-      nebulaGradient.addColorStop(1, 'transparent');
-      ctx.fillStyle = nebulaGradient;
-      ctx.fillRect(0, 0, w, h);
-
-      // Stars
-      this.renderStars(ctx, cx, cy);
-
-      // Figures arriving one by one
-      const totalFigures = CONFIG.figures.count;
-      const figuresVisible = Math.floor(progress * totalFigures) + 1;
-      this.renderFiguresPartial(ctx, cx, cy, Math.min(figuresVisible, totalFigures), progress);
-
-      // Atlas
-      const hover = Math.sin(this.time * CONFIG.atlas.hoverSpeed) * CONFIG.atlas.hoverAmplitude;
-      const projectedFaces = this.projectFaces(cx, cy, hover);
-      const orbFace = projectedFaces.find(f => f.faceIndex === this.orbFaceIndex);
-      const orbPosition = orbFace ? this.getOrbPosition(orbFace.verts) : { x: cx, y: cy };
-      const orbFaceDepth = orbFace ? orbFace.depth : 0;
-
-      let orbRendered = false;
-      for (const face of projectedFaces) {
-        if (!orbRendered && face.depth < orbFaceDepth) {
-          this.renderOrb(ctx, orbPosition.x, orbPosition.y);
-          orbRendered = true;
-        }
-        this.renderFace(ctx, face, face.faceIndex === this.orbFaceIndex);
-      }
-      if (!orbRendered) {
-        this.renderOrb(ctx, orbPosition.x, orbPosition.y);
-      }
-
-      // Vignette
-      const vignette = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(w, h) * 0.7);
-      vignette.addColorStop(0, 'transparent');
-      vignette.addColorStop(0.7, 'transparent');
-      vignette.addColorStop(1, 'rgba(0, 0, 0, 0.7)');
-      ctx.fillStyle = vignette;
-      ctx.fillRect(0, 0, w, h);
-      return;
-    }
-  }
-
-  // Trippy domain-warped background
-  renderDomainWarp(ctx, cx, cy, w, h, t) {
-    const cellSize = 40;
-    const cols = Math.ceil(w / cellSize) + 2;
-    const rows = Math.ceil(h / cellSize) + 2;
-
-    for (let i = 0; i < cols; i++) {
-      for (let j = 0; j < rows; j++) {
-        const x = i * cellSize;
-        const y = j * cellSize;
-
-        // Warped coordinates
-        const warpX = Math.sin(y * 0.01 + t * 2) * 30 + Math.sin(t * 3 + i * 0.5) * 20;
-        const warpY = Math.cos(x * 0.01 + t * 1.5) * 30 + Math.cos(t * 2.5 + j * 0.5) * 20;
-
-        const wx = x + warpX;
-        const wy = y + warpY;
-
-        // Distance from center affects color
-        const dx = wx - cx;
-        const dy = wy - cy;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-
-        const hue = (dist * 0.5 + t * 100 + i * 10 + j * 10) % 360;
-        const lightness = 30 + Math.sin(dist * 0.02 - t * 3) * 20;
-
-        ctx.fillStyle = `hsla(${hue}, 100%, ${lightness}%, 0.3)`;
-        ctx.fillRect(wx - cellSize / 2, wy - cellSize / 2, cellSize, cellSize);
-      }
-    }
-  }
-
-  // Kaleidoscope mirror effect
-  renderKaleidoscope(ctx, cx, cy, w, h, t) {
-    const segments = this.kaleidoSegments || 12;
-    const angleStep = (Math.PI * 2) / segments;
-
-    ctx.save();
-    ctx.translate(cx, cy);
-
-    for (let s = 0; s < segments; s++) {
-      ctx.save();
-      ctx.rotate(s * angleStep + t * 0.3);
-
-      // Mirror every other segment
-      if (s % 2 === 1) {
-        ctx.scale(-1, 1);
-      }
-
-      // Draw fractal-like patterns
-      for (let i = 0; i < 8; i++) {
-        const dist = 50 + i * 40 + Math.sin(t * 2 + i) * 20;
-        const size = 20 + Math.sin(t * 3 + i * 0.5) * 10;
-        const hue = (t * 50 + i * 45 + s * 30) % 360;
-
-        ctx.fillStyle = `hsla(${hue}, 100%, 60%, 0.6)`;
-        ctx.beginPath();
-
-        // Alternate between shapes
-        const shape = (i + s) % 4;
-        if (shape === 0) {
-          ctx.arc(dist, 0, size, 0, Math.PI * 2);
-        } else if (shape === 1) {
-          ctx.rect(dist - size / 2, -size / 2, size, size);
-        } else if (shape === 2) {
-          // Triangle
-          ctx.moveTo(dist, -size);
-          ctx.lineTo(dist + size, size);
-          ctx.lineTo(dist - size, size);
-          ctx.closePath();
+    
+    // Update and render cached neurons
+    for (let row = 0; row < rows; row++) {
+      for (let col = 0; col < cols; col++) {
+        const idx = row * cols + col;
+        const neuron = this.gridNeurons[idx];
+        
+        // During intro, neurons are in default state (no activation)
+        if (isIntro) {
+          neuron.activation = 0;
+          neuron.isActive = false;
         } else {
-          // Star
-          for (let p = 0; p < 5; p++) {
-            const angle = (p * Math.PI * 2) / 5 - Math.PI / 2;
-            const r = p % 2 === 0 ? size : size / 2;
-            const px = dist + Math.cos(angle) * r;
-            const py = Math.sin(angle) * r;
-            if (p === 0) ctx.moveTo(px, py);
-            else ctx.lineTo(px, py);
-          }
-          ctx.closePath();
+          const rawActivation = activations[idx];
+          neuron.activation = rawActivation;
+          neuron.isActive = rawActivation > 0.1;
+          // Update position (in case grid offset changed)
+          neuron.x = this.gridOffsetX + col * spacing;
+          neuron.y = this.gridOffsetY + row * spacing;
         }
-        ctx.fill();
+        
+        // Check for synapse flash effect
+        let flashIntensity = 0;
+        if (this.gridFlashes && this.gridFlashes.has(idx)) {
+          const flashTime = this.gridFlashes.get(idx);
+          const flashAge = this.synapseAnimationTime - flashTime;
+          const flashDuration = 0.4;
+          if (flashAge < flashDuration) {
+            flashIntensity = 1 - (flashAge / flashDuration);
+          } else {
+            this.gridFlashes.delete(idx);
+          }
+        }
+        
+        neuron.renderGrid(ctx, CONFIG.colors, this._normCache, flashIntensity, this.scale);
       }
-
-      ctx.restore();
     }
-
+  }
+  
+  /**
+   * Draw input and output neurons (left and right of grid)
+   */
+  drawInputOutputNeurons(ctx) {
+    if (!this.currentTestCase) return;
+    if (!this.cachedOutput) return;
+    if (!this.fsm.is('training')) return; // Only show during training
+    if (this.trainingOpacity <= 0) return;
+    
+    ctx.save();
+    ctx.globalAlpha = this.trainingOpacity;
+    
+    const gridCenterX = this.width / 2;
+    const gridCenterY = this.height / 2;
+    const gridWidth = CONFIG.grid.cols * this.gridSpacing;
+    const gridHeight = CONFIG.grid.rows * this.gridSpacing;
+    
+    // Position output column closer to grid (scaled)
+    const outputX = gridCenterX + gridWidth / 2 + 8 * this.scale;
+    
+    // Note: Input neurons are now represented by binary dots in drawInputOutput()
+    // We only draw output neurons here
+    
+    // Use cached output from update() - no forward pass here!
+    const output = this.cachedOutput;
+    const prediction = this.cachedPrediction;
+    
+    // Get top 10 outputs sorted by activation
+    // Note: output is Float32Array, must convert to Array first for .map to return objects
+    const outputWithIndices = Array.from(output, (val, idx) => ({ value: val, index: idx }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 10);
+    
+    const outputSpacing = this.gridSpacing; // Use same spacing as grid
+    const outputStartY = gridCenterY - (outputWithIndices.length - 1) * outputSpacing / 2;
+    
+    // Always recreate neurons when order changes (outputs are sorted by activation)
+    // Use a key based on the sorted indices to detect changes
+    const currentKeys = outputWithIndices.map(o => o.index).join(',');
+    if (!this.outputNeuronsKeys || this.outputNeuronsKeys !== currentKeys) {
+      this.outputNeurons = [];
+      for (let i = 0; i < outputWithIndices.length; i++) {
+        const outputY = outputStartY + i * outputSpacing;
+        this.outputNeurons.push(new Neuron(outputX, outputY, 4 * this.scale));
+      }
+      this.outputNeuronsKeys = currentKeys;
+    }
+    
+    // Update neuron states and render
+    for (let i = 0; i < outputWithIndices.length; i++) {
+      const outputIdx = outputWithIndices[i].index;
+      const strength = outputWithIndices[i].value;
+      const neuron = this.outputNeurons[i];
+      
+      // Update neuron position
+      neuron.x = outputX;
+      neuron.y = outputStartY + i * outputSpacing;
+      
+      // Update neuron state
+      neuron.activation = strength;
+      neuron.isTarget = (outputIdx === this.currentTestCase.target);
+      neuron.isSelected = (outputIdx === prediction);
+      
+      // Error state: only show if neuron has significant activation
+      // Otherwise early training shows constant red for low-confidence predictions
+      const hasSignificantActivation = strength > 0.1;
+      const isMismatch = (neuron.isTarget && !neuron.isSelected) || (!neuron.isTarget && neuron.isSelected);
+      neuron.isError = hasSignificantActivation && isMismatch;
+      
+      // Check for synapse flash effect (triggered when synapse reaches this neuron)
+      let flashIntensity = 0;
+      if (this.outputFlashes.has(i)) {
+        const flashTime = this.outputFlashes.get(i);
+        const flashAge = this.synapseAnimationTime - flashTime;
+        const flashDuration = 0.4; // seconds
+        if (flashAge < flashDuration) {
+          flashIntensity = 1 - (flashAge / flashDuration);
+        } else {
+          this.outputFlashes.delete(i); // Clean up old flashes
+        }
+      }
+      
+      // Render using Neuron class with flash and scale
+      neuron.renderOutput(ctx, CONFIG.colors, flashIntensity, this.scale);
+    }
+    
     ctx.restore();
   }
-
-  // Rings flying toward viewer
-  renderTunnelRings(ctx, cx, cy, w, h, t) {
-    if (!this.tunnelRings) return;
-
-    const maxDist = Math.max(w, h);
-
-    for (const ring of this.tunnelRings) {
-      const scale = 1000 / (ring.z + 100);
-      if (scale < 0.1 || scale > 20) continue;
-
-      const radius = 100 * scale;
-      const hue = (ring.hue + t * 30) % 360;
-      const alpha = Math.min(1, scale * 0.3);
-
-      ctx.strokeStyle = `hsla(${hue}, 100%, 70%, ${alpha})`;
-      ctx.lineWidth = ring.thickness * scale;
+  
+  /**
+   * Draw synapses (connections) as animated lines
+   */
+  drawSynapses(ctx) {
+    if (!this.currentTestCase) return;
+    if (!this.fsm.is('training')) return; // Only show during training
+    if (this.trainingOpacity <= 0) return;
+    
+    ctx.save();
+    ctx.globalAlpha = this.trainingOpacity;
+    
+    const synapseColor = '#0ff'; // Cyan for synapses
+    const gridCenterX = this.width / 2;
+    const gridCenterY = this.height / 2;
+    const gridWidth = CONFIG.grid.cols * this.gridSpacing;
+    
+    // Input positions match binary dots positions (scaled)
+    const leftX = gridCenterX - gridWidth / 2 - 100 * this.scale;
+    const { rows, cols } = CONFIG.grid;
+    const spacing = this.gridSpacing;
+    
+    // Get activations
+    const activations = this.network.hiddenActivations;
+    if (!activations || activations.length === 0) return;
+    
+    // Normalize activations
+    const maxActivation = Math.max(...activations, 0.001);
+    
+    // Animation phase (0-1, loops)
+    const animPhase = (this.synapseAnimationTime * 0.5) % 1;
+    
+    ctx.save();
+    ctx.lineCap = 'round';
+    
+    // Draw input → hidden connections
+    // ONE synapse from each input (a and b) from the right side of binary dots
+    const [aOrig, bOrig] = this.currentTestCase.original || 
+      [Math.round(this.currentTestCase.input[0] * CONFIG.network.outputSize),
+       Math.round(this.currentTestCase.input[1] * CONFIG.network.outputSize)];
+    
+    // Calculate right edge of binary dots (scaled)
+    const dotSize = 4 * this.scale;
+    const dotSpacing = 18 * this.scale;
+    const dotsPerRow = 10;
+    const bits = 7;
+    const totalRows = Math.ceil(bits / dotsPerRow);
+    const dotsInLastRow = bits % dotsPerRow || dotsPerRow;
+    const rightEdgeX = leftX + ((dotsInLastRow - 1) * dotSpacing) / 2 + dotSpacing / 2;
+    
+    // Input a position (right edge of binary dots, top) - must match drawInputOutput
+    const inputAX = rightEdgeX;
+    const inputAY = gridCenterY - 40 * this.scale;
+    
+    // Input b position (right edge of binary dots, bottom) - must match drawInputOutput
+    const inputBX = rightEdgeX;
+    const inputBY = gridCenterY + 40 * this.scale;
+    
+    // Sample connections for performance
+    const maxConnectionsToShow = 50;
+    
+    // Input a → Hidden: ONE synapse to specific destination neurons
+    this.drawSingleInputToHidden(
+      ctx,
+      inputAX, inputAY, // from position (right edge of binary dots)
+      this.gridOffsetX, this.gridOffsetY, rows, cols, spacing,
+      this.network.weights1[0], activations, maxActivation,
+      animPhase, synapseColor
+    );
+    
+    // Input b → Hidden: ONE synapse to specific destination neurons
+    this.drawSingleInputToHidden(
+      ctx,
+      inputBX, inputBY, // from position (right edge of binary dots)
+      this.gridOffsetX, this.gridOffsetY, rows, cols, spacing,
+      this.network.weights1[1], activations, maxActivation,
+      animPhase, synapseColor
+    );
+    
+    // Draw hidden → output connections (to top 10 outputs - same as neurons)
+    // Use cached output - don't call forward() again!
+    if (!this.cachedOutput) return;
+    const output = this.cachedOutput;
+    // Note: output is Float32Array, must use Array.from for proper object mapping
+    const topOutputs = Array.from(output, (val, idx) => ({ value: val, index: idx }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 10); // Match the number of output neurons
+    
+    const outputSpacing = this.gridSpacing;
+    const outputStartY = gridCenterY - (topOutputs.length - 1) * outputSpacing / 2;
+    const outputX = gridCenterX + gridWidth / 2 + 8 * this.scale; // Match drawInputOutputNeurons position
+    
+    // Draw ALL output synapses using a single unified tracing animation
+    // This ensures one synapse traces at a time across all outputs
+    this.drawUnifiedOutputSynapses(
+      ctx,
+      this.gridOffsetX, this.gridOffsetY, rows, cols, spacing,
+      topOutputs, outputX, outputStartY, outputSpacing,
+      activations, maxActivation, synapseColor
+    );
+    
+    ctx.restore();
+  }
+  
+  /**
+   * Draw ONE synapse FROM input TO specific hidden neurons
+   * Shows one synapse at a time, cycling through destination neurons
+   */
+  drawSingleInputToHidden(ctx, fromX, fromY, gridOffsetX, gridOffsetY, rows, cols, spacing, weights, activations, maxActivation, animPhase, color) {
+    // Collect strongest connections
+    const connections = [];
+    for (let i = 0; i < weights.length; i++) {
+      const weight = weights[i];
+      const activation = activations[i] / maxActivation;
+      const strength = Math.abs(weight) * activation;
+      connections.push({ index: i, strength, weight, activation });
+    }
+    
+    // Sort by strength and take top N
+    connections.sort((a, b) => b.strength - a.strength);
+    const topConnections = connections.slice(0, 20); // Top 20 destinations
+    
+    if (topConnections.length === 0) return;
+    
+    // Cycle through connections: show one at a time
+    const connectionDuration = 0.5;
+    const totalCycleTime = topConnections.length * connectionDuration;
+    const cyclePhase = (this.synapseAnimationTime % totalCycleTime) / connectionDuration;
+    const currentConnectionIndex = Math.floor(cyclePhase);
+    const connectionProgress = cyclePhase % 1;
+    
+    // Draw only the current connection
+    const conn = topConnections[currentConnectionIndex % topConnections.length];
+    
+    // Draw all connections faintly for context
+    for (const c of topConnections) {
+      const idx = c.index;
+      const row = Math.floor(idx / cols);
+      const col = idx % cols;
+      
+      const toX = gridOffsetX + col * spacing;
+      const toY = gridOffsetY + row * spacing;
+      
+      ctx.strokeStyle = color;
+      ctx.globalAlpha = 0.05;
+      ctx.lineWidth = 0.5;
       ctx.beginPath();
-      ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+      ctx.moveTo(fromX, fromY);
+      ctx.lineTo(toX, toY);
       ctx.stroke();
-
-      // Inner glow
-      const gradient = ctx.createRadialGradient(cx, cy, radius * 0.8, cx, cy, radius * 1.2);
-      gradient.addColorStop(0, 'transparent');
-      gradient.addColorStop(0.5, `hsla(${hue}, 100%, 50%, ${alpha * 0.3})`);
-      gradient.addColorStop(1, 'transparent');
-      ctx.fillStyle = gradient;
-      ctx.fillRect(0, 0, w, h);
+    }
+    
+    // Draw the active connection with animation
+    const idx = conn.index;
+    const row = Math.floor(idx / cols);
+    const col = idx % cols;
+    
+    const toX = gridOffsetX + col * spacing;
+    const toY = gridOffsetY + row * spacing;
+    
+    // Line properties based on weight and activation
+    const lineWidth = Math.max(1, Math.abs(conn.weight) * 3);
+    const alpha = Math.min(0.8, conn.activation * 0.9);
+    
+    // Animated tracing effect
+    const traceLength = 0.4;
+    const traceStart = connectionProgress;
+    const traceEnd = (connectionProgress + traceLength) % 1;
+    
+    // Draw animated trace segment
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = alpha;
+    ctx.lineWidth = lineWidth;
+    
+    ctx.beginPath();
+    
+    if (traceEnd > traceStart) {
+      const startX = fromX + (toX - fromX) * traceStart;
+      const startY = fromY + (toY - fromY) * traceStart;
+      const endX = fromX + (toX - fromX) * traceEnd;
+      const endY = fromY + (toY - fromY) * traceEnd;
+      
+      ctx.moveTo(startX, startY);
+      ctx.lineTo(endX, endY);
+    } else {
+      const startX = fromX + (toX - fromX) * traceStart;
+      const startY = fromY + (toY - fromY) * traceStart;
+      const endX = fromX + (toX - fromX) * traceEnd;
+      const endY = fromY + (toY - fromY) * traceEnd;
+      
+      ctx.moveTo(startX, startY);
+      ctx.lineTo(toX, toY);
+      ctx.moveTo(fromX, fromY);
+      ctx.lineTo(endX, endY);
+    }
+    
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    
+    // Trigger flash when synapse reaches the grid neuron (only once per synapse)
+    const shouldFlash = traceEnd >= 0.95 || (traceEnd < traceStart && traceStart > 0.9);
+    if (shouldFlash && this.lastGridFlashIdx !== idx) {
+      this.gridFlashes.set(idx, this.synapseAnimationTime);
+      this.lastGridFlashIdx = idx;
+    } else if (!shouldFlash && this.lastGridFlashIdx === idx) {
+      // Reset when synapse moves away from completion zone
+      this.lastGridFlashIdx = -1;
     }
   }
-
-  // Particle storm
-  renderTunnelParticles(ctx, cx, cy, w, h, t) {
-    if (!this.tunnelParticles) return;
-
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-
-    for (const p of this.tunnelParticles) {
-      const scale = 800 / (p.z + 50);
-      if (scale < 0.05 || scale > 30) continue;
-
-      const x = cx + Math.cos(p.angle) * p.radius * scale;
-      const y = cy + Math.sin(p.angle) * p.radius * scale;
-
-      const size = p.size * scale;
-      const hue = (p.hue + t * 60) % 360;
-      const alpha = Math.min(1, scale * 0.5);
-
-      ctx.fillStyle = `hsla(${hue}, 100%, 70%, ${alpha})`;
-
-      ctx.beginPath();
-      if (p.type === 0) {
-        ctx.arc(x, y, size, 0, Math.PI * 2);
-      } else if (p.type === 1) {
-        ctx.rect(x - size / 2, y - size / 2, size, size);
-      } else if (p.type === 2) {
-        // Draw as streak toward center
-        const streakLen = size * 3;
-        const angle = Math.atan2(cy - y, cx - x);
-        ctx.moveTo(x, y);
-        ctx.lineTo(x + Math.cos(angle) * streakLen, y + Math.sin(angle) * streakLen);
-        ctx.lineWidth = size / 2;
-        ctx.strokeStyle = `hsla(${hue}, 100%, 70%, ${alpha})`;
+  
+  /**
+   * Draw connections FROM activated binary dots TO hidden neurons
+   * Each activated bit connects to hidden neurons it activates
+   */
+  drawInputToHiddenConnections(ctx, number, centerX, centerY, dotSize, dotSpacing, dotsPerRow, gridOffsetX, gridOffsetY, rows, cols, spacing, weights, activations, maxActivation, animPhase, color) {
+    // Convert to binary to find activated bits
+    const bits = 7;
+    const binary = [];
+    let temp = number;
+    for (let i = bits - 1; i >= 0; i--) {
+      const bit = (temp >> i) & 1;
+      binary.push(bit);
+    }
+    
+    // Calculate dot positions
+    const totalRows = Math.ceil(bits / dotsPerRow);
+    const startY = centerY - ((totalRows - 1) * dotSpacing) / 2;
+    
+    // Find activated bits and their positions
+    const activatedBits = [];
+    for (let i = 0; i < bits; i++) {
+      if (binary[i] === 1) {
+        const row = Math.floor(i / dotsPerRow);
+        const col = i % dotsPerRow;
+        const dotsInRow = Math.min(dotsPerRow, bits - row * dotsPerRow);
+        const rowWidth = (dotsInRow - 1) * dotSpacing;
+        const x = centerX - rowWidth / 2 + col * dotSpacing;
+        const y = startY + row * dotSpacing;
+        activatedBits.push({ index: i, x, y });
+      }
+    }
+    
+    if (activatedBits.length === 0) return;
+    
+    // Cycle through connections: show one at a time
+    const connectionDuration = 0.5;
+    const totalCycleTime = activatedBits.length * connectionDuration;
+    const cyclePhase = (this.synapseAnimationTime % totalCycleTime) / connectionDuration;
+    const currentBitIndex = Math.floor(cyclePhase);
+    const connectionProgress = cyclePhase % 1;
+    
+    const activeBit = activatedBits[currentBitIndex % activatedBits.length];
+    
+    // Draw all connections faintly for context
+    for (const bit of activatedBits) {
+      // Connect this bit to top hidden neurons (by weight strength)
+      const connections = [];
+      for (let i = 0; i < weights.length; i++) {
+        const weight = weights[i];
+        const activation = activations[i] / maxActivation;
+        const strength = Math.abs(weight) * activation;
+        connections.push({ index: i, strength, weight, activation });
+      }
+      
+      connections.sort((a, b) => b.strength - a.strength);
+      const topConnections = connections.slice(0, 10); // Top 10 per bit
+      
+      for (const conn of topConnections) {
+        const hiddenIdx = conn.index;
+        const hiddenRow = Math.floor(hiddenIdx / cols);
+        const hiddenCol = hiddenIdx % cols;
+        const toX = gridOffsetX + hiddenCol * spacing;
+        const toY = gridOffsetY + hiddenRow * spacing;
+        
+        ctx.strokeStyle = color;
+        ctx.globalAlpha = 0.03;
+        ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(bit.x, bit.y);
+        ctx.lineTo(toX, toY);
         ctx.stroke();
-      } else {
-        // Diamond
-        ctx.moveTo(x, y - size);
-        ctx.lineTo(x + size, y);
-        ctx.lineTo(x, y + size);
-        ctx.lineTo(x - size, y);
-        ctx.closePath();
       }
-      ctx.fill();
     }
-
+    
+    // Draw active connection with animation
+    const connections = [];
+    for (let i = 0; i < weights.length; i++) {
+      const weight = weights[i];
+      const activation = activations[i] / maxActivation;
+      const strength = Math.abs(weight) * activation;
+      connections.push({ index: i, strength, weight, activation });
+    }
+    
+    connections.sort((a, b) => b.strength - a.strength);
+    const topConnections = connections.slice(0, 10);
+    
+    for (const conn of topConnections) {
+      const hiddenIdx = conn.index;
+      const hiddenRow = Math.floor(hiddenIdx / cols);
+      const hiddenCol = hiddenIdx % cols;
+      const toX = gridOffsetX + hiddenCol * spacing;
+      const toY = gridOffsetY + hiddenRow * spacing;
+      
+      const lineWidth = Math.max(1, Math.abs(conn.weight) * 2);
+      const alpha = Math.min(0.6, conn.activation * 0.7);
+      
+      const traceLength = 0.4;
+      const traceStart = connectionProgress;
+      const traceEnd = (connectionProgress + traceLength) % 1;
+      
+      ctx.strokeStyle = color;
+      ctx.globalAlpha = alpha;
+      ctx.lineWidth = lineWidth;
+      
+      ctx.beginPath();
+      
+      if (traceEnd > traceStart) {
+        const startX = activeBit.x + (toX - activeBit.x) * traceStart;
+        const startY = activeBit.y + (toY - activeBit.y) * traceStart;
+        const endX = activeBit.x + (toX - activeBit.x) * traceEnd;
+        const endY = activeBit.y + (toY - activeBit.y) * traceEnd;
+        
+        ctx.moveTo(startX, startY);
+        ctx.lineTo(endX, endY);
+      } else {
+        const startX = activeBit.x + (toX - activeBit.x) * traceStart;
+        const startY = activeBit.y + (toY - activeBit.y) * traceStart;
+        const endX = activeBit.x + (toX - activeBit.x) * traceEnd;
+        const endY = activeBit.y + (toY - activeBit.y) * traceEnd;
+        
+        ctx.moveTo(startX, startY);
+        ctx.lineTo(toX, toY);
+        ctx.moveTo(activeBit.x, activeBit.y);
+        ctx.lineTo(endX, endY);
+      }
+      
+      ctx.stroke();
+    }
+    
+    ctx.globalAlpha = 1;
+  }
+  
+  /**
+   * Draw connections FROM a single point TO a grid with animated tracing
+   * Shows only ONE synapse at a time, cycling through them
+   */
+  drawLayerConnectionsToGrid(ctx, fromX, fromY, gridOffsetX, gridOffsetY, rows, cols, spacing, weights, activations, maxActivation, animPhase, maxConnections, color) {
+    // Collect strongest connections
+    const connections = [];
+    for (let i = 0; i < weights.length; i++) {
+      const weight = weights[i];
+      const activation = activations[i] / maxActivation;
+      const strength = Math.abs(weight) * activation;
+      connections.push({ index: i, strength, weight, activation });
+    }
+    
+    // Sort by strength and take top N
+    connections.sort((a, b) => b.strength - a.strength);
+    const topConnections = connections.slice(0, maxConnections);
+    
+    if (topConnections.length === 0) return;
+    
+    // Cycle through connections: show one at a time
+    const connectionDuration = 0.5; // Time per connection in seconds
+    const totalCycleTime = topConnections.length * connectionDuration;
+    const cyclePhase = (this.synapseAnimationTime % totalCycleTime) / connectionDuration;
+    const currentConnectionIndex = Math.floor(cyclePhase);
+    const connectionProgress = cyclePhase % 1;
+    
+    // Draw only the current connection
+    const conn = topConnections[currentConnectionIndex % topConnections.length];
+    
+    // Draw all connections faintly for context
+    for (const c of topConnections) {
+      const idx = c.index;
+      const row = Math.floor(idx / cols);
+      const col = idx % cols;
+      
+      const toX = gridOffsetX + col * spacing;
+      const toY = gridOffsetY + row * spacing;
+      
+      ctx.strokeStyle = color;
+      ctx.globalAlpha = 0.05;
+      ctx.lineWidth = 0.5;
+      ctx.beginPath();
+      ctx.moveTo(fromX, fromY);
+      ctx.lineTo(toX, toY);
+      ctx.stroke();
+    }
+    
+    // Draw the active connection with animation
+    const idx = conn.index;
+    const row = Math.floor(idx / cols);
+    const col = idx % cols;
+    
+    const toX = gridOffsetX + col * spacing;
+    const toY = gridOffsetY + row * spacing;
+    
+    // Line properties based on weight and activation
+    const lineWidth = Math.max(1, Math.abs(conn.weight) * 3);
+    const alpha = Math.min(0.8, conn.activation * 0.9);
+    
+    // Animated tracing effect - use connectionProgress instead of animPhase
+    const traceLength = 0.4;
+    const traceStart = connectionProgress;
+    const traceEnd = (connectionProgress + traceLength) % 1;
+    
+    // Draw animated trace segment
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = alpha;
+    ctx.lineWidth = lineWidth;
+    
+    ctx.beginPath();
+    
+    if (traceEnd > traceStart) {
+      // Normal case: trace from start to end
+      const startX = fromX + (toX - fromX) * traceStart;
+      const startY = fromY + (toY - fromY) * traceStart;
+      const endX = fromX + (toX - fromX) * traceEnd;
+      const endY = fromY + (toY - fromY) * traceEnd;
+      
+      ctx.moveTo(startX, startY);
+      ctx.lineTo(endX, endY);
+    } else {
+      // Wrapped case: draw two segments
+      const startX = fromX + (toX - fromX) * traceStart;
+      const startY = fromY + (toY - fromY) * traceStart;
+      const endX = fromX + (toX - fromX) * traceEnd;
+      const endY = fromY + (toY - fromY) * traceEnd;
+      
+      ctx.moveTo(startX, startY);
+      ctx.lineTo(toX, toY);
+      ctx.moveTo(fromX, fromY);
+      ctx.lineTo(endX, endY);
+    }
+    
+    ctx.stroke();
+    
+    ctx.globalAlpha = 1;
+  }
+  
+  /**
+   * Draw unified output synapses - ONE trace at a time across ALL output neurons
+   * This creates the same visual style as input synapses
+   */
+  drawUnifiedOutputSynapses(ctx, gridOffsetX, gridOffsetY, rows, cols, spacing, topOutputs, outputX, outputStartY, outputSpacing, activations, maxActivation, color) {
+    // Collect ALL strongest connections across ALL output neurons
+    const allConnections = [];
+    
+    for (let outIdx = 0; outIdx < topOutputs.length; outIdx++) {
+      const outputIdx = topOutputs[outIdx].index;
+      const outputY = outputStartY + outIdx * outputSpacing;
+      const weights = this.network.weights2.map(row => row[outputIdx]);
+      
+      for (let i = 0; i < weights.length; i++) {
+        const weight = weights[i];
+        const activation = activations[i] / maxActivation;
+        const strength = Math.abs(weight) * activation;
+        
+        if (strength > 0.01) { // Only include significant connections
+          const row = Math.floor(i / cols);
+          const col = i % cols;
+          const fromX = gridOffsetX + col * spacing;
+          const fromY = gridOffsetY + row * spacing;
+          
+          allConnections.push({
+            fromX, fromY,
+            toX: outputX, toY: outputY,
+            strength, weight, activation,
+            outputIdx: outIdx
+          });
+        }
+      }
+    }
+    
+    // Sort by strength and take top connections
+    allConnections.sort((a, b) => b.strength - a.strength);
+    const topConnections = allConnections.slice(0, 30); // Top 30 across all outputs
+    
+    if (topConnections.length === 0) return;
+    
+    // Cycle through connections: show ONE at a time
+    const connectionDuration = 0.3; // Faster cycling
+    const totalCycleTime = topConnections.length * connectionDuration;
+    const cyclePhase = (this.synapseAnimationTime % totalCycleTime) / connectionDuration;
+    const currentConnectionIndex = Math.floor(cyclePhase);
+    const connectionProgress = cyclePhase % 1;
+    
+    // Draw all connections very faintly for context
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = 0.03;
+    ctx.lineWidth = 0.5;
+    for (const conn of topConnections) {
+      ctx.beginPath();
+      ctx.moveTo(conn.fromX, conn.fromY);
+      ctx.lineTo(conn.toX, conn.toY);
+      ctx.stroke();
+    }
+    
+    // Draw the active connection with animated trace
+    const conn = topConnections[currentConnectionIndex % topConnections.length];
+    
+    const lineWidth = Math.max(1, Math.abs(conn.weight) * 3);
+    const alpha = Math.min(0.8, conn.activation * 0.9);
+    
+    // Animated tracing effect
+    const traceLength = 0.4;
+    const traceStart = connectionProgress;
+    const traceEnd = Math.min(1, connectionProgress + traceLength);
+    
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = alpha;
+    ctx.lineWidth = lineWidth;
+    
+    ctx.beginPath();
+    
+    if (traceEnd > traceStart) {
+      const startX = conn.fromX + (conn.toX - conn.fromX) * traceStart;
+      const startY = conn.fromY + (conn.toY - conn.fromY) * traceStart;
+      const endX = conn.fromX + (conn.toX - conn.fromX) * traceEnd;
+      const endY = conn.fromY + (conn.toY - conn.fromY) * traceEnd;
+      
+      ctx.moveTo(startX, startY);
+      ctx.lineTo(endX, endY);
+    }
+    
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    
+    // Trigger flash when synapse reaches the output neuron (only once per synapse)
+    const outputNeuronIdx = conn.outputIdx;
+    const flashKey = `${currentConnectionIndex}-${outputNeuronIdx}`;
+    if (traceEnd >= 0.95 && this.lastOutputFlashIdx !== flashKey) {
+      this.outputFlashes.set(outputNeuronIdx, this.synapseAnimationTime);
+      this.lastOutputFlashIdx = flashKey;
+    } else if (traceEnd < 0.5 && this.lastOutputFlashIdx === flashKey) {
+      // Reset when synapse moves away from completion zone
+      this.lastOutputFlashIdx = null;
+    }
+  }
+  
+  /**
+   * Draw connections FROM a grid TO a single point with animated tracing
+   * Shows only ONE synapse at a time, cycling through them
+   */
+  drawLayerConnectionsFromGrid(ctx, gridOffsetX, gridOffsetY, rows, cols, spacing, toX, toY, weights, activations, maxActivation, animPhase, maxConnections, color) {
+    // Collect strongest connections
+    const connections = [];
+    for (let i = 0; i < weights.length; i++) {
+      const weight = weights[i];
+      const activation = activations[i] / maxActivation;
+      const strength = Math.abs(weight) * activation;
+      connections.push({ index: i, strength, weight, activation });
+    }
+    
+    // Sort by strength and take top N
+    connections.sort((a, b) => b.strength - a.strength);
+    const topConnections = connections.slice(0, maxConnections);
+    
+    if (topConnections.length === 0) return;
+    
+    // Cycle through connections: show one at a time
+    const connectionDuration = 0.5; // Time per connection in seconds
+    const totalCycleTime = topConnections.length * connectionDuration;
+    const cyclePhase = (this.synapseAnimationTime % totalCycleTime) / connectionDuration;
+    const currentConnectionIndex = Math.floor(cyclePhase);
+    const connectionProgress = cyclePhase % 1;
+    
+    // Initialize synapse trail tracking if needed
+    if (!this.synapseTrails) {
+      this.synapseTrails = new Map();
+    }
+    
+    // Draw only the current connection
+    const conn = topConnections[currentConnectionIndex % topConnections.length];
+    
+    const idx = conn.index;
+    const row = Math.floor(idx / cols);
+    const col = idx % cols;
+    
+    const fromX = gridOffsetX + col * spacing;
+    const fromY = gridOffsetY + row * spacing;
+    
+    // Create a unique key for this synapse trail
+    const trailKey = `${fromX},${fromY},${toX},${toY}`;
+    
+    // Draw fading trails for all synapses (fade out over time)
+    const fadeDuration = 1.5; // Seconds to fade out
+    const trailsToRemove = [];
+    
+    for (const [key, trail] of this.synapseTrails.entries()) {
+      const age = this.synapseAnimationTime - trail.startTime;
+      const fadeAlpha = Math.max(0, 1 - (age / fadeDuration));
+      
+      if (fadeAlpha <= 0) {
+        trailsToRemove.push(key);
+        continue;
+      }
+      
+      // Draw faded trail - MUST reach toX, toY
+      ctx.strokeStyle = color;
+      ctx.globalAlpha = fadeAlpha * 0.4; // Fade to 40% max
+      ctx.lineWidth = Math.max(0.5, Math.abs(trail.weight) * 2 * fadeAlpha);
+      ctx.beginPath();
+      ctx.moveTo(trail.fromX, trail.fromY);
+      ctx.lineTo(trail.toX, trail.toY); // Always draw full line to destination
+      ctx.stroke();
+    }
+    
+    // Remove faded trails
+    for (const key of trailsToRemove) {
+      this.synapseTrails.delete(key);
+    }
+    
+    // Draw the active connection with animation - MUST reach toX, toY
+    const lineWidth = Math.max(1, Math.abs(conn.weight) * 3);
+    const alpha = Math.min(0.8, conn.activation * 0.9);
+    
+    // Animated tracing effect - trace from fromX,fromY to toX,toY
+    const traceLength = 0.4;
+    const traceStart = connectionProgress;
+    const traceEnd = Math.min(1, connectionProgress + traceLength);
+    
+    // Draw animated trace segment - ensure it reaches toX, toY
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = alpha;
+    ctx.lineWidth = lineWidth;
+    
+    ctx.beginPath();
+    
+    if (traceEnd > traceStart) {
+      const startX = fromX + (toX - fromX) * traceStart;
+      const startY = fromY + (toY - fromY) * traceStart;
+      const endX = fromX + (toX - fromX) * traceEnd;
+      const endY = fromY + (toY - fromY) * traceEnd;
+      
+      ctx.moveTo(startX, startY);
+      ctx.lineTo(endX, endY);
+    } else {
+      // Handle wrap-around case
+      const startX = fromX + (toX - fromX) * traceStart;
+      const startY = fromY + (toY - fromY) * traceStart;
+      
+      ctx.moveTo(startX, startY);
+      ctx.lineTo(toX, toY); // Always reach the destination
+      ctx.moveTo(fromX, fromY);
+      const endX = fromX + (toX - fromX) * traceEnd;
+      const endY = fromY + (toY - fromY) * traceEnd;
+      ctx.lineTo(endX, endY);
+    }
+    
+    ctx.stroke();
+    
+    // Track when this synapse completes (reaches destination) - add to trails
+    if (connectionProgress >= 0.95 && !this.synapseTrails.has(trailKey)) {
+      this.synapseTrails.set(trailKey, { 
+        startTime: this.synapseAnimationTime,
+        fromX, fromY, toX, toY,
+        weight: conn.weight,
+        activation: conn.activation
+      });
+    }
+    
+    ctx.globalAlpha = 1;
+  }
+  
+  drawInputOutput(ctx) {
+    if (!this.currentTestCase) return;
+    if (!this.fsm.is('training')) return; // Only show during training
+    if (this.trainingOpacity <= 0) return;
+    
+    ctx.save();
+    ctx.globalAlpha = this.trainingOpacity;
+    
+    const { text, neuronActive, neuronBright } = CONFIG.colors;
+    // Use original values for display
+    const [aOrig, bOrig] = this.currentTestCase.original || 
+      [Math.round(this.currentTestCase.input[0] * CONFIG.network.outputSize),
+       Math.round(this.currentTestCase.input[1] * CONFIG.network.outputSize)];
+    const target = this.currentTestCase.target;
+    const prediction = this.network.predict(this.currentTestCase.input);
+    const correct = prediction === target;
+    
+    const gridCenterX = this.width / 2;
+    const gridCenterY = this.height / 2;
+    const gridWidth = CONFIG.grid.cols * this.gridSpacing;
+    const gridHeight = CONFIG.grid.rows * this.gridSpacing;
+    
+    // All positions and sizes scaled
+    const leftX = gridCenterX - gridWidth / 2 - 100 * this.scale;
+    const rightX = gridCenterX + gridWidth / 2 + 100 * this.scale;
+    const dotSize = 4 * this.scale;
+    const dotSpacing = 18 * this.scale;
+    const dotsPerRow = 10;
+    
+    // Draw input 'a' as dots on left side (top)
+    const aStartY = gridCenterY - 40 * this.scale;
+    this.drawNumberAsDots(ctx, aOrig, leftX, aStartY, dotSize, dotSpacing, dotsPerRow, neuronActive);
+    
+    // Draw '+' symbol (scaled font)
+    ctx.fillStyle = text;
+    ctx.font = `bold ${Math.round(32 * this.scale)}px monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('+', leftX, gridCenterY);
+    
+    // Draw input 'b' as dots on left side (bottom)
+    const bStartY = gridCenterY + 40 * this.scale;
+    this.drawNumberAsDots(ctx, bOrig, leftX, bStartY, dotSize, dotSpacing, dotsPerRow, neuronActive);
+    
+    // Draw output 'target' as dots on right side
+    this.drawNumberAsDots(ctx, target, rightX, gridCenterY, dotSize, dotSpacing, dotsPerRow, neuronBright);
+    
+    // Result below grid (3 text fields) - scaled, compact
+    const resultY = gridCenterY + gridHeight / 2 + 40 * this.scale;
+    ctx.font = `bold ${Math.round(18 * this.scale)}px monospace`;
+    ctx.fillStyle = text;
+    
+    // Input sum
+    const sum = aOrig + bOrig;
+    ctx.fillText(`${aOrig} + ${bOrig} = ${sum}`, gridCenterX, resultY);
+    
+    // Mod operation
+    ctx.font = `${Math.round(14 * this.scale)}px monospace`;
+    ctx.fillText(`mod 97 = ${target}`, gridCenterX, resultY + 22 * this.scale);
+    
+    // Prediction (with color)
+    ctx.font = `bold ${Math.round(16 * this.scale)}px monospace`;
+    ctx.fillStyle = correct ? '#0ff' : '#f00';
+    ctx.fillText(`Predicted: ${prediction} ${correct ? '✓' : '✗'}`, gridCenterX, resultY + 44 * this.scale);
+    
     ctx.restore();
   }
-
-  // Central vortex/singularity
-  renderVortex(ctx, cx, cy, t) {
-    const spirals = 6;
-    const turns = 3;
-
+  
+  /**
+   * Draw a number as dots representing binary representation
+   * Each bit position gets a dot (1 = bright dot, 0 = dim/empty)
+   */
+  drawNumberAsDots(ctx, number, centerX, centerY, dotSize, spacing, dotsPerRow, color) {
+    // Convert to binary (we need 7 bits to represent 0-96)
+    const bits = 7; // 2^7 = 128, enough for 0-96
+    const binary = [];
+    let temp = number;
+    for (let i = bits - 1; i >= 0; i--) {
+      const bit = (temp >> i) & 1;
+      binary.push(bit);
+    }
+    
+    // Calculate layout (7 bits = 7 dots, arrange in rows)
+    const totalRows = Math.ceil(bits / dotsPerRow);
+    const startY = centerY - ((totalRows - 1) * spacing) / 2;
+    
+    ctx.globalAlpha = 1;
+    
+    for (let i = 0; i < bits; i++) {
+      const bit = binary[i];
+      const row = Math.floor(i / dotsPerRow);
+      const col = i % dotsPerRow;
+      
+      // Center the dots horizontally
+      const dotsInRow = Math.min(dotsPerRow, bits - row * dotsPerRow);
+      const rowWidth = (dotsInRow - 1) * spacing;
+      const x = centerX - rowWidth / 2 + col * spacing;
+      const y = startY + row * spacing;
+      
+      // Use Neuron class for binary dots
+      const neuron = new Neuron(x, y, dotSize);
+      neuron.isActive = (bit === 1);
+      neuron.activation = bit === 1 ? 1.0 : 0.0;
+      neuron.render(ctx, CONFIG.colors);
+    }
+  }
+  
+  drawStats(ctx) {
+    // Only show stats during training
+    if (!this.fsm.is('training')) return;
+    if (this.trainingOpacity <= 0) return;
+    
     ctx.save();
-    ctx.translate(cx, cy);
-    ctx.rotate(t * 2);
-    ctx.globalCompositeOperation = 'lighter';
-
-    for (let s = 0; s < spirals; s++) {
-      const baseAngle = (s / spirals) * Math.PI * 2;
-      const hue = (s * 60 + t * 100) % 360;
-
-      ctx.strokeStyle = `hsla(${hue}, 100%, 60%, 0.8)`;
-      ctx.lineWidth = 3;
+    ctx.globalAlpha = this.trainingOpacity;
+    
+    const { text } = CONFIG.colors;
+    const x = 20 * this.scale;
+    const y = 20 * this.scale;
+    const lineHeight = 20 * this.scale;
+    
+    ctx.fillStyle = text;
+    ctx.font = `${Math.round(14 * this.scale)}px monospace`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    
+    ctx.fillText(`Epoch: ${this.epoch}`, x, y);
+    ctx.fillText(`Train: ${(this.trainAccuracy * 100).toFixed(1)}%`, x, y + lineHeight);
+    ctx.fillText(`Test: ${(this.testAccuracy * 100).toFixed(1)}%`, x, y + lineHeight * 2);
+    
+    if (this.grokkingDetected) {
+      ctx.fillStyle = '#0ff';
+      ctx.fillText(`✓ GROKKING!`, x, y + lineHeight * 3);
+    }
+    
+    // Draw compact accuracy graph (scaled)
+    if (this.accuracyHistory.length > 10) {
+      const graphW = 150 * this.scale;
+      const graphH = 40 * this.scale;
+      const graphX = x;
+      const graphY = y + lineHeight * 4.5;
+      
+      // Sample history for performance (every Nth point)
+      const sampleRate = Math.max(1, Math.floor(this.accuracyHistory.length / 100));
+      
+      ctx.strokeStyle = '#0f0';
+      ctx.lineWidth = 1;
       ctx.beginPath();
-
-      for (let i = 0; i <= 100; i++) {
-        const progress = i / 100;
-        const angle = baseAngle + progress * turns * Math.PI * 2;
-        const radius = progress * 150 + Math.sin(t * 5 + progress * 10) * 10;
-        const x = Math.cos(angle) * radius;
-        const y = Math.sin(angle) * radius;
-
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
+      let first = true;
+      for (let i = 0; i < this.accuracyHistory.length; i += sampleRate) {
+        const point = this.accuracyHistory[i];
+        const px = graphX + (i / this.accuracyHistory.length) * graphW;
+        const py = graphY - point.train * graphH;
+        if (first) {
+          ctx.moveTo(px, py);
+          first = false;
+        } else {
+          ctx.lineTo(px, py);
+        }
+      }
+      ctx.stroke();
+      
+      ctx.strokeStyle = '#0ff';
+      ctx.beginPath();
+      first = true;
+      for (let i = 0; i < this.accuracyHistory.length; i += sampleRate) {
+        const point = this.accuracyHistory[i];
+        const px = graphX + (i / this.accuracyHistory.length) * graphW;
+        const py = graphY - point.test * graphH;
+        if (first) {
+          ctx.moveTo(px, py);
+          first = false;
+        } else {
+          ctx.lineTo(px, py);
+        }
       }
       ctx.stroke();
     }
-
-    // Central bright point
-    const coreGradient = ctx.createRadialGradient(0, 0, 0, 0, 0, 50);
-    coreGradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
-    coreGradient.addColorStop(0.3, `hsla(${(t * 100) % 360}, 100%, 70%, 0.8)`);
-    coreGradient.addColorStop(1, 'transparent');
-    ctx.fillStyle = coreGradient;
-    ctx.fillRect(-50, -50, 100, 100);
-
+    
     ctx.restore();
-  }
-
-  // Screen distortion effects
-  renderScreenEffects(ctx, cx, cy, w, h, t) {
-    // Scanlines
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
-    for (let y = 0; y < h; y += 4) {
-      ctx.fillRect(0, y, w, 2);
-    }
-
-    // Pulsing vignette
-    const pulse = 0.5 + Math.sin(t * 3) * 0.2;
-    const vignette = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(w, h) * 0.7);
-    vignette.addColorStop(0, 'transparent');
-    vignette.addColorStop(0.5, 'transparent');
-    vignette.addColorStop(1, `rgba(0, 0, 0, ${pulse})`);
-    ctx.fillStyle = vignette;
-    ctx.fillRect(0, 0, w, h);
-
-    // Random flicker
-    if (Math.random() < 0.05) {
-      ctx.fillStyle = `rgba(255, 255, 255, ${Math.random() * 0.3})`;
-      ctx.fillRect(0, 0, w, h);
-    }
   }
 }
 
+/**
+ * Mount Day 19 into the provided canvas.
+ * @param {HTMLCanvasElement} canvas
+ * @returns {{ stop: () => void, game: Day19Demo }}
+ */
 export default function day19(canvas) {
   const game = new Day19Demo(canvas);
   game.start();

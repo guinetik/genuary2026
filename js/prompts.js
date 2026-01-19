@@ -59,8 +59,8 @@ export const INTERPRETATIONS = {
   15: 'Black Hole: an invisible singularity revealed only by gravitational lensing and its glowing accretion disk. Click to feed matter into the void.',
   16: "Maxwell's Demon: a tiny demon sorts hot and cold gas particles, seemingly violating the second law of thermodynamics. Order emerges from chaos... or does it? 😈",
   17: 'Infinite Poincaré: hyperbolic tessellation that never ends. Zoom in or out forever through nested disks within disks. Click to change pattern, drag to pan, scroll to dive deeper.',
-  18: "Langton's Ant: one rule (turn right on light, left on dark) creates chaos, then suddenly builds a highway. Emergence from simplicity.",
-  19: 'Something imprisoned in geometry wants you to free it. 16 clicks until the universe screams apart. An Homage to No Man\'s Sky.',
+  18: "Langton's Ant × Particle Collider: two ants walk opposing planes (screen & exclusion blend). When paths cross, matter collides in bursts of light. Press [R] to restart.",
+  19: 'Grokking Neural Network: a neural network learns modular arithmetic (a + b mod 97). The 16×16 grid visualizes hidden layer activations. Watch it transition from memorization to generalization - the grokking phenomenon! Click to restart training.',
   20: 'Ouroboros: the ancient serpent eating its own tail. One continuous line, eternally consuming and regenerating. Click to grow, drag to rotate.',
   21: 'Bauhaus Poster: Living geometric composition with cycling colors, breathing shapes, and a wandering cursor that leaves trails. Move mouse for parallax, click to regenerate.',
   22: 'Etch-a-Sketch: terminal-style drawing toy with rotary knobs. Drag to draw, shake to clear, [S] exports SVG for pen plotters.',
@@ -97,4 +97,4 @@ export function getInterpretation(day) {
  * Total number of Genuary days to display
  * (Expand as implementations are added)
  */
-export const TOTAL_DAYS = 17;
+export const TOTAL_DAYS = 31;
