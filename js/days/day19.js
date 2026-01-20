@@ -289,13 +289,13 @@ class Neuron {
 
 const CONFIG = {
   background: '#000',
-  // Neural network architecture
+  // Neural network architecture (matching Python grokking implementation)
   network: {
-    inputSize: 2,
+    inputSize: 32,       // 16 + 16 for one-hot encoding (mod 16)
     hiddenSize: 256,     // Keep the 16×16!
     outputSize: 16,      // Keep 16!
-    learningRate: 0.016,  // Higher LR for per-sample SGD memorization
-    weightDecay: 0.000016
+    learningRate: 0.001, // Standard Adam LR (from Python impl)
+    weightDecay: 0.1,    // HIGH weight decay (this is the grokking secret!)
   },
   // Training
   training: {
@@ -303,9 +303,10 @@ const CONFIG = {
     // For mod 16: 16 * 16 = 256 total pairs
     // 50% = 128 training examples, 128 test examples
     useAllPairs: true,   // Generate all possible (a, b) pairs
+    useOneHot: true,     // ONE-HOT ENCODING - key for true grokking!
     trainSplit: 0.5,     // 50% for training, 50% for testing
-    batchSize: 128,      // Full batch (all training data per update)
-    epochsPerFrame: 16,  // Many epochs per frame (small dataset = very fast)
+    batchSize: 512,      // Large batch (from Python impl)
+    epochsPerFrame: 100, // Many epochs per frame
     showGrokking: true,  // Track grokking transition
     useWorker: true,     // Use Web Worker for training (better performance)
   },
@@ -343,20 +344,20 @@ class Day19Demo extends Game {
     this.network = new NeuralNetwork(inputSize, hiddenSize, outputSize, learningRate, weightDecay);
     
     // Generate datasets using grokking paper methodology
-    const { useAllPairs, trainSplit } = CONFIG.training;
+    const { useAllPairs, trainSplit, useOneHot } = CONFIG.training;
     
     if (useAllPairs) {
       // Generate all possible pairs and split 50/50
-      const allData = generateDataset(0, outputSize, true);
+      const allData = generateDataset(0, outputSize, true, useOneHot);
       const split = splitDataset(allData, trainSplit);
       this.trainData = split.train;
       this.testData = split.test;
-      console.log(`Generated all ${allData.length} possible pairs: ${this.trainData.length} training, ${this.testData.length} test`);
+      console.log(`Generated all ${allData.length} possible pairs: ${this.trainData.length} training, ${this.testData.length} test (oneHot: ${useOneHot})`);
     } else {
       // Fallback to random sampling (old method)
       const { trainSize, testSize } = CONFIG.training;
-      this.trainData = generateDataset(trainSize, outputSize, false);
-      this.testData = generateDataset(testSize, outputSize, false);
+      this.trainData = generateDataset(trainSize, outputSize, false, useOneHot);
+      this.testData = generateDataset(testSize, outputSize, false, useOneHot);
     }
     
     // Training state
@@ -655,19 +656,19 @@ class Day19Demo extends Game {
     this.network = new NeuralNetwork(inputSize, hiddenSize, outputSize, learningRate, weightDecay);
     
     // Generate datasets using grokking paper methodology
-    const { useAllPairs, trainSplit } = CONFIG.training;
+    const { useAllPairs, trainSplit, useOneHot } = CONFIG.training;
     
     if (useAllPairs) {
       // Generate all possible pairs and split 50/50
-      const allData = generateDataset(0, outputSize, true);
+      const allData = generateDataset(0, outputSize, true, useOneHot);
       const split = splitDataset(allData, trainSplit);
       this.trainData = split.train;
       this.testData = split.test;
     } else {
       // Fallback to random sampling (old method)
       const { trainSize, testSize } = CONFIG.training;
-      this.trainData = generateDataset(trainSize, outputSize, false);
-      this.testData = generateDataset(testSize, outputSize, false);
+      this.trainData = generateDataset(trainSize, outputSize, false, useOneHot);
+      this.testData = generateDataset(testSize, outputSize, false, useOneHot);
     }
     
     this.epoch = 0;

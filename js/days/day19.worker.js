@@ -170,6 +170,147 @@ class NeuralNetwork {
     this.gradCount = 0;
   }
   
+  /**
+   * Apply AVERAGED gradients - standard mini-batch SGD for grokking
+   * Divides accumulated gradients by batch size before applying
+   */
+  applyGradientsAveraged(batchSize, useWeightDecay = true) {
+    if (!this.gradCount || this.gradCount === 0) return;
+    
+    const lr = this.learningRate;
+    const wd = useWeightDecay ? this.weightDecay : 0;
+    const scale = 1.0 / batchSize; // Average the gradients
+    
+    // Apply averaged gradients with conditional weight decay
+    for (let i = 0; i < this.hiddenSize; i++) {
+      for (let j = 0; j < this.outputSize; j++) {
+        this.weights2[i][j] -= lr * (this.gradW2[i][j] * scale + wd * this.weights2[i][j]);
+        this.gradW2[i][j] = 0;
+      }
+    }
+    
+    for (let j = 0; j < this.outputSize; j++) {
+      this.bias2[j] -= lr * this.gradB2[j] * scale;
+      this.gradB2[j] = 0;
+    }
+    
+    for (let i = 0; i < this.inputSize; i++) {
+      for (let j = 0; j < this.hiddenSize; j++) {
+        this.weights1[i][j] -= lr * (this.gradW1[i][j] * scale + wd * this.weights1[i][j]);
+        this.gradW1[i][j] = 0;
+      }
+    }
+    
+    for (let j = 0; j < this.hiddenSize; j++) {
+      this.bias1[j] -= lr * this.gradB1[j] * scale;
+      this.gradB1[j] = 0;
+    }
+    
+    this.gradCount = 0;
+  }
+  
+  /**
+   * Initialize Adam optimizer state
+   */
+  initAdam() {
+    if (this.adamInitialized) return;
+    
+    // First moment (mean of gradients)
+    this.m_W1 = this.weights1.map(row => new Float32Array(row.length));
+    this.m_B1 = new Float32Array(this.hiddenSize);
+    this.m_W2 = this.weights2.map(row => new Float32Array(row.length));
+    this.m_B2 = new Float32Array(this.outputSize);
+    
+    // Second moment (variance of gradients)
+    this.v_W1 = this.weights1.map(row => new Float32Array(row.length));
+    this.v_B1 = new Float32Array(this.hiddenSize);
+    this.v_W2 = this.weights2.map(row => new Float32Array(row.length));
+    this.v_B2 = new Float32Array(this.outputSize);
+    
+    this.adamT = 0; // Time step
+    this.adamInitialized = true;
+  }
+  
+  /**
+   * AdamW optimizer - THE key to grokking!
+   * Decoupled weight decay (applied directly to weights, not gradients)
+   * @param {number} batchSize - Batch size for gradient averaging
+   * @param {boolean} useWeightDecay - Whether to apply weight decay
+   * @param {number} beta1 - First moment decay (default 0.9)
+   * @param {number} beta2 - Second moment decay (default 0.98)
+   * @param {number} epsilon - Small constant for numerical stability
+   */
+  applyAdamW(batchSize, useWeightDecay = true, beta1 = 0.9, beta2 = 0.98, epsilon = 1e-8) {
+    if (!this.gradCount || this.gradCount === 0) return;
+    
+    this.initAdam();
+    this.adamT++;
+    
+    const lr = this.learningRate;
+    const wd = useWeightDecay ? this.weightDecay : 0;
+    const scale = 1.0 / batchSize;
+    
+    // Bias correction factors
+    const bc1 = 1 - Math.pow(beta1, this.adamT);
+    const bc2 = 1 - Math.pow(beta2, this.adamT);
+    
+    // Update weights2 (hidden -> output)
+    for (let i = 0; i < this.hiddenSize; i++) {
+      for (let j = 0; j < this.outputSize; j++) {
+        const g = this.gradW2[i][j] * scale;
+        
+        // Update moments
+        this.m_W2[i][j] = beta1 * this.m_W2[i][j] + (1 - beta1) * g;
+        this.v_W2[i][j] = beta2 * this.v_W2[i][j] + (1 - beta2) * g * g;
+        
+        // Bias-corrected moments
+        const m_hat = this.m_W2[i][j] / bc1;
+        const v_hat = this.v_W2[i][j] / bc2;
+        
+        // AdamW update: gradient step + DECOUPLED weight decay
+        this.weights2[i][j] -= lr * (m_hat / (Math.sqrt(v_hat) + epsilon) + wd * this.weights2[i][j]);
+        this.gradW2[i][j] = 0;
+      }
+    }
+    
+    // Update bias2
+    for (let j = 0; j < this.outputSize; j++) {
+      const g = this.gradB2[j] * scale;
+      this.m_B2[j] = beta1 * this.m_B2[j] + (1 - beta1) * g;
+      this.v_B2[j] = beta2 * this.v_B2[j] + (1 - beta2) * g * g;
+      const m_hat = this.m_B2[j] / bc1;
+      const v_hat = this.v_B2[j] / bc2;
+      this.bias2[j] -= lr * m_hat / (Math.sqrt(v_hat) + epsilon);
+      this.gradB2[j] = 0;
+    }
+    
+    // Update weights1 (input -> hidden)
+    for (let i = 0; i < this.inputSize; i++) {
+      for (let j = 0; j < this.hiddenSize; j++) {
+        const g = this.gradW1[i][j] * scale;
+        this.m_W1[i][j] = beta1 * this.m_W1[i][j] + (1 - beta1) * g;
+        this.v_W1[i][j] = beta2 * this.v_W1[i][j] + (1 - beta2) * g * g;
+        const m_hat = this.m_W1[i][j] / bc1;
+        const v_hat = this.v_W1[i][j] / bc2;
+        this.weights1[i][j] -= lr * (m_hat / (Math.sqrt(v_hat) + epsilon) + wd * this.weights1[i][j]);
+        this.gradW1[i][j] = 0;
+      }
+    }
+    
+    // Update bias1
+    for (let j = 0; j < this.hiddenSize; j++) {
+      const g = this.gradB1[j] * scale;
+      this.m_B1[j] = beta1 * this.m_B1[j] + (1 - beta1) * g;
+      this.v_B1[j] = beta2 * this.v_B1[j] + (1 - beta2) * g * g;
+      const m_hat = this.m_B1[j] / bc1;
+      const v_hat = this.v_B1[j] / bc2;
+      this.bias1[j] -= lr * m_hat / (Math.sqrt(v_hat) + epsilon);
+      this.gradB1[j] = 0;
+    }
+    
+    this.gradCount = 0;
+  }
+  
   predict(input) {
     const output = this.forward(input);
     let maxIdx = 0;
@@ -257,8 +398,19 @@ self.onmessage = function(e) {
       // Initialize network and data
       const { inputSize, hiddenSize, outputSize, learningRate, weightDecay } = data.config;
       network = new NeuralNetwork(inputSize, hiddenSize, outputSize, learningRate, weightDecay);
-      trainData = data.trainData;
-      testData = data.testData;
+      
+      // Convert inputs to Float32Array (postMessage may serialize typed arrays as objects)
+      trainData = data.trainData.map(ex => ({
+        ...ex,
+        input: ex.input instanceof Float32Array ? ex.input : new Float32Array(Object.values(ex.input))
+      }));
+      testData = data.testData.map(ex => ({
+        ...ex,
+        input: ex.input instanceof Float32Array ? ex.input : new Float32Array(Object.values(ex.input))
+      }));
+      
+      console.log(`[Worker] Init: inputSize=${inputSize}, trainData=${trainData.length}, testData=${testData.length}, inputLen=${trainData[0]?.input?.length}`);
+      
       epoch = 0;
       trainAccuracy = 0;
       testAccuracy = 0;
@@ -269,11 +421,11 @@ self.onmessage = function(e) {
       break;
       
     case 'train':
-      // Train for specified epochs using TRUE per-sample SGD for grokking
+      // Train using AdamW optimizer (key to grokking!)
       if (!network || isTraining) return;
       
       isTraining = true;
-      const { epochsPerFrame } = data;
+      const { epochsPerFrame, batchSize = 512 } = data;
       
       for (let e = 0; e < epochsPerFrame; e++) {
         // Shuffle training data indices for each epoch
@@ -284,22 +436,24 @@ self.onmessage = function(e) {
           [indices[i], indices[j]] = [indices[j], indices[i]];
         }
         
-        // PER-SAMPLE SGD - apply gradients after EACH sample for maximum noise
-        // This instability is essential for grokking!
-        for (let i = 0; i < trainData.length; i++) {
-          const idx = indices[i];
-          const example = trainData[idx];
+        // Process in batches with AdamW optimizer
+        for (let batchStart = 0; batchStart < trainData.length; batchStart += batchSize) {
+          const batchEnd = Math.min(batchStart + batchSize, trainData.length);
+          const actualBatchSize = batchEnd - batchStart;
           
-          // Forward pass
-          const output = new Float32Array(network.forward(example.input));
-          const target = oneHot(example.target, network.outputSize);
-          network.backward(example.input, target, output);
+          // Accumulate gradients over the batch
+          for (let i = batchStart; i < batchEnd; i++) {
+            const idx = indices[i];
+            const example = trainData[idx];
+            
+            const output = new Float32Array(network.forward(example.input));
+            const target = oneHot(example.target, network.outputSize);
+            network.backward(example.input, target, output);
+          }
           
-          // Apply gradient IMMEDIATELY (per-sample)
-          // Phase 1: NO weight decay (pure memorization)
-          // Phase 2: WITH weight decay (compression/grokking)
-          const useWeightDecay = (phase === 2);
-          network.applyGradients(useWeightDecay);
+          // AdamW update - weight decay from the START (like the Python impl)
+          // No two-phase training - AdamW handles this properly
+          network.applyAdamW(actualBatchSize, true);
         }
         
         epoch++;
@@ -311,12 +465,29 @@ self.onmessage = function(e) {
       trainAccuracy = calculateAccuracy(network, trainSample);
       testAccuracy = calculateAccuracy(network, testSample);
       
+      // Debug: log sample predictions every 1000 epochs
+      if (epoch % 1000 === 0) {
+        const testEx = testData[0];
+        const trainEx = trainData[0];
+        const testPred = network.predict(testEx.input);
+        const trainPred = network.predict(trainEx.input);
+        console.log(`[Debug] Epoch ${epoch}:`);
+        console.log(`  Train[0]: (${trainEx.original}) → pred=${trainPred}, target=${trainEx.target}, correct=${trainPred === trainEx.target}`);
+        console.log(`  Test[0]: (${testEx.original}) → pred=${testPred}, target=${testEx.target}, correct=${testPred === testEx.target}`);
+        console.log(`  Test input sum: ${testEx.input.reduce((a,b) => a+b, 0)}, len: ${testEx.input.length}`);
+      }
+      
       // TWO-PHASE TRAINING: Switch to phase 2 when memorization is complete
       // Phase 1: No weight decay - allows pure overfitting/memorization
       // Phase 2: Weight decay kicks in - forces compression/generalization
       if (phase === 1 && trainAccuracy >= PHASE1_THRESHOLD) {
         phase = 2;
         console.log(`[GROK] Phase 2 started at epoch ${epoch} - weight decay now active`);
+      }
+      
+      // Safety: if train accuracy drops too much in Phase 2, weight decay is too strong
+      if (phase === 2 && trainAccuracy < 0.5) {
+        console.warn(`[GROK] Train accuracy collapsed to ${(trainAccuracy*100).toFixed(1)}% - weight decay may be too strong`);
       }
       
       isTraining = false;
@@ -340,9 +511,18 @@ self.onmessage = function(e) {
       if (network) {
         const cfg = data.config;
         network = new NeuralNetwork(cfg.inputSize, cfg.hiddenSize, cfg.outputSize, cfg.learningRate, cfg.weightDecay);
-        trainData = data.trainData;
+        
+        // Convert inputs to Float32Array (postMessage may serialize typed arrays as objects)
+        trainData = data.trainData.map(ex => ({
+          ...ex,
+          input: ex.input instanceof Float32Array ? ex.input : new Float32Array(Object.values(ex.input))
+        }));
+        testData = data.testData.map(ex => ({
+          ...ex,
+          input: ex.input instanceof Float32Array ? ex.input : new Float32Array(Object.values(ex.input))
+        }));
+        
         phase = 1; // Reset to memorization phase
-        testData = data.testData;
         epoch = 0;
         trainAccuracy = 0;
         testAccuracy = 0;
