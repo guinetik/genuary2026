@@ -336,9 +336,10 @@ class NeuralNetwork {
  * @param {number} size - Number of examples (ignored if useAllPairs=true)
  * @param {number} mod - Modulus value
  * @param {boolean} useAllPairs - If true, generate all possible (a, b) pairs
+ * @param {boolean} useOneHot - If true, use one-hot encoding for inputs
  * @returns {Array} Dataset array
  */
-function generateDataset(size, mod, useAllPairs = false) {
+function generateDataset(size, mod, useAllPairs = false, useOneHot = false) {
   const data = [];
   
   if (useAllPairs) {
@@ -346,8 +347,20 @@ function generateDataset(size, mod, useAllPairs = false) {
     for (let a = 0; a < mod; a++) {
       for (let b = 0; b < mod; b++) {
         const c = (a + b) % mod;
+        
+        let input;
+        if (useOneHot) {
+          // One-hot encoding: [one-hot(a), one-hot(b)]
+          input = new Float32Array(mod * 2);
+          input[a] = 1;           // One-hot for a
+          input[mod + b] = 1;     // One-hot for b
+        } else {
+          // Scalar encoding (original)
+          input = [a / mod, b / mod];
+        }
+        
         data.push({ 
-          input: [a / mod, b / mod], 
+          input,
           target: c,
           original: [a, b] // Keep original for display
         });
@@ -359,8 +372,18 @@ function generateDataset(size, mod, useAllPairs = false) {
       const a = Math.floor(Math.random() * mod);
       const b = Math.floor(Math.random() * mod);
       const c = (a + b) % mod;
+      
+      let input;
+      if (useOneHot) {
+        input = new Float32Array(mod * 2);
+        input[a] = 1;
+        input[mod + b] = 1;
+      } else {
+        input = [a / mod, b / mod];
+      }
+      
       data.push({ 
-        input: [a / mod, b / mod], 
+        input,
         target: c,
         original: [a, b]
       });

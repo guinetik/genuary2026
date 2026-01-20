@@ -15,7 +15,10 @@
  */
 
 import { Game, Painter, Motion, StateMachine, Tweenetik, Easing } from '@guinetik/gcanvas';
+// Old MLP (kept for reference)
 import {NeuralNetwork, generateDataset, splitDataset, oneHot, calculateAccuracy} from './neural';
+// New Factored MLP (Google's grokking architecture)
+import { FactoredNetwork, generateAllPairs, splitData, calcAccuracy } from './grokking-mlp.js';
 
 /**
  * Neuron class to represent neuron state and rendering
@@ -214,58 +217,57 @@ class Neuron {
   }
   
   /**
-   * Render as output neuron with flash effect when synapse arrives
+   * Render as output neuron with flash/blink effect
+   * Size and brightness driven by flashIntensity, color by target/error state
    */
   renderOutput(ctx, colors, flashIntensity = 0, scale = 1) {
     // Skip if not spawned yet
     if (this.spawnScale <= 0.01) return;
     
-    const { neuronActive, neuronBright } = colors;
-    
-    // Combine activation with flash for visual boost
-    const effectiveActivation = Math.min(1, this.activation + flashIntensity * 0.5);
-    const isFlashing = flashIntensity > 0.1;
-    
-    // Base sizes scaled (including spawn scale)
     const spawnMult = this.spawnScale;
     const baseSize = 4 * scale * spawnMult;
     const minDotSize = 2 * scale * spawnMult;
     
-    // Dim dot for truly inactive
-    if (effectiveActivation < 0.05 && !isFlashing) {
-      ctx.fillStyle = `rgba(0, 255, 0, ${0.1 * spawnMult})`;
+    // Use flashIntensity directly for blink effect
+    const brightness = flashIntensity;
+    
+    // Always show a dim dot when not flashing
+    if (brightness < 0.05) {
+      // Dim base dot - slightly brighter for target/selected
+      const dimAlpha = (this.isTarget || this.isSelected) ? 0.25 : 0.1;
+      ctx.fillStyle = this.isError ? `rgba(255, 0, 0, ${dimAlpha * spawnMult})` 
+                                   : `rgba(0, 255, 0, ${dimAlpha * spawnMult})`;
       ctx.beginPath();
       ctx.arc(this.x, this.y, minDotSize, 0, Math.PI * 2);
       ctx.fill();
       return;
     }
     
-    // Size: base + activation + flash boost (all scaled)
-    const size = (baseSize + effectiveActivation * 3 * scale + flashIntensity * 2 * scale) * spawnMult;
+    // Size grows with brightness (flash intensity)
+    const size = (baseSize + brightness * 5 * scale) * spawnMult;
     
-    // Determine colors
+    // Determine colors based on state
     let coreColor, glowColor;
     
-    if (this.isError && this.activation > 0.1) {
-      coreColor = '#f00';
-      glowColor = `rgba(255, 0, 0, ${(0.3 + flashIntensity * 0.3) * spawnMult})`;
-    } else if ((this.isSelected && this.isTarget) && this.activation > 0.1) {
-      coreColor = neuronBright;
-      glowColor = `rgba(0, 255, 0, ${(0.35 + flashIntensity * 0.3) * spawnMult})`;
-    } else if (isFlashing) {
-      const flashWhite = Math.floor(flashIntensity * 255);
-      coreColor = `rgb(${flashWhite}, 255, ${flashWhite})`;
-      glowColor = `rgba(0, 255, 255, ${(0.3 + flashIntensity * 0.4) * spawnMult})`;
-    } else if (effectiveActivation > 0.5) {
-      coreColor = neuronBright;
-      glowColor = `rgba(0, 255, 0, ${0.25 * spawnMult})`;
+    if (this.isError) {
+      // Red for error (wrong prediction)
+      const r = Math.floor(200 + brightness * 55);
+      coreColor = `rgb(${r}, ${Math.floor(brightness * 50)}, ${Math.floor(brightness * 50)})`;
+      glowColor = `rgba(255, 50, 50, ${brightness * 0.5 * spawnMult})`;
+    } else if (this.isTarget && this.isSelected) {
+      // Bright green for correct prediction
+      const g = Math.floor(200 + brightness * 55);
+      coreColor = `rgb(${Math.floor(brightness * 200)}, ${g}, ${Math.floor(brightness * 200)})`;
+      glowColor = `rgba(100, 255, 100, ${brightness * 0.5 * spawnMult})`;
     } else {
-      coreColor = neuronActive;
-      glowColor = `rgba(0, 255, 0, ${(0.1 + effectiveActivation * 0.25) * spawnMult})`;
+      // Cyan flash for other
+      const flashWhite = Math.floor(brightness * 255);
+      coreColor = `rgb(${flashWhite}, 255, ${flashWhite})`;
+      glowColor = `rgba(0, 255, 255, ${brightness * 0.5 * spawnMult})`;
     }
     
-    // Draw glow
-    const glowMult = 1.6 + flashIntensity * 0.5;
+    // Draw glow (size based on brightness)
+    const glowMult = 1.5 + brightness * 0.8;
     ctx.fillStyle = glowColor;
     ctx.beginPath();
     ctx.arc(this.x, this.y, size * glowMult, 0, Math.PI * 2);
@@ -277,9 +279,9 @@ class Neuron {
     ctx.arc(this.x, this.y, size, 0, Math.PI * 2);
     ctx.fill();
     
-    // White center dot (only when mostly spawned)
-    if (effectiveActivation > 0.2 || isFlashing) {
-      ctx.fillStyle = '#fff';
+    // White center dot when bright
+    if (brightness > 0.3) {
+      ctx.fillStyle = `rgba(255, 255, 255, ${brightness})`;
       ctx.beginPath();
       ctx.arc(this.x, this.y, size * 0.3, 0, Math.PI * 2);
       ctx.fill();
@@ -289,32 +291,31 @@ class Neuron {
 
 const CONFIG = {
   background: '#000',
-  // Neural network architecture (matching Python grokking implementation)
+  // Factored MLP architecture (from Google's grokking implementation)
+  // Architecture: Embed → Hidden(tied) → ReLU(h_a + h_b) → Out → Unembed(tied)
   network: {
-    inputSize: 32,       // 16 + 16 for one-hot encoding (mod 16)
-    hiddenSize: 256,     // Keep the 16×16!
-    outputSize: 16,      // Keep 16!
-    learningRate: 0.001, // Standard Adam LR (from Python impl)
-    weightDecay: 0.1,    // HIGH weight decay (this is the grokking secret!)
+    nTokens: 67,         // Modulus (number of possible outputs) - KEEP 16!
+    embedSize: 500,      // Embedding dimension (Google used 500)
+    hiddenSize: 24,      // Hidden layer size (Google used 24, we use more for visualization)
+    learningRate: 0.001, // Standard AdamW LR
+    weightDecay: 1.0,    // HIGH weight decay - THE key to grokking!
+    beta1: 0.9,          // AdamW beta1
+    beta2: 0.9,         // AdamW beta2 (from Google)
+    symmetric: true,     // Only use pairs where a <= b (like Google)
+    trainFraction: 0.4,  // 40% train, 60% test (from Google)
   },
   // Training
   training: {
-    // Use 50% of all possible pairs for training (grokking paper methodology)
-    // For mod 16: 16 * 16 = 256 total pairs
-    // 50% = 128 training examples, 128 test examples
-    useAllPairs: true,   // Generate all possible (a, b) pairs
-    useOneHot: true,     // ONE-HOT ENCODING - key for true grokking!
-    trainSplit: 0.5,     // 50% for training, 50% for testing
-    batchSize: 512,      // Large batch (from Python impl)
-    epochsPerFrame: 100, // Many epochs per frame
+    batchSize: 64,       // Full batch per step
+    epochsPerFrame: 16,  // Epochs per animation frame
     showGrokking: true,  // Track grokking transition
-    useWorker: true,     // Use Web Worker for training (better performance)
+    useWorker: true,     // Use Web Worker for training
   },
   // Grid visualization
   grid: {
     rows: 16,
     cols: 16,
-    baseSpacing: 30, // Base spacing at reference size
+    baseSpacing: 38, // Larger spacing for better visibility
     referenceSize: 800, // Reference canvas size for scaling
   },
   // Colors
@@ -339,24 +340,30 @@ class Day19Demo extends Game {
   init() {
     super.init();
     
-    // Initialize network
-    const { inputSize, hiddenSize, outputSize, learningRate, weightDecay } = CONFIG.network;
-    this.network = new NeuralNetwork(inputSize, hiddenSize, outputSize, learningRate, weightDecay);
+    // Initialize Factored Network (Google's grokking architecture)
+    console.log('[Day19] Creating FactoredNetwork...');
+    const startTime = performance.now();
     
-    // Generate datasets using grokking paper methodology
-    const { useAllPairs, trainSplit, useOneHot } = CONFIG.training;
+    try {
+      this.network = new FactoredNetwork(CONFIG.network);
+      console.log(`[Day19] Network created in ${(performance.now() - startTime).toFixed(1)}ms`);
+    } catch (err) {
+      console.error('[Day19] Failed to create network:', err);
+      return;
+    }
     
-    if (useAllPairs) {
-      // Generate all possible pairs and split 50/50
-      const allData = generateDataset(0, outputSize, true, useOneHot);
-      const split = splitDataset(allData, trainSplit);
-      this.trainData = split.train;
-      this.testData = split.test;
-      console.log(`Generated all ${allData.length} possible pairs: ${this.trainData.length} training, ${this.testData.length} test (oneHot: ${useOneHot})`);
-    } else {
-      // Fallback to random sampling (old method)
+    // Generate datasets using Google's methodology
+    const { nTokens, symmetric, trainFraction } = CONFIG.network;
+    const allData = generateAllPairs(nTokens, symmetric);
+    const split = splitData(allData, trainFraction);
+    this.trainData = split.train;
+    this.testData = split.test;
+    console.log(`Generated ${allData.length} pairs (symmetric=${symmetric}): ${this.trainData.length} train, ${this.testData.length} test`);
+    
+    // Legacy compatibility - not used with factored network
+    if (false) {
       const { trainSize, testSize } = CONFIG.training;
-      this.trainData = generateDataset(trainSize, outputSize, false, useOneHot);
+      this.trainData = generateDataset(trainSize, nTokens, false, false);
       this.testData = generateDataset(testSize, outputSize, false, useOneHot);
     }
     
@@ -412,7 +419,8 @@ class Day19Demo extends Game {
     
     // Initialize with a forward pass so grid shows something immediately
     if (this.trainData.length > 0) {
-      this.network.forward(this.trainData[0].input);
+      const sample = this.trainData[0];
+      this.network.forward(sample.a, sample.b);
     }
     
     // Grid positioning
@@ -457,13 +465,39 @@ class Day19Demo extends Game {
       this.restart();
     });
     
-    // Debug: Press 'g' to toggle grok mode for testing rainbow rendering
-    this.grokModeOverride = false; // When true, disables automatic grok detection
+    // Debug: Press 'g' to toggle grok mode
+    // Instead of just visuals, swap test set with train set so accuracy rises naturally
+    this.grokModeOverride = false;
+    this.originalTestData = null; // Store original test data for restoration
     window.addEventListener('keydown', (e) => {
       if (e.key === 'g' || e.key === 'G') {
-        this.grokModeOverride = true; // Disable auto-detection
-        this.grokMode = this.grokMode > 0.5 ? 0 : 1;
-        console.log(`[DEBUG] Grok mode: ${this.grokMode} (manual override)`);
+        this.grokModeOverride = !this.grokModeOverride;
+        
+        if (this.grokModeOverride) {
+          // Enable grok mode: swap test set with train set
+          this.originalTestData = this.testData;
+          this.testData = [...this.trainData]; // Use train data for testing
+          this.grokMode = 1;
+          console.log(`[DEBUG] Grok mode ON - test set = train set (${this.testData.length} examples)`);
+          
+          // Tell worker to do the same
+          if (this.worker) {
+            this.worker.postMessage({ type: 'grokMode', enabled: true });
+          }
+        } else {
+          // Disable grok mode: restore original test set
+          if (this.originalTestData) {
+            this.testData = this.originalTestData;
+            this.originalTestData = null;
+          }
+          this.grokMode = 0;
+          console.log(`[DEBUG] Grok mode OFF - original test set restored (${this.testData.length} examples)`);
+          
+          // Tell worker to restore
+          if (this.worker) {
+            this.worker.postMessage({ type: 'grokMode', enabled: false });
+          }
+        }
       }
     });
   }
@@ -487,13 +521,11 @@ class Day19Demo extends Game {
             this.trainAccuracy = e.data.trainAccuracy;
             this.testAccuracy = e.data.testAccuracy;
             
-            // Update network activations for visualization
+            // Update network activations for visualization (256 values for 16x16 grid)
             if (this.network) {
+              // The worker sends 256 grid-mapped activations
               this.network.hiddenActivations = new Float32Array(e.data.hiddenActivations);
               this.network.outputActivations = new Float32Array(e.data.outputActivations);
-              // Store weights for synapse visualization
-              this.network.weights1 = e.data.weights1;
-              this.network.weights2 = e.data.weights2;
             }
             
             this.workerTraining = false;
@@ -518,14 +550,12 @@ class Day19Demo extends Game {
         this.workerReady = false;
       };
       
-      // Initialize worker with network config and data
-      const { inputSize, hiddenSize, outputSize, learningRate, weightDecay } = CONFIG.network;
+      // Initialize worker with network config
+      // Worker generates its own data from the same config
       this.worker.postMessage({
         type: 'init',
         data: {
-          config: { inputSize, hiddenSize, outputSize, learningRate, weightDecay },
-          trainData: this.trainData,
-          testData: this.testData,
+          config: CONFIG.network,
         }
       });
       
@@ -563,19 +593,19 @@ class Day19Demo extends Game {
         neuron.spawnScale = 0;
         this.gridNeurons.push(neuron);
         
-        // Staggered spawn animation - wave from center
+        // Staggered spawn animation - fast wave from center
         const distFromCenter = Math.sqrt(
           Math.pow(col - cols/2, 2) + Math.pow(row - rows/2, 2)
         );
-        const delay = distFromCenter * 0.3; // Stagger by distance
+        const delay = distFromCenter * 0.04; // Much faster stagger
         
         this.pendingTweens++;
         Tweenetik.to(neuron, { 
           x: targetX, 
           y: targetY, 
           spawnScale: 1 
-        }, 1, Easing.easeInOutBack, { 
-          delay: 1 + delay,
+        }, 0.4, Easing.easeOutBack, { 
+          delay: 0.1 + delay,
           onComplete: () => this.onTweenComplete()
         });
       }
@@ -586,26 +616,26 @@ class Day19Demo extends Game {
     const leftX = centerX - gridWidth / 2 - 100 * this.scale;
     const rightX = centerX + gridWidth / 2 + 100 * this.scale;
     
-    // Input A dots (7 bits)
+    // Input A dots (7 bits) - faster spawn
     this.inputDots = [];
     for (let i = 0; i < 14; i++) { // 7 bits for A, 7 bits for B
       const dot = { x: centerX, y: centerY, spawnScale: 0 };
       this.inputDots.push(dot);
       this.pendingTweens++;
-      Tweenetik.to(dot, { spawnScale: 1 }, 0.5, Easing.easeOutBack, { 
-        delay: 0.3 + i * 0.02,
+      Tweenetik.to(dot, { spawnScale: 1 }, 0.3, Easing.easeOutBack, { 
+        delay: 0.05 + i * 0.01,
         onComplete: () => this.onTweenComplete()
       });
     }
     
-    // Output dots (7 bits)
+    // Output dots (7 bits) - faster spawn
     this.outputDots = [];
     for (let i = 0; i < 7; i++) {
       const dot = { x: centerX, y: centerY, spawnScale: 0 };
       this.outputDots.push(dot);
       this.pendingTweens++;
-      Tweenetik.to(dot, { spawnScale: 1 }, 0.5, Easing.easeOutBack, { 
-        delay: 0.5 + i * 0.02,
+      Tweenetik.to(dot, { spawnScale: 1 }, 0.3, Easing.easeOutBack, { 
+        delay: 0.1 + i * 0.01,
         onComplete: () => this.onTweenComplete()
       });
     }
@@ -652,24 +682,15 @@ class Day19Demo extends Game {
   }
   
   restart() {
-    const { inputSize, hiddenSize, outputSize, learningRate, weightDecay } = CONFIG.network;
-    this.network = new NeuralNetwork(inputSize, hiddenSize, outputSize, learningRate, weightDecay);
+    // Create new FactoredNetwork
+    this.network = new FactoredNetwork(CONFIG.network);
     
-    // Generate datasets using grokking paper methodology
-    const { useAllPairs, trainSplit, useOneHot } = CONFIG.training;
-    
-    if (useAllPairs) {
-      // Generate all possible pairs and split 50/50
-      const allData = generateDataset(0, outputSize, true, useOneHot);
-      const split = splitDataset(allData, trainSplit);
-      this.trainData = split.train;
-      this.testData = split.test;
-    } else {
-      // Fallback to random sampling (old method)
-      const { trainSize, testSize } = CONFIG.training;
-      this.trainData = generateDataset(trainSize, outputSize, false, useOneHot);
-      this.testData = generateDataset(testSize, outputSize, false, useOneHot);
-    }
+    // Generate datasets using Google's methodology
+    const { nTokens, symmetric, trainFraction } = CONFIG.network;
+    const allData = generateAllPairs(nTokens, symmetric);
+    const split = splitData(allData, trainFraction);
+    this.trainData = split.train;
+    this.testData = split.test;
     
     this.epoch = 0;
     this.trainAccuracy = 0;
@@ -691,15 +712,12 @@ class Day19Demo extends Game {
     
     // Reset worker if using
     if (this.useWorker && this.worker) {
-      const { inputSize, hiddenSize, outputSize, learningRate, weightDecay } = CONFIG.network;
       this.workerReady = false;
       this.workerTraining = false;
       this.worker.postMessage({
         type: 'reset',
         data: {
-          config: { inputSize, hiddenSize, outputSize, learningRate, weightDecay },
-          trainData: this.trainData,
-          testData: this.testData,
+          config: CONFIG.network,
         }
       });
     }
@@ -755,37 +773,22 @@ class Day19Demo extends Game {
     // Always update so we see changes as network trains
     if (this.currentTestCase) {
       // Recalculate - network weights are changing during training!
-      this.cachedOutput = this.network.forward(this.currentTestCase.input);
-      // Calculate prediction from cached output
-      let maxIdx = 0;
-      let maxVal = this.cachedOutput[0];
-      for (let i = 1; i < this.cachedOutput.length; i++) {
-        if (this.cachedOutput[i] > maxVal) {
-          maxVal = this.cachedOutput[i];
-          maxIdx = i;
-        }
-      }
-      this.cachedPrediction = maxIdx;
+      const { probs } = this.network.forward(this.currentTestCase.a, this.currentTestCase.b);
+      this.cachedOutput = probs;
+      this.cachedPrediction = this.network.predict(this.currentTestCase.a, this.currentTestCase.b);
     } else if (this.trainData.length > 0) {
       // Initialize with first example
       this.currentTestCase = this.trainData[0];
-      this.cachedOutput = this.network.forward(this.currentTestCase.input);
-      let maxIdx = 0;
-      let maxVal = this.cachedOutput[0];
-      for (let i = 1; i < this.cachedOutput.length; i++) {
-        if (this.cachedOutput[i] > maxVal) {
-          maxVal = this.cachedOutput[i];
-          maxIdx = i;
-        }
-      }
-      this.cachedPrediction = maxIdx;
+      const { probs } = this.network.forward(this.currentTestCase.a, this.currentTestCase.b);
+      this.cachedOutput = probs;
+      this.cachedPrediction = this.network.predict(this.currentTestCase.a, this.currentTestCase.b);
       this.outputNeuronsInitialized = false;
     }
   }
   
   trainNetwork() {
     const { epochsPerFrame, batchSize } = CONFIG.training;
-    const { outputSize } = CONFIG.network;
+    const { nTokens } = CONFIG.network;
     
     // Use Web Worker if available
     if (this.useWorker && this.workerReady && !this.workerTraining) {
@@ -795,17 +798,15 @@ class Day19Demo extends Game {
         data: { epochsPerFrame, batchSize }
       });
       
-      // Track grokking from worker state
-      if (this.epoch % 5 === 0) {
-        this.accuracyHistory.push({
-          epoch: this.epoch,
-          train: this.trainAccuracy,
-          test: this.testAccuracy,
-        });
-        
-        if (this.accuracyHistory.length > 500) {
-          this.accuracyHistory.shift();
-        }
+      // Track grokking from worker state (push every epoch for faster graph)
+      this.accuracyHistory.push({
+        epoch: this.epoch,
+        train: this.trainAccuracy,
+        test: this.testAccuracy,
+      });
+      
+      if (this.accuracyHistory.length > 500) {
+        this.accuracyHistory.shift();
       }
       
       // Grok mode detection - only when train is ~100% AND test is high
@@ -823,35 +824,35 @@ class Day19Demo extends Game {
     // Fallback: train on main thread
     if (this.useWorker) return; // Wait for worker to be ready
     
-    // Main thread fallback (simplified)
+    // Main thread fallback using FactoredNetwork
+    this.network.resetGradients();
     for (let e = 0; e < epochsPerFrame; e++) {
-      // Process all training data each epoch
+      // Process all training data each epoch (full batch)
       for (let i = 0; i < this.trainData.length; i++) {
-        const example = this.trainData[i];
-        const output = this.network.forward(example.input);
-        const target = oneHot(example.target, outputSize);
-        this.network.backward(example.input, target, output);
+        const ex = this.trainData[i];
+        const { cache } = this.network.forward(ex.a, ex.b);
+        this.network.backward(ex.target, cache);
       }
+      this.network.applyAdamW(this.trainData.length);
       this.epoch++;
     }
     
     if (this.epoch % 20 === 0) {
       const trainSample = this.trainData.slice(0, Math.min(100, this.trainData.length));
       const testSample = this.testData.slice(0, Math.min(100, this.testData.length));
-      this.trainAccuracy = calculateAccuracy(this.network, trainSample);
-      this.testAccuracy = calculateAccuracy(this.network, testSample);
+      this.trainAccuracy = calcAccuracy(this.network, trainSample);
+      this.testAccuracy = calcAccuracy(this.network, testSample);
     }
     
-    if (this.epoch % 5 === 0) {
-      this.accuracyHistory.push({
-        epoch: this.epoch,
-        train: this.trainAccuracy,
-        test: this.testAccuracy,
-      });
-      
-      if (this.accuracyHistory.length > 500) {
-        this.accuracyHistory.shift();
-      }
+    // Push every epoch for faster graph updates
+    this.accuracyHistory.push({
+      epoch: this.epoch,
+      train: this.trainAccuracy,
+      test: this.testAccuracy,
+    });
+    
+    if (this.accuracyHistory.length > 500) {
+      this.accuracyHistory.shift();
     }
     
     // Detect grokking: test accuracy suddenly jumps while train is already high
@@ -938,39 +939,30 @@ class Day19Demo extends Game {
         neuron.x = this.gridOffsetX + col * spacing;
         neuron.y = this.gridOffsetY + row * spacing;
         
-        // Check for synapse flash effect
+        // Check for synapse flash effect - always fade out (blink effect)
         let flashIntensity = 0;
         if (this.gridFlashes && this.gridFlashes.has(idx)) {
           const flashTime = this.gridFlashes.get(idx);
           const flashAge = this.synapseAnimationTime - flashTime;
-          const flashDuration = 0.6;
+          const flashDuration = 0.5; // Faster fade for blink effect
           if (flashAge < flashDuration) {
-            flashIntensity = 1 - (flashAge / flashDuration);
-            // Mark this neuron as activated for current test case
+            // Smooth fade out using ease-out curve
+            const t = flashAge / flashDuration;
+            flashIntensity = 1 - (t * t); // Quadratic ease-out
             this.activatedGridNeurons.add(idx);
           } else {
             this.gridFlashes.delete(idx);
+            this.activatedGridNeurons.delete(idx);
           }
         }
-        
-        // Neuron stays activated once a synapse has reached it (until new test case)
-        const wasActivated = this.activatedGridNeurons.has(idx);
         
         if (isIntro) {
           neuron.activation = 0;
           neuron.isActive = false;
-        } else if (flashIntensity > 0) {
-          // Currently flashing - show flash intensity
-          neuron.activation = flashIntensity;
-          neuron.isActive = true;
-        } else if (wasActivated) {
-          // Was activated earlier in this test case - stay lit (but dimmer)
-          neuron.activation = 0.6; // Sustained activation level
-          neuron.isActive = true;
         } else {
-          // Never activated for this test case - dim
-          neuron.activation = 0;
-          neuron.isActive = false;
+          // Always use flash intensity - neurons blink and fade
+          neuron.activation = flashIntensity;
+          neuron.isActive = flashIntensity > 0.1;
         }
         
         neuron.renderGrid(ctx, CONFIG.colors, this._normCache, flashIntensity, this.scale, this.grokMode, row, col, this.animTime);
@@ -1035,39 +1027,32 @@ class Day19Demo extends Game {
       neuron.x = outputX;
       neuron.y = outputStartY + i * outputSpacing;
       
-      // Check for synapse flash effect (triggered when synapse reaches this neuron)
+      // Check for synapse flash effect - always fade out (blink effect)
       let flashIntensity = 0;
       if (this.outputFlashes.has(i)) {
         const flashTime = this.outputFlashes.get(i);
         const flashAge = this.synapseAnimationTime - flashTime;
-        const flashDuration = 0.6;
+        const flashDuration = 0.5; // Faster fade for blink effect
         if (flashAge < flashDuration) {
-          flashIntensity = 1 - (flashAge / flashDuration);
-          // Mark this neuron as activated for current test case
+          // Smooth fade out using ease-out curve
+          const t = flashAge / flashDuration;
+          flashIntensity = 1 - (t * t); // Quadratic ease-out
           this.activatedOutputNeurons.add(i);
         } else {
           this.outputFlashes.delete(i);
+          this.activatedOutputNeurons.delete(i);
         }
       }
       
-      // Neuron stays activated once a synapse has reached it (until new test case)
-      const wasActivated = this.activatedOutputNeurons.has(i);
-      
-      if (flashIntensity > 0) {
-        neuron.activation = flashIntensity;
-      } else if (wasActivated) {
-        neuron.activation = 0.6; // Sustained activation
-      } else {
-        neuron.activation = 0;
-      }
+      // Always use flash intensity - neurons blink and fade
+      neuron.activation = flashIntensity;
       
       neuron.isTarget = (outputIdx === this.currentTestCase.target);
       neuron.isSelected = (outputIdx === prediction);
       
-      // Error state: show when activated (flashing or sustained)
-      const isActivated = flashIntensity > 0 || wasActivated;
+      // Error state: show when currently flashing and there's a mismatch
       const isMismatch = (neuron.isTarget && !neuron.isSelected) || (!neuron.isTarget && neuron.isSelected);
-      neuron.isError = isActivated && isMismatch;
+      neuron.isError = flashIntensity > 0.1 && isMismatch;
       
       // Render using Neuron class with flash and scale
       neuron.renderOutput(ctx, CONFIG.colors, flashIntensity, this.scale);
@@ -1077,115 +1062,205 @@ class Day19Demo extends Game {
   }
   
   /**
-   * Draw synapses (connections) as animated lines
+   * Draw synapses - FAST burst-style to show batched training
+   * Targets rotate through grid over time, neurons deactivate after short duration
    */
   drawSynapses(ctx) {
     if (!this.currentTestCase) return;
-    if (!this.fsm.is('training')) return; // Only show during training
+    if (!this.fsm.is('training')) return;
     if (this.synapseOpacity <= 0) return;
+    if (!this.cachedOutput) return;
+    if (!this.gridNeurons) return;
     
     ctx.save();
     ctx.globalAlpha = this.synapseOpacity;
     
-    const synapseColor = '#0ff'; // Cyan for synapses
     const gridCenterX = this.width / 2;
     const gridCenterY = this.height / 2;
     const gridWidth = CONFIG.grid.cols * this.gridSpacing;
-    
-    // Input positions match binary dots positions (scaled)
-    const leftX = gridCenterX - gridWidth / 2 - 100 * this.scale;
     const { rows, cols } = CONFIG.grid;
     const spacing = this.gridSpacing;
+    const t = this.synapseAnimationTime;
     
-    // Get activations
+    // Clear old activations - neurons deactivate after 0.4 seconds
+    const activationDuration = 0.4;
+    for (const [idx, flashTime] of this.gridFlashes.entries()) {
+      if (t - flashTime > activationDuration) {
+        this.gridFlashes.delete(idx);
+        this.activatedGridNeurons.delete(idx);
+      }
+    }
+    for (const [pos, flashTime] of this.outputFlashes.entries()) {
+      if (t - flashTime > activationDuration) {
+        this.outputFlashes.delete(pos);
+        this.activatedOutputNeurons.delete(pos);
+      }
+    }
+    
+    // Get current network activations
     const activations = this.network.hiddenActivations;
-    if (!activations || activations.length === 0) return;
+    const maxAct = activations ? Math.max(...activations, 0.001) : 1;
     
-    // Normalize activations
-    const maxActivation = Math.max(...activations, 0.001);
+    // Build list of neurons with their actual positions, weighted by activation
+    // Time-based rotation selects different neurons each frame
+    const getGridTarget = (burstIndex) => {
+      // Use time + burst index to rotate through grid
+      const timeOffset = Math.floor(t * 8); // Changes target every 125ms
+      const idx = (timeOffset * 17 + burstIndex * 31) % 256; // Spread across 16x16
+      const row = Math.floor(idx / cols);
+      const col = idx % cols;
+      return {
+        index: idx,
+        x: this.gridOffsetX + col * spacing,
+        y: this.gridOffsetY + row * spacing
+      };
+    };
     
-    // Animation phase (0-1, loops)
-    const animPhase = (this.synapseAnimationTime * 0.5) % 1;
+    // Input positions - match drawInputOutput layout exactly
+    const leftX = gridCenterX - gridWidth / 2 - 100 * this.scale;
+    const inputAX = leftX; // Center X of input A dots
+    const inputAY = gridCenterY - 40 * this.scale; // Input A Y position
+    const inputBX = leftX; // Center X of input B dots
+    const inputBY = gridCenterY + 40 * this.scale; // Input B Y position
     
-    ctx.save();
     ctx.lineCap = 'round';
     
-    // Draw input → hidden connections
-    // ONE synapse from each input (a and b) from the right side of binary dots
-    const [aOrig, bOrig] = this.currentTestCase.original || 
-      [Math.round(this.currentTestCase.input[0] * CONFIG.network.outputSize),
-       Math.round(this.currentTestCase.input[1] * CONFIG.network.outputSize)];
+    const numInputBursts = 12;
+    const numOutputBursts = 8;
     
-    // Calculate right edge of binary dots (scaled)
-    const dotSize = 4 * this.scale;
-    const dotSpacing = 18 * this.scale;
-    const dotsPerRow = 10;
-    const mod = CONFIG.network.outputSize;
-    const bits = Math.max(3, Math.ceil(Math.log2(mod + 1)));
-    const totalRows = Math.ceil(bits / dotsPerRow);
-    const dotsInLastRow = bits % dotsPerRow || dotsPerRow;
-    const rightEdgeX = leftX + ((dotsInLastRow - 1) * dotSpacing) / 2 + dotSpacing / 2;
+    // Input → Grid synapses (FAST bursts, rotating through grid)
+    for (let b = 0; b < numInputBursts; b++) {
+      const phase = ((t * 6 + b * 0.083) % 1); // Fast cycle
+      
+      // Get target - rotates through grid over time
+      const targetNeuron = getGridTarget(b);
+      
+      // Alternate inputs
+      const isA = b % 2 === 0;
+      const startX = isA ? inputAX : inputBX;
+      const startY = isA ? inputAY : inputBY;
+      
+      // Fast ease-out
+      const progress = Math.min(1, phase * 3);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      
+      const traceX = startX + (targetNeuron.x - startX) * eased;
+      const traceY = startY + (targetNeuron.y - startY) * eased;
+      
+      let alpha = (1 - phase) * 0.6;
+      
+      ctx.strokeStyle = '#0ff';
+      ctx.lineWidth = Math.max(0.5, 1.0 * this.scale);
+      ctx.globalAlpha = this.synapseOpacity * alpha;
+      
+      ctx.beginPath();
+      ctx.moveTo(startX, startY);
+      ctx.lineTo(traceX, traceY);
+      ctx.stroke();
+      
+      // Glow at head
+      if (progress < 1 && alpha > 0.1) {
+        ctx.fillStyle = `rgba(0, 255, 255, ${alpha * 0.5})`;
+        ctx.beginPath();
+        ctx.arc(traceX, traceY, 2 * this.scale, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      
+      // Flash neuron when synapse arrives
+      if (progress > 0.9) {
+        this.gridFlashes.set(targetNeuron.index, t);
+        this.activatedGridNeurons.add(targetNeuron.index);
+      }
+    }
     
-    // Input a position (right edge of binary dots, top) - must match drawInputOutput
-    const inputAX = rightEdgeX;
-    const inputAY = gridCenterY - 40 * this.scale;
+    // Get output neurons that should receive synapses
+    // Target prediction neuron and target neuron (the ones shown as active)
+    const outputTargets = [];
+    if (this.outputNeurons && this.outputNeurons.length > 0) {
+      for (let i = 0; i < this.outputNeurons.length; i++) {
+        const neuron = this.outputNeurons[i];
+        // Only target prediction or target neurons
+        if (neuron.isSelected || neuron.isTarget) {
+          outputTargets.push({
+            position: i,
+            x: neuron.x,
+            y: neuron.y,
+            isPrimary: neuron.isSelected // Prediction is primary target
+          });
+        }
+      }
+    }
     
-    // Input b position (right edge of binary dots, bottom) - must match drawInputOutput
-    const inputBX = rightEdgeX;
-    const inputBY = gridCenterY + 40 * this.scale;
-    
-    // Sample connections for performance
-    const maxConnectionsToShow = 50;
-    
-    // Input a → Hidden: ONE synapse to specific destination neurons
-    this.drawSingleInputToHidden(
-      ctx,
-      inputAX, inputAY, // from position (right edge of binary dots)
-      this.gridOffsetX, this.gridOffsetY, rows, cols, spacing,
-      this.network.weights1[0], activations, maxActivation,
-      animPhase, synapseColor
-    );
-    
-    // Input b → Hidden: ONE synapse to specific destination neurons
-    this.drawSingleInputToHidden(
-      ctx,
-      inputBX, inputBY, // from position (right edge of binary dots)
-      this.gridOffsetX, this.gridOffsetY, rows, cols, spacing,
-      this.network.weights1[1], activations, maxActivation,
-      animPhase, synapseColor
-    );
-    
-    // Draw hidden → output connections (to top 10 outputs - same as neurons)
-    // Use cached output - don't call forward() again!
-    if (!this.cachedOutput) return;
-    const output = this.cachedOutput;
-    // Note: output is Float32Array, must use Array.from for proper object mapping
-    const topOutputs = Array.from(output, (val, idx) => ({ value: val, index: idx }))
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 10); // Match the number of output neurons
-    
-    const outputSpacing = this.gridSpacing;
-    const outputStartY = gridCenterY - (topOutputs.length - 1) * outputSpacing / 2;
-    const outputX = gridCenterX + gridWidth / 2 + 8 * this.scale; // Match drawInputOutputNeurons position
-    
-    // Draw ALL output synapses using a single unified tracing animation
-    // This ensures one synapse traces at a time across all outputs
-    this.drawUnifiedOutputSynapses(
-      ctx,
-      this.gridOffsetX, this.gridOffsetY, rows, cols, spacing,
-      topOutputs, outputX, outputStartY, outputSpacing,
-      activations, maxActivation, synapseColor
-    );
+    // Grid → Output synapses (from recently-activated grid neurons to prediction/target)
+    if (outputTargets.length > 0) {
+      // Use recently activated grid neurons as sources
+      const sources = Array.from(this.activatedGridNeurons).slice(-8).map(idx => {
+        const row = Math.floor(idx / cols);
+        const col = idx % cols;
+        return {
+          index: idx,
+          x: this.gridOffsetX + col * spacing,
+          y: this.gridOffsetY + row * spacing
+        };
+      });
+      
+      // If no activated neurons yet, use grid targets we're currently hitting
+      if (sources.length === 0) {
+        for (let b = 0; b < 4; b++) {
+          sources.push(getGridTarget(b));
+        }
+      }
+      
+      for (let b = 0; b < numOutputBursts; b++) {
+        const phase = ((t * 5 + b * 0.125 + 0.15) % 1);
+        
+        const sourceNeuron = sources[b % sources.length];
+        const targetOutput = outputTargets[b % outputTargets.length];
+        
+        const progress = Math.min(1, phase * 3);
+        const eased = 1 - Math.pow(1 - progress, 3);
+        
+        const traceX = sourceNeuron.x + (targetOutput.x - sourceNeuron.x) * eased;
+        const traceY = sourceNeuron.y + (targetOutput.y - sourceNeuron.y) * eased;
+        
+        let alpha = (1 - phase) * 0.5;
+        
+        ctx.strokeStyle = '#0ff';
+        ctx.lineWidth = Math.max(0.5, 1.0 * this.scale);
+        ctx.globalAlpha = this.synapseOpacity * alpha;
+        
+        ctx.beginPath();
+        ctx.moveTo(sourceNeuron.x, sourceNeuron.y);
+        ctx.lineTo(traceX, traceY);
+        ctx.stroke();
+        
+        if (progress < 1 && alpha > 0.1) {
+          ctx.fillStyle = `rgba(0, 255, 255, ${alpha * 0.5})`;
+          ctx.beginPath();
+          ctx.arc(traceX, traceY, 2 * this.scale, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        
+        // Flash source at start, target at end
+        if (progress > 0.1 && progress < 0.3) {
+          this.gridFlashes.set(sourceNeuron.index, t);
+        }
+        if (progress > 0.9) {
+          // Flash output neuron when synapse arrives
+          this.outputFlashes.set(targetOutput.position, t);
+          this.activatedOutputNeurons.add(targetOutput.position);
+        }
+      }
+    }
     
     ctx.restore();
   }
   
   /**
-   * Draw ONE synapse FROM input TO specific hidden neurons
-   * Shows one synapse at a time, cycling through destination neurons
+   * DEPRECATED: Old weight-based synapse drawing (kept for reference)
    */
-  drawSingleInputToHidden(ctx, fromX, fromY, gridOffsetX, gridOffsetY, rows, cols, spacing, weights, activations, maxActivation, animPhase, color) {
-    // Collect strongest connections
+  drawSingleInputToHidden_OLD(ctx, fromX, fromY, gridOffsetX, gridOffsetY, rows, cols, spacing, weights, activations, maxActivation, animPhase, color) {
+    if (!weights) return; // Skip if no weights (FactoredNetwork)
     const connections = [];
     for (let i = 0; i < weights.length; i++) {
       const weight = weights[i];
@@ -1193,10 +1268,8 @@ class Day19Demo extends Game {
       const strength = Math.abs(weight) * activation;
       connections.push({ index: i, strength, weight, activation });
     }
-    
-    // Sort by strength and take top N
     connections.sort((a, b) => b.strength - a.strength);
-    const topConnections = connections.slice(0, 20); // Top 20 destinations
+    const topConnections = connections.slice(0, 20);
     
     if (topConnections.length === 0) return;
     
@@ -1292,7 +1365,7 @@ class Day19Demo extends Game {
    */
   drawInputToHiddenConnections(ctx, number, centerX, centerY, dotSize, dotSpacing, dotsPerRow, gridOffsetX, gridOffsetY, rows, cols, spacing, weights, activations, maxActivation, animPhase, color) {
     // Convert to binary to find activated bits
-    const mod = CONFIG.network.outputSize;
+    const mod = CONFIG.network.nTokens;
     const bits = Math.max(3, Math.ceil(Math.log2(mod + 1)));
     const binary = [];
     let temp = number;
@@ -1774,12 +1847,11 @@ class Day19Demo extends Game {
     ctx.globalAlpha = this.trainingOpacity;
     
     const { text, neuronActive, neuronBright } = CONFIG.colors;
-    // Use original values for display
-    const [aOrig, bOrig] = this.currentTestCase.original || 
-      [Math.round(this.currentTestCase.input[0] * CONFIG.network.outputSize),
-       Math.round(this.currentTestCase.input[1] * CONFIG.network.outputSize)];
+    // Use a, b directly (new format) or fall back to original array
+    const aOrig = this.currentTestCase.a ?? this.currentTestCase.original?.[0] ?? 0;
+    const bOrig = this.currentTestCase.b ?? this.currentTestCase.original?.[1] ?? 0;
     const target = this.currentTestCase.target;
-    const prediction = this.network.predict(this.currentTestCase.input);
+    const prediction = this.network.predict(aOrig, bOrig);
     const correct = prediction === target;
     
     const gridCenterX = this.width / 2;
@@ -1812,23 +1884,27 @@ class Day19Demo extends Game {
     // Draw output 'target' as dots on right side
     this.drawNumberAsDots(ctx, target, rightX, gridCenterY, dotSize, dotSpacing, dotsPerRow, neuronBright);
     
-    // Result below grid (3 text fields) - scaled, compact
-    const resultY = gridCenterY + gridHeight / 2 + 40 * this.scale;
-    ctx.font = `bold ${Math.round(18 * this.scale)}px monospace`;
+    // Result text - left-aligned below the graph area
+    const statsX = 40 * this.scale;
+    const graphBottomY = 40 * this.scale + 22 * this.scale * 6 + 40 * this.scale; // Below graph
+    const resultY = graphBottomY + 30 * this.scale;
+    
+    ctx.textAlign = 'left';
+    ctx.font = `bold ${Math.round(14 * this.scale)}px monospace`;
     ctx.fillStyle = text;
     
     // Input sum
     const sum = aOrig + bOrig;
-    ctx.fillText(`${aOrig} + ${bOrig} = ${sum}`, gridCenterX, resultY);
+    ctx.fillText(`${aOrig} + ${bOrig} = ${sum}`, statsX, resultY);
     
     // Mod operation
-    ctx.font = `${Math.round(14 * this.scale)}px monospace`;
-    ctx.fillText(`mod ${CONFIG.network.outputSize} = ${target}`, gridCenterX, resultY + 22 * this.scale);
+    ctx.font = `${Math.round(12 * this.scale)}px monospace`;
+    ctx.fillText(`mod ${CONFIG.network.nTokens} = ${target}`, statsX, resultY + 18 * this.scale);
     
     // Prediction (with color)
-    ctx.font = `bold ${Math.round(16 * this.scale)}px monospace`;
+    ctx.font = `bold ${Math.round(12 * this.scale)}px monospace`;
     ctx.fillStyle = correct ? '#0ff' : '#f00';
-    ctx.fillText(`Predicted: ${prediction} ${correct ? '✓' : '✗'}`, gridCenterX, resultY + 44 * this.scale);
+    ctx.fillText(`Predicted: ${prediction} ${correct ? '✓' : '✗'}`, statsX, resultY + 36 * this.scale);
     
     ctx.restore();
   }
@@ -1839,9 +1915,9 @@ class Day19Demo extends Game {
    */
   drawNumberAsDots(ctx, number, centerX, centerY, dotSize, spacing, dotsPerRow, color) {
     // Calculate bits needed based on mod (outputSize)
-    // mod 8 needs 3 bits, mod 16 needs 4 bits, mod 97 needs 7 bits
-    const mod = CONFIG.network.outputSize;
-    const bits = Math.max(3, Math.ceil(Math.log2(mod + 1))); // +1 to handle edge case
+    // mod 8 needs 3 bits (0-7), mod 16 needs 4 bits (0-15), mod 97 needs 7 bits (0-96)
+    const mod = CONFIG.network.nTokens;
+    const bits = Math.max(1, Math.ceil(Math.log2(mod))); // Exact bits needed for values 0 to mod-1
     
     const binary = [];
     let temp = number;
@@ -1907,7 +1983,7 @@ class Day19Demo extends Game {
     }
     
     // Draw compact accuracy graph (scaled) - more space below text
-    if (this.accuracyHistory.length > 10) {
+    if (this.accuracyHistory.length > 2) {
       const graphW = 150 * this.scale;
       const graphH = 40 * this.scale;
       const graphX = x;
