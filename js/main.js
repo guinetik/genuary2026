@@ -339,6 +339,130 @@ function generateSections() {
   }
 }
 
+/**
+ * Setup mobile footer and info overlay
+ */
+function setupMobileUI() {
+  // 1. Create Mobile Footer
+  const footer = document.createElement('div');
+  footer.className = 'mobile-footer';
+  footer.innerHTML = `
+    <div class="mobile-footer-left">
+      <div class="marquee-container">
+        <div class="marquee-content" id="mobile-footer-title">GENUARY 2026</div>
+      </div>
+    </div>
+    <div class="mobile-footer-right">
+      <button class="mobile-btn" id="mobile-info-btn" aria-label="Info">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="12" y1="16" x2="12" y2="12"></line>
+          <line x1="12" y1="8" x2="12.01" y2="8"></line>
+        </svg>
+      </button>
+      <div class="mobile-nav-group">
+        <button class="mobile-btn" id="mobile-prev-btn" aria-label="Previous">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M18 15l-6-6-6 6"/>
+          </svg>
+        </button>
+        <button class="mobile-btn" id="mobile-next-btn" aria-label="Next">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M6 9l6 6 6-6"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(footer);
+
+  // 2. Create Info Overlay
+  const overlay = document.createElement('div');
+  overlay.className = 'mobile-info-overlay';
+  overlay.id = 'mobile-info-overlay';
+  overlay.innerHTML = `
+    <div class="mobile-info-content">
+      <button class="mobile-info-close" id="mobile-info-close">&times;</button>
+      <div class="mobile-info-body">
+        <div class="mobile-info-day" id="mobile-info-day">DAY 01</div>
+        <h2 class="mobile-info-title" id="mobile-info-title-full">Title</h2>
+        <p class="mobile-info-desc" id="mobile-info-desc">Description...</p>
+        <div class="mobile-info-actions">
+          <button class="action-btn" id="mobile-restart-btn">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+              <path d="M3 3v5h5"/>
+            </svg>
+            RESTART
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  // 3. Event Listeners
+  document.getElementById('mobile-prev-btn').addEventListener('click', navigatePrev);
+  document.getElementById('mobile-next-btn').addEventListener('click', navigateNext);
+  
+  const infoBtn = document.getElementById('mobile-info-btn');
+  const closeBtn = document.getElementById('mobile-info-close');
+  const restartBtn = document.getElementById('mobile-restart-btn');
+
+  infoBtn.addEventListener('click', () => {
+    overlay.classList.add('open');
+    updateMobileInfoContent(state.currentDay);
+  });
+
+  closeBtn.addEventListener('click', () => {
+    overlay.classList.remove('open');
+  });
+  
+  // Close on background click
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) {
+      overlay.classList.remove('open');
+    }
+  });
+
+  restartBtn.addEventListener('click', () => {
+    restartDay(state.currentDay);
+    overlay.classList.remove('open');
+  });
+}
+
+/**
+ * Update mobile footer and info content
+ */
+function updateMobileUI(day) {
+  const titleEl = document.getElementById('mobile-footer-title');
+  const prevBtn = document.getElementById('mobile-prev-btn');
+  const nextBtn = document.getElementById('mobile-next-btn');
+  
+  if (!titleEl) return;
+
+  if (day === 0) {
+    titleEl.textContent = "GENUARY 2026";
+    prevBtn.disabled = true;
+    nextBtn.disabled = false;
+  } else {
+    titleEl.textContent = `DAY #${day}: ${getPrompt(day)}`;
+    prevBtn.disabled = false;
+    nextBtn.disabled = day >= TOTAL_DAYS;
+  }
+}
+
+/**
+ * Update content inside the info overlay
+ */
+function updateMobileInfoContent(day) {
+  if (day === 0) return;
+  
+  document.getElementById('mobile-info-day').textContent = `DAY ${String(day).padStart(2, '0')}`;
+  document.getElementById('mobile-info-title-full').textContent = getPrompt(day);
+  document.getElementById('mobile-info-desc').textContent = getInterpretation(day);
+}
+
 // ============================================
 // Navigation
 // ============================================
@@ -409,6 +533,9 @@ function updateActiveNav(day) {
   // Update arrow buttons
   elements.navUp.disabled = day === 0;
   elements.navDown.disabled = day === TOTAL_DAYS;
+
+  // Update mobile UI to ensure consistency
+  updateMobileUI(day);
 }
 
 /**
@@ -523,6 +650,7 @@ async function transitionToDay(newDay) {
 
   // Update UI
   updateActiveNav(newDay);
+  updateMobileUI(newDay); // Update mobile footer
 
   // Update URL hash without scrolling
   if (newDay > 0) {
@@ -788,6 +916,7 @@ async function init() {
 
   // Generate DOM
   generateSections();
+  setupMobileUI(); // Initialize mobile UI elements
 
   // Setup interactions
   setupScrollHandling();
@@ -803,6 +932,7 @@ async function init() {
   if (!handlingHash) {
     await mountDay(state.currentDay);
     updateActiveNav(state.currentDay);
+    updateMobileUI(state.currentDay); // Sync mobile UI
     // Clear initialization flag after a brief delay
     setTimeout(() => {
       state.isInitializing = false;

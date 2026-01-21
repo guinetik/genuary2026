@@ -11,11 +11,15 @@
  * Controls:
  * - Drag knobs to draw
  * - Arrow keys for precise control
+ * - A/D for X axis, W/S or J/L for Y axis
  * - Shake mouse rapidly or press 'C' to clear
- * - Press 'S' to download SVG
+ * - Press 'G' to download SVG
+ * - Press 'P' to load an SVG file for auto-draw
+ * - Press '1' for logo, '2' for star, '3' for spiral, '4' for house
+ * - Press 'ESC' to stop auto-drawing
  */
 
-import { Game, Painter } from '@guinetik/gcanvas';
+import { Game, Painter, Keys, Mouse, Button, Scene } from '@guinetik/gcanvas';
 
 const CONFIG = {
   colors: {
@@ -66,6 +70,37 @@ const CONFIG = {
     friction: 0.98,
     bounce: 0.3,
   },
+
+  // Auto-draw settings
+  autoDraw: {
+    speed: 150,           // Pixels per second
+    knobRotationScale: 0.02, // How much knobs rotate per pixel moved
+  },
+};
+
+// Preset SVG patterns for demo
+const PRESET_PATTERNS = {
+  // Guinetik logo (two interlocking shapes)
+  logo: `M 0 30.276 L 0 9.358 L 0 0.845 L 17.139 0.845 L 17.139 -5.247 L 5.189 -5.247 L 5.189 -19.273 L 0 -19.273 L 0 -4.975 L 0 0.845 L -8.618 0.845 L -25.071 0.845 L -25.071 9.757 L -7.593 9.757 L -7.593 30.276 L 0 30.276 Z M 50 20.33 L 50 6.031 L 50 0.211 L 75.068 0.211 L 75.068 -8.702 L 57.59 -8.702 L 57.59 -29.22 L 50 -29.22 L 50 -8.303 L 50 0.211 L 32.859 0.211 L 32.859 6.304 L 44.806 6.304 L 44.806 20.33 L 50 20.33 Z`,
+  
+  // Simple star
+  star: `M 0.5 0.1 L 0.6 0.4 L 0.9 0.4 L 0.65 0.6 L 0.75 0.9 L 0.5 0.7 L 0.25 0.9 L 0.35 0.6 L 0.1 0.4 L 0.4 0.4 Z`,
+  
+  // Spiral
+  spiral: (() => {
+    let path = 'M 0.5 0.5';
+    for (let i = 0; i < 720; i += 5) {
+      const angle = (i * Math.PI) / 180;
+      const r = 0.02 + (i / 720) * 0.4;
+      const x = 0.5 + Math.cos(angle) * r;
+      const y = 0.5 + Math.sin(angle) * r;
+      path += ` L ${x.toFixed(3)} ${y.toFixed(3)}`;
+    }
+    return path;
+  })(),
+  
+  // House
+  house: `M 0.2 0.7 L 0.2 0.4 L 0.5 0.15 L 0.8 0.4 L 0.8 0.7 L 0.2 0.7 M 0.35 0.7 L 0.35 0.5 L 0.5 0.5 L 0.5 0.7 M 0.6 0.45 L 0.7 0.45 L 0.7 0.55 L 0.6 0.55 L 0.6 0.45`,
 };
 
 /**
@@ -80,6 +115,10 @@ class EtchASketchDemo extends Game {
   init() {
     super.init();
     Painter.init(this.ctx);
+
+    // Initialize input systems
+    Keys.init(this);
+    Mouse.init(this);
 
     // Calculate dimensions
     this.updateDimensions();
@@ -115,12 +154,22 @@ class EtchASketchDemo extends Game {
     this.isClearing = false;
 
     // Mouse tracking
-    this.mouseX = 0;
-    this.mouseY = 0;
     this.dragStartAngle = 0;
+
+    // Auto-draw state
+    this.autoDrawing = false;
+    this.autoDrawPath = [];      // Array of {x, y} normalized points
+    this.autoDrawIndex = 0;      // Current point index
+    this.autoDrawProgress = 0;   // Progress to next point (0-1)
 
     // Set up event listeners
     this.setupEvents();
+
+    // Create hidden file input for SVG loading
+    this.createFileInput();
+
+    // Create mobile UI buttons
+    this.createMobileUI();
   }
 
   /**
@@ -152,16 +201,15 @@ class EtchASketchDemo extends Game {
   }
 
   /**
-   * Set up mouse, touch, and keyboard events
+   * Set up mouse, touch, and keyboard events using engine's event system
    */
   setupEvents() {
-    // Mouse events
-    this.canvas.addEventListener('mousedown', (e) => this.onPointerDown(e));
-    this.canvas.addEventListener('mousemove', (e) => this.onPointerMove(e));
-    this.canvas.addEventListener('mouseup', () => this.onPointerUp());
-    this.canvas.addEventListener('mouseleave', () => this.onPointerUp());
+    // Mouse events via engine
+    this.events.on('mousedown', (e) => this.onPointerDown(e));
+    this.events.on('mousemove', (e) => this.onPointerMove(e));
+    this.events.on('mouseup', () => this.onPointerUp());
 
-    // Touch events
+    // Touch events (still need raw for now)
     this.canvas.addEventListener('touchstart', (e) => {
       e.preventDefault();
       this.onPointerDown(e.touches[0]);
@@ -172,20 +220,416 @@ class EtchASketchDemo extends Game {
     });
     this.canvas.addEventListener('touchend', () => this.onPointerUp());
 
-    // Keyboard events
-    window.addEventListener('keydown', (e) => this.onKeyDown(e));
+    // Keyboard events via Keys
+    const step = 0.15;
+
+    // Arrow keys
+    this.events.on(Keys.LEFT, () => { this.leftKnob.velocity -= step; });
+    this.events.on(Keys.RIGHT, () => { this.leftKnob.velocity += step; });
+    this.events.on(Keys.UP, () => { this.rightKnob.velocity -= step; });
+    this.events.on(Keys.DOWN, () => { this.rightKnob.velocity += step; });
+
+    // A/D for X axis
+    this.events.on(Keys.A, () => { this.leftKnob.velocity -= step; });
+    this.events.on(Keys.D, () => { this.leftKnob.velocity += step; });
+
+    // W/S for Y axis
+    this.events.on(Keys.W, () => { this.rightKnob.velocity -= step; });
+    this.events.on(Keys.S, () => { this.rightKnob.velocity += step; });
+
+    // J/L for Y axis (alternative)
+    this.events.on(Keys.J, () => { this.rightKnob.velocity -= step; });
+    this.events.on(Keys.L, () => { this.rightKnob.velocity += step; });
+
+    // Actions
+    this.events.on(Keys.C, () => this.clearScreen());
+    this.events.on(Keys.G, () => this.exportSVG());
+
+    // Auto-draw controls
+    this.events.on('keydown', (e) => {
+      if (e.key === 'p' || e.key === 'P') {
+        this.fileInput.click(); // Open file picker
+      }
+      if (e.key === '1') this.startPresetDraw('logo');
+      if (e.key === '2') this.startPresetDraw('star');
+      if (e.key === '3') this.startPresetDraw('spiral');
+      if (e.key === '4') this.startPresetDraw('house');
+      if (e.key === 'Escape' && this.autoDrawing) {
+        this.stopAutoDraw();
+      }
+    });
+  }
+
+  /**
+   * Create hidden file input for SVG loading
+   */
+  createFileInput() {
+    this.fileInput = document.createElement('input');
+    this.fileInput.type = 'file';
+    this.fileInput.accept = '.svg';
+    this.fileInput.style.display = 'none';
+    document.body.appendChild(this.fileInput);
+
+    this.fileInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        this.loadSVGFile(file);
+      }
+      this.fileInput.value = ''; // Reset for next use
+    });
+  }
+
+  /**
+   * Create mobile-friendly UI buttons
+   */
+  createMobileUI() {
+    // Create UI scene for buttons
+    this.uiScene = new Scene(this);
+    this.pipeline.add(this.uiScene);
+
+    const btnHeight = 35;
+    const btnWidth = 55;
+    const spacing = 8;
+    const bottomPadding = 40;
+
+    // Button definitions
+    const buttons = [
+      { text: '1', action: () => this.startPresetDraw('logo') },
+      { text: '2', action: () => this.startPresetDraw('star') },
+      { text: '3', action: () => this.startPresetDraw('spiral') },
+      { text: '4', action: () => this.startPresetDraw('house') },
+      { text: 'CLR', action: () => this.clearScreen() },
+      { text: 'SVG', action: () => this.exportSVG() },
+    ];
+
+    // Calculate total width and starting X position
+    const totalWidth = buttons.length * btnWidth + (buttons.length - 1) * spacing;
+    const startX = (this.width - totalWidth) / 2 + btnWidth / 2;
+    const btnY = this.height - bottomPadding;
+
+    this.mobileButtons = [];
+
+    buttons.forEach((btnConfig, i) => {
+      const btn = new Button(this, {
+        x: startX + i * (btnWidth + spacing),
+        y: btnY,
+        width: btnWidth,
+        height: btnHeight,
+        text: btnConfig.text,
+        font: '12px "Fira Code", monospace',
+        onClick: btnConfig.action,
+        colorDefaultBg: 'rgba(0, 0, 0, 0.8)',
+        colorDefaultStroke: 'rgba(0, 255, 0, 0.5)',
+        colorDefaultText: '#0f0',
+        colorHoverBg: '#0f0',
+        colorHoverStroke: '#0f0',
+        colorHoverText: '#000',
+        colorPressedBg: '#0a0',
+        colorPressedStroke: '#0f0',
+        colorPressedText: '#000',
+      });
+      this.uiScene.add(btn);
+      this.mobileButtons.push(btn);
+    });
+  }
+
+  /**
+   * Update button positions on resize
+   */
+  updateMobileUI() {
+    if (!this.mobileButtons || this.mobileButtons.length === 0) return;
+
+    const btnWidth = 55;
+    const spacing = 8;
+    const bottomPadding = 40;
+
+    const totalWidth = this.mobileButtons.length * btnWidth + (this.mobileButtons.length - 1) * spacing;
+    const startX = (this.width - totalWidth) / 2 + btnWidth / 2;
+    const btnY = this.height - bottomPadding;
+
+    this.mobileButtons.forEach((btn, i) => {
+      btn.x = startX + i * (btnWidth + spacing);
+      btn.y = btnY;
+    });
+  }
+
+  /**
+   * Load and parse an SVG file
+   */
+  loadSVGFile(file) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const svgText = e.target.result;
+      const pathData = this.extractPathFromSVG(svgText);
+      if (pathData) {
+        this.startAutoDraw(pathData);
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  /**
+   * Extract path data from SVG string
+   */
+  extractPathFromSVG(svgText) {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(svgText, 'image/svg+xml');
+    const paths = doc.querySelectorAll('path');
+    
+    if (paths.length === 0) {
+      console.warn('[Day22] No paths found in SVG');
+      return null;
+    }
+
+    // Get the d attribute from the first path
+    return paths[0].getAttribute('d');
+  }
+
+  /**
+   * Start auto-drawing a preset pattern
+   */
+  startPresetDraw(presetName) {
+    const pathData = PRESET_PATTERNS[presetName];
+    if (pathData) {
+      this.clearScreen();
+      setTimeout(() => this.startAutoDraw(pathData, true), 500);
+    }
+  }
+
+  /**
+   * Parse SVG path data and start auto-drawing
+   * @param {string} pathData - SVG path d attribute
+   * @param {boolean} isNormalized - If true, coordinates are 0-1 normalized
+   */
+  startAutoDraw(pathData, isNormalized = false) {
+    const points = this.parseSVGPathToPoints(pathData, isNormalized);
+    
+    if (points.length < 2) {
+      console.warn('[Day22] Not enough points to draw');
+      return;
+    }
+
+    console.log(`[Day22] Starting auto-draw with ${points.length} points`);
+
+    // Clear and start fresh
+    this.clearScreen();
+    
+    // Wait for clear animation
+    setTimeout(() => {
+      this.autoDrawPath = points;
+      this.autoDrawIndex = 0;
+      this.autoDrawProgress = 0;
+      this.autoDrawing = true;
+
+      // Move cursor to start point
+      const start = points[0];
+      this.cursorX = start.x;
+      this.cursorY = start.y;
+      this.points = [{ x: this.cursorX, y: this.cursorY }];
+    }, 100);
+  }
+
+  /**
+   * Parse SVG path data into screen-space points
+   */
+  parseSVGPathToPoints(pathData, isNormalized) {
+    const points = [];
+    let currentX = 0;
+    let currentY = 0;
+
+    // Parse SVG path commands
+    const commandRegex = /([MLHVCSQTAZmlhvcsqtaz])([^MLHVCSQTAZmlhvcsqtaz]*)/g;
+    let match;
+
+    while ((match = commandRegex.exec(pathData)) !== null) {
+      const command = match[1];
+      const argsStr = match[2].trim();
+      const args = argsStr.length > 0
+        ? argsStr.split(/[\s,]+/).map(parseFloat).filter(n => !isNaN(n))
+        : [];
+
+      switch (command) {
+        case 'M': // Absolute moveto
+          for (let i = 0; i < args.length; i += 2) {
+            currentX = args[i];
+            currentY = args[i + 1];
+            points.push({ x: currentX, y: currentY, move: i === 0 });
+          }
+          break;
+        case 'm': // Relative moveto
+          for (let i = 0; i < args.length; i += 2) {
+            currentX += args[i];
+            currentY += args[i + 1];
+            points.push({ x: currentX, y: currentY, move: i === 0 });
+          }
+          break;
+        case 'L': // Absolute lineto
+          for (let i = 0; i < args.length; i += 2) {
+            currentX = args[i];
+            currentY = args[i + 1];
+            points.push({ x: currentX, y: currentY });
+          }
+          break;
+        case 'l': // Relative lineto
+          for (let i = 0; i < args.length; i += 2) {
+            currentX += args[i];
+            currentY += args[i + 1];
+            points.push({ x: currentX, y: currentY });
+          }
+          break;
+        case 'H': // Absolute horizontal
+          for (const x of args) {
+            currentX = x;
+            points.push({ x: currentX, y: currentY });
+          }
+          break;
+        case 'h': // Relative horizontal
+          for (const dx of args) {
+            currentX += dx;
+            points.push({ x: currentX, y: currentY });
+          }
+          break;
+        case 'V': // Absolute vertical
+          for (const y of args) {
+            currentY = y;
+            points.push({ x: currentX, y: currentY });
+          }
+          break;
+        case 'v': // Relative vertical
+          for (const dy of args) {
+            currentY += dy;
+            points.push({ x: currentX, y: currentY });
+          }
+          break;
+        case 'Z':
+        case 'z':
+          // Close path - return to first point
+          if (points.length > 0) {
+            const first = points[0];
+            points.push({ x: first.x, y: first.y });
+            currentX = first.x;
+            currentY = first.y;
+          }
+          break;
+        // TODO: Add curve support (C, S, Q, T, A)
+      }
+    }
+
+    // Convert to screen coordinates
+    if (isNormalized) {
+      // Normalized 0-1 coordinates
+      return points.map(p => ({
+        x: this.screenX + p.x * this.screenW,
+        y: this.screenY + p.y * this.screenH,
+        move: p.move
+      }));
+    } else {
+      // Find bounds and scale to fit screen
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const p of points) {
+        minX = Math.min(minX, p.x);
+        minY = Math.min(minY, p.y);
+        maxX = Math.max(maxX, p.x);
+        maxY = Math.max(maxY, p.y);
+      }
+
+      const svgW = maxX - minX || 1;
+      const svgH = maxY - minY || 1;
+      const scale = Math.min(
+        (this.screenW * 0.8) / svgW,
+        (this.screenH * 0.8) / svgH
+      );
+      const offsetX = this.screenX + (this.screenW - svgW * scale) / 2;
+      const offsetY = this.screenY + (this.screenH - svgH * scale) / 2;
+
+      return points.map(p => ({
+        x: offsetX + (p.x - minX) * scale,
+        y: offsetY + (p.y - minY) * scale,
+        move: p.move
+      }));
+    }
+  }
+
+  /**
+   * Stop auto-drawing
+   */
+  stopAutoDraw() {
+    this.autoDrawing = false;
+    this.autoDrawPath = [];
+    console.log('[Day22] Auto-draw stopped');
+  }
+
+  /**
+   * Update auto-draw animation
+   */
+  updateAutoDraw(dt) {
+    if (!this.autoDrawing || this.autoDrawPath.length < 2) return;
+
+    const speed = CONFIG.autoDraw.speed;
+    const currentPoint = this.autoDrawPath[this.autoDrawIndex];
+    const nextIndex = this.autoDrawIndex + 1;
+
+    if (nextIndex >= this.autoDrawPath.length) {
+      // Finished drawing
+      this.autoDrawing = false;
+      console.log('[Day22] Auto-draw complete!');
+      return;
+    }
+
+    const nextPoint = this.autoDrawPath[nextIndex];
+    const dx = nextPoint.x - currentPoint.x;
+    const dy = nextPoint.y - currentPoint.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist < 0.1) {
+      // Skip to next point
+      this.autoDrawIndex = nextIndex;
+      return;
+    }
+
+    // Calculate movement this frame
+    const moveAmount = speed * dt;
+    this.autoDrawProgress += moveAmount / dist;
+
+    if (this.autoDrawProgress >= 1) {
+      // Reached next point
+      this.autoDrawProgress = 0;
+      this.autoDrawIndex = nextIndex;
+      this.cursorX = nextPoint.x;
+      this.cursorY = nextPoint.y;
+    } else {
+      // Interpolate position
+      this.cursorX = currentPoint.x + dx * this.autoDrawProgress;
+      this.cursorY = currentPoint.y + dy * this.autoDrawProgress;
+    }
+
+    // Animate knobs based on movement direction
+    const knobScale = CONFIG.autoDraw.knobRotationScale;
+    this.leftKnob.angle += dx * knobScale;
+    this.rightKnob.angle += dy * knobScale;
+
+    // Add point to drawing (skip if it's a move command)
+    if (!nextPoint.move) {
+      const lastPoint = this.points[this.points.length - 1];
+      const pointDist = Math.sqrt(
+        (this.cursorX - lastPoint.x) ** 2 + (this.cursorY - lastPoint.y) ** 2
+      );
+      if (pointDist > 1) {
+        this.points.push({ x: this.cursorX, y: this.cursorY });
+      }
+    } else {
+      // Move command - jump without drawing
+      this.points.push({ x: this.cursorX, y: this.cursorY });
+    }
   }
 
   /**
    * Handle pointer down (mouse or touch)
    */
   onPointerDown(e) {
-    const rect = this.canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-
-    this.mouseX = x;
-    this.mouseY = y;
+    // Use Mouse coordinates from engine (already canvas-relative)
+    const x = Mouse.x;
+    const y = Mouse.y;
 
     // Check if clicking on left knob
     const leftDist = Math.sqrt(
@@ -214,9 +658,9 @@ class EtchASketchDemo extends Game {
    * Handle pointer move
    */
   onPointerMove(e) {
-    const rect = this.canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    // Use Mouse coordinates from engine
+    const x = Mouse.x;
+    const y = Mouse.y;
 
     // Track for shake detection
     const now = Date.now();
@@ -252,9 +696,6 @@ class EtchASketchDemo extends Game {
       this.rightKnob.angle = this.rightKnob.lastAngle + delta;
       this.rightKnob.velocity = delta * 0.5;
     }
-
-    this.mouseX = x;
-    this.mouseY = y;
   }
 
   /**
@@ -263,40 +704,6 @@ class EtchASketchDemo extends Game {
   onPointerUp() {
     this.leftKnob.dragging = false;
     this.rightKnob.dragging = false;
-  }
-
-  /**
-   * Handle keyboard input
-   */
-  onKeyDown(e) {
-    const step = 0.15;
-
-    switch (e.key) {
-      case 'ArrowLeft':
-        this.leftKnob.velocity -= step;
-        e.preventDefault();
-        break;
-      case 'ArrowRight':
-        this.leftKnob.velocity += step;
-        e.preventDefault();
-        break;
-      case 'ArrowUp':
-        this.rightKnob.velocity -= step;
-        e.preventDefault();
-        break;
-      case 'ArrowDown':
-        this.rightKnob.velocity += step;
-        e.preventDefault();
-        break;
-      case 'c':
-      case 'C':
-        this.clearScreen();
-        break;
-      case 's':
-      case 'S':
-        this.exportSVG();
-        break;
-    }
   }
 
   /**
@@ -419,6 +826,12 @@ class EtchASketchDemo extends Game {
     // Update sand particles
     this.updateSandParticles(dt);
 
+    // Update auto-draw if active
+    if (this.autoDrawing) {
+      this.updateAutoDraw(dt);
+      return; // Skip manual input while auto-drawing
+    }
+
     // Apply knob physics
     const friction = CONFIG.knob.friction;
     const maxSpeed = CONFIG.knob.maxSpeed;
@@ -515,6 +928,7 @@ class EtchASketchDemo extends Game {
   }
 
   render() {
+    super.render();
     const ctx = this.ctx;
     const w = this.width;
     const h = this.height;
@@ -800,11 +1214,18 @@ class EtchASketchDemo extends Game {
     ctx.fillStyle = CONFIG.colors.textDim;
     ctx.font = '10px "Fira Code", monospace';
     ctx.textAlign = 'center';
-    ctx.fillText('Drag knobs or use arrow keys • Shake or [C] to clear • [S] to export SVG', w / 2, h - 15);
+    
+    if (this.autoDrawing) {
+      ctx.fillStyle = CONFIG.colors.text;
+      ctx.fillText('AUTO-DRAWING... [ESC] to stop', w / 2, h - 15);
+    } else {
+      ctx.fillText('[A/D] X • [W/S] Y • [C] clear • [G] export • [P] load SVG • [1-4] presets', w / 2, h - 15);
+    }
   }
 
   onResize() {
     this.updateDimensions();
+    this.updateMobileUI();
   }
 }
 
