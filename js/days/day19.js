@@ -15,10 +15,8 @@
  */
 
 import { Game, Painter, Motion, StateMachine, Tweenetik, Easing } from '@guinetik/gcanvas';
-// Old MLP (kept for reference)
-import {NeuralNetwork, generateDataset, splitDataset, oneHot, calculateAccuracy} from './neural';
-// New Factored MLP (Google's grokking architecture)
-import { FactoredNetwork, generateAllPairs, splitData, calcAccuracy } from './grokking-mlp.js';
+// Factored MLP (Google's grokking architecture)
+import { FactoredNetwork, generateAllPairs, splitData, calcAccuracy } from './day19.grokking.js';
 
 /**
  * Neuron class to represent neuron state and rendering
@@ -219,8 +217,9 @@ class Neuron {
   /**
    * Render as output neuron with flash/blink effect
    * Size and brightness driven by flashIntensity, color by target/error state
+   * @param {number} grokMode - If > 0.5, override error state to green (grokked = always correct)
    */
-  renderOutput(ctx, colors, flashIntensity = 0, scale = 1) {
+  renderOutput(ctx, colors, flashIntensity = 0, scale = 1, grokMode = 0) {
     // Skip if not spawned yet
     if (this.spawnScale <= 0.01) return;
     
@@ -231,12 +230,15 @@ class Neuron {
     // Use flashIntensity directly for blink effect
     const brightness = flashIntensity;
     
+    // In grok mode, override error state - grokked model is always correct
+    const showError = this.isError && grokMode < 0.5;
+    
     // Always show a dim dot when not flashing
     if (brightness < 0.05) {
       // Dim base dot - slightly brighter for target/selected
       const dimAlpha = (this.isTarget || this.isSelected) ? 0.25 : 0.1;
-      ctx.fillStyle = this.isError ? `rgba(255, 0, 0, ${dimAlpha * spawnMult})` 
-                                   : `rgba(0, 255, 0, ${dimAlpha * spawnMult})`;
+      ctx.fillStyle = showError ? `rgba(255, 0, 0, ${dimAlpha * spawnMult})` 
+                                : `rgba(0, 255, 0, ${dimAlpha * spawnMult})`;
       ctx.beginPath();
       ctx.arc(this.x, this.y, minDotSize, 0, Math.PI * 2);
       ctx.fill();
@@ -249,8 +251,8 @@ class Neuron {
     // Determine colors based on state
     let coreColor, glowColor;
     
-    if (this.isError) {
-      // Red for error (wrong prediction)
+    if (showError) {
+      // Red for error (wrong prediction) - only when NOT grokked
       const r = Math.floor(200 + brightness * 55);
       coreColor = `rgb(${r}, ${Math.floor(brightness * 50)}, ${Math.floor(brightness * 50)})`;
       glowColor = `rgba(255, 50, 50, ${brightness * 0.5 * spawnMult})`;
@@ -296,11 +298,11 @@ const CONFIG = {
   network: {
     nTokens: 67,         // Modulus (number of possible outputs) - KEEP 16!
     embedSize: 500,      // Embedding dimension (Google used 500)
-    hiddenSize: 24,      // Hidden layer size (Google used 24, we use more for visualization)
-    learningRate: 0.001, // Standard AdamW LR
+    hiddenSize: 64,      // Hidden layer size (Google used 24, we use more for visualization)
+    learningRate: 1e-2, // Standard AdamW LR
     weightDecay: 1.0,    // HIGH weight decay - THE key to grokking!
     beta1: 0.9,          // AdamW beta1
-    beta2: 0.9,         // AdamW beta2 (from Google)
+    beta2: 0.98,         // AdamW beta2 (from Google)
     symmetric: true,     // Only use pairs where a <= b (like Google)
     trainFraction: 0.4,  // 40% train, 60% test (from Google)
   },
@@ -317,6 +319,13 @@ const CONFIG = {
     cols: 16,
     baseSpacing: 38, // Larger spacing for better visibility
     referenceSize: 800, // Reference canvas size for scaling
+  },
+  // Animation timing (all values in seconds)
+  timing: {
+    flashDuration: 0.5,      // How long neurons stay lit after synapse arrives
+    activationDuration: 0.4, // How long to track activated neurons before cleanup
+    traceLength: 0.4,        // Length of synapse trace as proportion of path
+    connectionCycle: 0.5,    // Time per connection in cycling animations
   },
   // Colors
   colors: {
@@ -360,13 +369,6 @@ class Day19Demo extends Game {
     this.testData = split.test;
     console.log(`Generated ${allData.length} pairs (symmetric=${symmetric}): ${this.trainData.length} train, ${this.testData.length} test`);
     
-    // Legacy compatibility - not used with factored network
-    if (false) {
-      const { trainSize, testSize } = CONFIG.training;
-      this.trainData = generateDataset(trainSize, nTokens, false, false);
-      this.testData = generateDataset(testSize, outputSize, false, useOneHot);
-    }
-    
     // Training state
     this.epoch = 0;
     this.trainAccuracy = 0;
@@ -392,7 +394,6 @@ class Day19Demo extends Game {
     this.synapseAnimationTime = 0;
     this.outputFlashes = new Map(); // Track flash effects on output neurons
     this.gridFlashes = new Map(); // Track flash effects on grid neurons
-    this.synapseTrails = new Map(); // Track fading synapse trails
     this.lastGridFlashIdx = -1; // Track last grid neuron that was flashed
     this.lastOutputFlashIdx = -1; // Track last output neuron that was flashed
     this.lastOutputSourceFlashKey = null; // Track source neuron flash for output synapses
@@ -404,7 +405,7 @@ class Day19Demo extends Game {
     
     // Grok mode - rainbow colors when model achieves high test accuracy
     this.grokMode = 0; // 0 = green, 1 = full rainbow (smooth transition)
-    this.grokThreshold = 0.60; // Test accuracy threshold to trigger grok mode (60%)
+    this.grokThreshold = 0.6; // Test accuracy threshold to trigger grok mode (90%)
     
     // Cached output neurons (avoid creating new objects every frame)
     this.outputNeurons = [];
@@ -483,6 +484,8 @@ class Day19Demo extends Game {
           // Tell worker to do the same
           if (this.worker) {
             this.worker.postMessage({ type: 'grokMode', enabled: true });
+            // Also sync weights so predictions are accurate
+            this.worker.postMessage({ type: 'syncWeights' });
           }
         } else {
           // Disable grok mode: restore original test set
@@ -540,6 +543,19 @@ class Day19Demo extends Game {
             }
             this.cachedOutput = new Float32Array(e.data.outputActivations);
             this.cachedPrediction = e.data.prediction;
+            break;
+            
+          case 'syncWeights':
+            // Sync trained weights from worker to main thread network
+            // Structured clone preserves Float32Array[] - assign directly
+            if (this.network && e.data.weights) {
+              const w = e.data.weights;
+              this.network.embed = w.embed;     // Already Float32Array[]
+              this.network.Whidden = w.Whidden; // Already Float32Array[]
+              this.network.Wout = w.Wout;       // Already Float32Array[]
+              console.log('[Main] Synced weights from worker');
+              this._weightsSynced = true;
+            }
             break;
         }
       };
@@ -706,7 +722,6 @@ class Day19Demo extends Game {
     this.animTime = 0;
     this.cachedOutput = null;
     this.cachedPrediction = null;
-    this.synapseTrails = new Map(); // Reset synapse trails
     this.trainingOpacity = 0; // Reset opacity for fade-in
     this.synapseOpacity = 0; // Reset synapse opacity
     
@@ -769,20 +784,31 @@ class Day19Demo extends Game {
       this.lastOutputSourceFlashKey = null;
     }
     
-    // Do forward pass ONCE per frame and cache results
-    // Always update so we see changes as network trains
+    // Do forward pass every frame for visualization (synapses need continuous data)
+    // Main thread network may have stale weights, but visual effect is fine
     if (this.currentTestCase) {
-      // Recalculate - network weights are changing during training!
       const { probs } = this.network.forward(this.currentTestCase.a, this.currentTestCase.b);
       this.cachedOutput = probs;
-      this.cachedPrediction = this.network.predict(this.currentTestCase.a, this.currentTestCase.b);
+      // Only use main thread prediction as fallback - worker prediction is more accurate
+      if (!this.useWorker || !this.workerReady) {
+        this.cachedPrediction = this.network.predict(this.currentTestCase.a, this.currentTestCase.b);
+      }
     } else if (this.trainData.length > 0) {
       // Initialize with first example
       this.currentTestCase = this.trainData[0];
-      const { probs } = this.network.forward(this.currentTestCase.a, this.currentTestCase.b);
-      this.cachedOutput = probs;
-      this.cachedPrediction = this.network.predict(this.currentTestCase.a, this.currentTestCase.b);
-      this.outputNeuronsInitialized = false;
+    }
+    
+    // Request prediction from WORKER (it has trained weights!)
+    // This gives accurate correct/wrong display
+    if (this.currentTestCase && this.useWorker && this.workerReady) {
+      // Request periodically to get fresh predictions as model trains
+      if (!this._lastForwardRequest || Date.now() - this._lastForwardRequest > 100) {
+        this._lastForwardRequest = Date.now();
+        this.worker.postMessage({ 
+          type: 'forward', 
+          data: { a: this.currentTestCase.a, b: this.currentTestCase.b }
+        });
+      }
     }
   }
   
@@ -815,7 +841,29 @@ class Day19Demo extends Game {
         const hasMemorized = this.trainAccuracy >= 0.95; // Train must be ~100%
         const hasGrokked = hasMemorized && this.testAccuracy >= this.grokThreshold;
         const targetGrok = hasGrokked ? 1 : 0;
+        const wasGrokked = this.grokMode > 0.5;
         this.grokMode += (targetGrok - this.grokMode) * 0.05; // Smooth transition to rainbow
+        
+        // When grokking is first detected, sync weights and refresh
+        if (!wasGrokked && this.grokMode > 0.5) {
+          this.currentTestCase = null; // Force new test case
+          this.cachedOutput = null;
+          this.cachedPrediction = null;
+          
+          // Sync trained weights from worker so main thread predictions are accurate
+          if (this.useWorker && this.workerReady && !this._weightsSynced) {
+            this.worker.postMessage({ type: 'syncWeights' });
+          }
+        }
+        
+        // Sync weights periodically when train accuracy is 100% (every ~5 seconds)
+        // This ensures main thread predictions are accurate during memorization phase
+        if (hasMemorized && this.useWorker && this.workerReady) {
+          if (!this._lastWeightSync || Date.now() - this._lastWeightSync > 5000) {
+            this._lastWeightSync = Date.now();
+            this.worker.postMessage({ type: 'syncWeights' });
+          }
+        }
       }
       
       return;
@@ -879,13 +927,17 @@ class Day19Demo extends Game {
     ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
     ctx.fillRect(0, 0, w, h);
     
+    // Update output neuron state FIRST (sets isSelected/isTarget flags)
+    // This must run before drawSynapses so output targets are set
+    this.updateOutputNeuronState();
+    
     // Draw synapses (connections) first, behind neurons
     this.drawSynapses(ctx);
     
     // Draw grid of hidden neurons
     this.drawNeuronGrid(ctx);
     
-    // Draw input/output neurons
+    // Draw input/output neurons (uses pre-computed state)
     this.drawInputOutputNeurons(ctx);
     
     // Draw input/output/result around grid
@@ -904,13 +956,17 @@ class Day19Demo extends Game {
     
     if (!activations || activations.length === 0) return;
     
-    // Cache normalization calculation (only recalculate every few frames)
-    if (!this._normCache || this._normFrameCount % 5 === 0) {
-      const sorted = [...activations].sort((a, b) => a - b);
-      this._normCache = Math.max(sorted[Math.floor(sorted.length * 0.95)], 0.001);
-      this._normFrameCount = 0;
+    // Calculate normalization - O(n) instead of O(n log n) sort
+    // Use max value for normalization (with smoothing to avoid flicker)
+    let maxVal = 0;
+    for (let i = 0; i < activations.length; i++) {
+      if (activations[i] > maxVal) maxVal = activations[i];
     }
-    this._normFrameCount++;
+    maxVal = Math.max(maxVal, 0.001);
+    // Smooth transition to avoid flicker
+    this._normCache = this._normCache 
+      ? this._normCache * 0.9 + maxVal * 0.1 
+      : maxVal;
     
     // Reinitialize grid neurons if spacing changed significantly (but not during intro)
     const spacingChanged = this._lastSpacing && Math.abs(this._lastSpacing - spacing) > 1;
@@ -944,10 +1000,9 @@ class Day19Demo extends Game {
         if (this.gridFlashes && this.gridFlashes.has(idx)) {
           const flashTime = this.gridFlashes.get(idx);
           const flashAge = this.synapseAnimationTime - flashTime;
-          const flashDuration = 0.5; // Faster fade for blink effect
-          if (flashAge < flashDuration) {
+          if (flashAge < CONFIG.timing.flashDuration) {
             // Smooth fade out using ease-out curve
-            const t = flashAge / flashDuration;
+            const t = flashAge / CONFIG.timing.flashDuration;
             flashIntensity = 1 - (t * t); // Quadratic ease-out
             this.activatedGridNeurons.add(idx);
           } else {
@@ -971,71 +1026,102 @@ class Day19Demo extends Game {
   }
   
   /**
+   * Update output neuron state (positions, isSelected, isTarget)
+   * Must run before drawSynapses so output targets are available
+   */
+  updateOutputNeuronState() {
+    if (!this.currentTestCase) return;
+    if (!this.cachedOutput) return;
+    if (!this.fsm.is('training')) return;
+    
+    const gridCenterX = this.width / 2;
+    const gridCenterY = this.height / 2;
+    const gridWidth = CONFIG.grid.cols * this.gridSpacing;
+    
+    const outputX = gridCenterX + gridWidth / 2 + 8 * this.scale;
+    const output = this.cachedOutput;
+    const prediction = this.cachedPrediction;
+    
+    const displayRows = 16;
+    const nTokens = CONFIG.network.nTokens;
+    
+    // Reuse arrays instead of allocating every frame
+    if (!this._rowActivations) this._rowActivations = new Float32Array(displayRows);
+    if (!this._rowTokens) this._rowTokens = new Int16Array(displayRows);
+    
+    // Reset arrays (faster than creating new ones)
+    this._rowActivations.fill(0);
+    this._rowTokens.fill(-1);
+    
+    // Group outputs by display row, take max activation per row
+    for (let token = 0; token < nTokens; token++) {
+      const row = Math.floor(token * displayRows / nTokens);
+      if (output[token] > this._rowActivations[row]) {
+        this._rowActivations[row] = output[token];
+        this._rowTokens[row] = token;
+      }
+    }
+    
+    const outputSpacing = this.gridSpacing;
+    const outputStartY = gridCenterY - (displayRows - 1) * outputSpacing / 2;
+    
+    // Initialize output neurons if needed
+    if (!this.outputNeurons || this.outputNeurons.length !== displayRows) {
+      this.outputNeurons = [];
+      for (let i = 0; i < displayRows; i++) {
+        const outputY = outputStartY + i * outputSpacing;
+        this.outputNeurons.push(new Neuron(outputX, outputY, 4 * this.scale));
+      }
+    }
+    
+    // Map prediction and target to display rows (inline the calculation)
+    const predictionRow = prediction !== null && prediction !== undefined 
+      ? Math.floor(prediction * displayRows / nTokens) : -1;
+    const targetRow = this.currentTestCase.target !== undefined 
+      ? Math.floor(this.currentTestCase.target * displayRows / nTokens) : -1;
+    
+    // Update neuron states (positions and flags)
+    for (let i = 0; i < displayRows; i++) {
+      const neuron = this.outputNeurons[i];
+      
+      // Update position
+      neuron.x = outputX;
+      neuron.y = outputStartY + i * outputSpacing;
+      
+      // Set flags based on display row mapping
+      neuron.isTarget = (i === targetRow);
+      neuron.isSelected = (i === predictionRow);
+    }
+  }
+  
+  /**
    * Draw input and output neurons (left and right of grid)
+   * State (isSelected, isTarget) is pre-computed by updateOutputNeuronState()
    */
   drawInputOutputNeurons(ctx) {
     if (!this.currentTestCase) return;
     if (!this.cachedOutput) return;
     if (!this.fsm.is('training')) return; // Only show during training
     if (this.trainingOpacity <= 0) return;
+    if (!this.outputNeurons || this.outputNeurons.length === 0) return;
     
     ctx.save();
     ctx.globalAlpha = this.trainingOpacity;
     
-    const gridCenterX = this.width / 2;
-    const gridCenterY = this.height / 2;
-    const gridWidth = CONFIG.grid.cols * this.gridSpacing;
-    const gridHeight = CONFIG.grid.rows * this.gridSpacing;
+    const displayRows = 16;
     
-    // Position output column closer to grid (scaled)
-    const outputX = gridCenterX + gridWidth / 2 + 8 * this.scale;
-    
-    // Note: Input neurons are now represented by binary dots in drawInputOutput()
-    // We only draw output neurons here
-    
-    // Use cached output from update() - no forward pass here!
-    const output = this.cachedOutput;
-    const prediction = this.cachedPrediction;
-    
-    // Get top 10 outputs sorted by activation
-    // Note: output is Float32Array, must convert to Array first for .map to return objects
-    const outputWithIndices = Array.from(output, (val, idx) => ({ value: val, index: idx }))
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 10);
-    
-    const outputSpacing = this.gridSpacing; // Use same spacing as grid
-    const outputStartY = gridCenterY - (outputWithIndices.length - 1) * outputSpacing / 2;
-    
-    // Always recreate neurons when order changes (outputs are sorted by activation)
-    // Use a key based on the sorted indices to detect changes
-    const currentKeys = outputWithIndices.map(o => o.index).join(',');
-    if (!this.outputNeuronsKeys || this.outputNeuronsKeys !== currentKeys) {
-      this.outputNeurons = [];
-      for (let i = 0; i < outputWithIndices.length; i++) {
-        const outputY = outputStartY + i * outputSpacing;
-        this.outputNeurons.push(new Neuron(outputX, outputY, 4 * this.scale));
-      }
-      this.outputNeuronsKeys = currentKeys;
-    }
-    
-    // Update neuron states and render
-    for (let i = 0; i < outputWithIndices.length; i++) {
-      const outputIdx = outputWithIndices[i].index;
+    // Render each output neuron (state already set by updateOutputNeuronState)
+    for (let i = 0; i < displayRows; i++) {
       const neuron = this.outputNeurons[i];
-      
-      // Update neuron position
-      neuron.x = outputX;
-      neuron.y = outputStartY + i * outputSpacing;
       
       // Check for synapse flash effect - always fade out (blink effect)
       let flashIntensity = 0;
       if (this.outputFlashes.has(i)) {
         const flashTime = this.outputFlashes.get(i);
         const flashAge = this.synapseAnimationTime - flashTime;
-        const flashDuration = 0.5; // Faster fade for blink effect
-        if (flashAge < flashDuration) {
+        if (flashAge < CONFIG.timing.flashDuration) {
           // Smooth fade out using ease-out curve
-          const t = flashAge / flashDuration;
+          const t = flashAge / CONFIG.timing.flashDuration;
           flashIntensity = 1 - (t * t); // Quadratic ease-out
           this.activatedOutputNeurons.add(i);
         } else {
@@ -1047,15 +1133,14 @@ class Day19Demo extends Game {
       // Always use flash intensity - neurons blink and fade
       neuron.activation = flashIntensity;
       
-      neuron.isTarget = (outputIdx === this.currentTestCase.target);
-      neuron.isSelected = (outputIdx === prediction);
-      
       // Error state: show when currently flashing and there's a mismatch
+      // (isTarget and isSelected already set by updateOutputNeuronState)
       const isMismatch = (neuron.isTarget && !neuron.isSelected) || (!neuron.isTarget && neuron.isSelected);
       neuron.isError = flashIntensity > 0.1 && isMismatch;
       
       // Render using Neuron class with flash and scale
-      neuron.renderOutput(ctx, CONFIG.colors, flashIntensity, this.scale);
+      // Pass grokMode to override error state when grokked
+      neuron.renderOutput(ctx, CONFIG.colors, flashIntensity, this.scale, this.grokMode);
     }
     
     ctx.restore();
@@ -1082,16 +1167,15 @@ class Day19Demo extends Game {
     const spacing = this.gridSpacing;
     const t = this.synapseAnimationTime;
     
-    // Clear old activations - neurons deactivate after 0.4 seconds
-    const activationDuration = 0.4;
+    // Clear old activations - neurons deactivate after configured duration
     for (const [idx, flashTime] of this.gridFlashes.entries()) {
-      if (t - flashTime > activationDuration) {
+      if (t - flashTime > CONFIG.timing.activationDuration) {
         this.gridFlashes.delete(idx);
         this.activatedGridNeurons.delete(idx);
       }
     }
     for (const [pos, flashTime] of this.outputFlashes.entries()) {
-      if (t - flashTime > activationDuration) {
+      if (t - flashTime > CONFIG.timing.activationDuration) {
         this.outputFlashes.delete(pos);
         this.activatedOutputNeurons.delete(pos);
       }
@@ -1174,18 +1258,17 @@ class Day19Demo extends Game {
     }
     
     // Get output neurons that should receive synapses
-    // Target prediction neuron and target neuron (the ones shown as active)
+    // ONLY target prediction (isSelected) and target (isTarget) - no extras
     const outputTargets = [];
     if (this.outputNeurons && this.outputNeurons.length > 0) {
       for (let i = 0; i < this.outputNeurons.length; i++) {
         const neuron = this.outputNeurons[i];
-        // Only target prediction or target neurons
         if (neuron.isSelected || neuron.isTarget) {
           outputTargets.push({
             position: i,
             x: neuron.x,
             y: neuron.y,
-            isPrimary: neuron.isSelected // Prediction is primary target
+            isPrimary: neuron.isSelected
           });
         }
       }
@@ -1193,28 +1276,44 @@ class Day19Demo extends Game {
     
     // Grid → Output synapses (from recently-activated grid neurons to prediction/target)
     if (outputTargets.length > 0) {
-      // Use recently activated grid neurons as sources
-      const sources = Array.from(this.activatedGridNeurons).slice(-8).map(idx => {
-        const row = Math.floor(idx / cols);
-        const col = idx % cols;
-        return {
-          index: idx,
-          x: this.gridOffsetX + col * spacing,
-          y: this.gridOffsetY + row * spacing
-        };
-      });
-      
-      // If no activated neurons yet, use grid targets we're currently hitting
-      if (sources.length === 0) {
-        for (let b = 0; b < 4; b++) {
-          sources.push(getGridTarget(b));
+      // Reuse source buffer instead of allocating every frame
+      if (!this._sourcesBuffer) {
+        this._sourcesBuffer = [];
+        for (let i = 0; i < 8; i++) {
+          this._sourcesBuffer.push({ index: 0, x: 0, y: 0 });
         }
       }
+      
+      // Fill from activated neurons (up to 8)
+      let sourceCount = 0;
+      for (const idx of this.activatedGridNeurons) {
+        if (sourceCount >= 8) break;
+        const row = Math.floor(idx / cols);
+        const col = idx % cols;
+        this._sourcesBuffer[sourceCount].index = idx;
+        this._sourcesBuffer[sourceCount].x = this.gridOffsetX + col * spacing;
+        this._sourcesBuffer[sourceCount].y = this.gridOffsetY + row * spacing;
+        sourceCount++;
+      }
+      
+      // If no activated neurons yet, use grid targets we're currently hitting
+      if (sourceCount === 0) {
+        for (let b = 0; b < 4; b++) {
+          const target = getGridTarget(b);
+          this._sourcesBuffer[sourceCount].index = target.index;
+          this._sourcesBuffer[sourceCount].x = target.x;
+          this._sourcesBuffer[sourceCount].y = target.y;
+          sourceCount++;
+        }
+      }
+      
+      const sources = this._sourcesBuffer;
+      const sourcesLen = sourceCount;
       
       for (let b = 0; b < numOutputBursts; b++) {
         const phase = ((t * 5 + b * 0.125 + 0.15) % 1);
         
-        const sourceNeuron = sources[b % sources.length];
+        const sourceNeuron = sources[b % sourcesLen];
         const targetOutput = outputTargets[b % outputTargets.length];
         
         const progress = Math.min(1, phase * 3);
@@ -1256,588 +1355,6 @@ class Day19Demo extends Game {
     ctx.restore();
   }
   
-  /**
-   * DEPRECATED: Old weight-based synapse drawing (kept for reference)
-   */
-  drawSingleInputToHidden_OLD(ctx, fromX, fromY, gridOffsetX, gridOffsetY, rows, cols, spacing, weights, activations, maxActivation, animPhase, color) {
-    if (!weights) return; // Skip if no weights (FactoredNetwork)
-    const connections = [];
-    for (let i = 0; i < weights.length; i++) {
-      const weight = weights[i];
-      const activation = activations[i] / maxActivation;
-      const strength = Math.abs(weight) * activation;
-      connections.push({ index: i, strength, weight, activation });
-    }
-    connections.sort((a, b) => b.strength - a.strength);
-    const topConnections = connections.slice(0, 20);
-    
-    if (topConnections.length === 0) return;
-    
-    // Cycle through connections: show one at a time
-    const connectionDuration = 0.5;
-    const totalCycleTime = topConnections.length * connectionDuration;
-    const cyclePhase = (this.synapseAnimationTime % totalCycleTime) / connectionDuration;
-    const currentConnectionIndex = Math.floor(cyclePhase);
-    const connectionProgress = cyclePhase % 1;
-    
-    // Draw only the current connection
-    const conn = topConnections[currentConnectionIndex % topConnections.length];
-    
-    // Draw all connections faintly for context
-    for (const c of topConnections) {
-      const idx = c.index;
-      const row = Math.floor(idx / cols);
-      const col = idx % cols;
-      
-      const toX = gridOffsetX + col * spacing;
-      const toY = gridOffsetY + row * spacing;
-      
-      ctx.strokeStyle = color;
-      ctx.globalAlpha = 0.05;
-      ctx.lineWidth = 0.5;
-      ctx.beginPath();
-      ctx.moveTo(fromX, fromY);
-      ctx.lineTo(toX, toY);
-      ctx.stroke();
-    }
-    
-    // Draw the active connection with animation
-    const idx = conn.index;
-    const row = Math.floor(idx / cols);
-    const col = idx % cols;
-    
-    const toX = gridOffsetX + col * spacing;
-    const toY = gridOffsetY + row * spacing;
-    
-    // Line properties based on weight and activation
-    const lineWidth = Math.max(0.5, Math.min(2, Math.abs(conn.weight) * 1.5));
-    const alpha = Math.min(0.8, conn.activation * 0.9);
-    
-    // Animated tracing effect
-    const traceLength = 0.4;
-    const traceStart = connectionProgress;
-    const traceEnd = (connectionProgress + traceLength) % 1;
-    
-    // Draw animated trace segment
-    ctx.strokeStyle = color;
-    ctx.globalAlpha = alpha;
-    ctx.lineWidth = lineWidth;
-    
-    ctx.beginPath();
-    
-    if (traceEnd > traceStart) {
-      const startX = fromX + (toX - fromX) * traceStart;
-      const startY = fromY + (toY - fromY) * traceStart;
-      const endX = fromX + (toX - fromX) * traceEnd;
-      const endY = fromY + (toY - fromY) * traceEnd;
-      
-      ctx.moveTo(startX, startY);
-      ctx.lineTo(endX, endY);
-    } else {
-      const startX = fromX + (toX - fromX) * traceStart;
-      const startY = fromY + (toY - fromY) * traceStart;
-      const endX = fromX + (toX - fromX) * traceEnd;
-      const endY = fromY + (toY - fromY) * traceEnd;
-      
-      ctx.moveTo(startX, startY);
-      ctx.lineTo(toX, toY);
-      ctx.moveTo(fromX, fromY);
-      ctx.lineTo(endX, endY);
-    }
-    
-    ctx.stroke();
-    ctx.globalAlpha = 1;
-    
-    // Trigger flash when synapse reaches the grid neuron (only once per synapse)
-    const shouldFlash = traceEnd >= 0.95 || (traceEnd < traceStart && traceStart > 0.9);
-    if (shouldFlash && this.lastGridFlashIdx !== idx) {
-      this.gridFlashes.set(idx, this.synapseAnimationTime);
-      this.lastGridFlashIdx = idx;
-    } else if (!shouldFlash && this.lastGridFlashIdx === idx) {
-      // Reset when synapse moves away from completion zone
-      this.lastGridFlashIdx = -1;
-    }
-  }
-  
-  /**
-   * Draw connections FROM activated binary dots TO hidden neurons
-   * Each activated bit connects to hidden neurons it activates
-   */
-  drawInputToHiddenConnections(ctx, number, centerX, centerY, dotSize, dotSpacing, dotsPerRow, gridOffsetX, gridOffsetY, rows, cols, spacing, weights, activations, maxActivation, animPhase, color) {
-    // Convert to binary to find activated bits
-    const mod = CONFIG.network.nTokens;
-    const bits = Math.max(3, Math.ceil(Math.log2(mod + 1)));
-    const binary = [];
-    let temp = number;
-    for (let i = bits - 1; i >= 0; i--) {
-      const bit = (temp >> i) & 1;
-      binary.push(bit);
-    }
-    
-    // Calculate dot positions
-    const totalRows = Math.ceil(bits / dotsPerRow);
-    const startY = centerY - ((totalRows - 1) * dotSpacing) / 2;
-    
-    // Find activated bits and their positions
-    const activatedBits = [];
-    for (let i = 0; i < bits; i++) {
-      if (binary[i] === 1) {
-        const row = Math.floor(i / dotsPerRow);
-        const col = i % dotsPerRow;
-        const dotsInRow = Math.min(dotsPerRow, bits - row * dotsPerRow);
-        const rowWidth = (dotsInRow - 1) * dotSpacing;
-        const x = centerX - rowWidth / 2 + col * dotSpacing;
-        const y = startY + row * dotSpacing;
-        activatedBits.push({ index: i, x, y });
-      }
-    }
-    
-    if (activatedBits.length === 0) return;
-    
-    // Cycle through connections: show one at a time
-    const connectionDuration = 0.5;
-    const totalCycleTime = activatedBits.length * connectionDuration;
-    const cyclePhase = (this.synapseAnimationTime % totalCycleTime) / connectionDuration;
-    const currentBitIndex = Math.floor(cyclePhase);
-    const connectionProgress = cyclePhase % 1;
-    
-    const activeBit = activatedBits[currentBitIndex % activatedBits.length];
-    
-    // Draw all connections faintly for context
-    for (const bit of activatedBits) {
-      // Connect this bit to top hidden neurons (by weight strength)
-      const connections = [];
-      for (let i = 0; i < weights.length; i++) {
-        const weight = weights[i];
-        const activation = activations[i] / maxActivation;
-        const strength = Math.abs(weight) * activation;
-        connections.push({ index: i, strength, weight, activation });
-      }
-      
-      connections.sort((a, b) => b.strength - a.strength);
-      const topConnections = connections.slice(0, 10); // Top 10 per bit
-      
-      for (const conn of topConnections) {
-        const hiddenIdx = conn.index;
-        const hiddenRow = Math.floor(hiddenIdx / cols);
-        const hiddenCol = hiddenIdx % cols;
-        const toX = gridOffsetX + hiddenCol * spacing;
-        const toY = gridOffsetY + hiddenRow * spacing;
-        
-        ctx.strokeStyle = color;
-        ctx.globalAlpha = 0.03;
-        ctx.lineWidth = 0.5;
-        ctx.beginPath();
-        ctx.moveTo(bit.x, bit.y);
-        ctx.lineTo(toX, toY);
-        ctx.stroke();
-      }
-    }
-    
-    // Draw active connection with animation
-    const connections = [];
-    for (let i = 0; i < weights.length; i++) {
-      const weight = weights[i];
-      const activation = activations[i] / maxActivation;
-      const strength = Math.abs(weight) * activation;
-      connections.push({ index: i, strength, weight, activation });
-    }
-    
-    connections.sort((a, b) => b.strength - a.strength);
-    const topConnections = connections.slice(0, 10);
-    
-    for (const conn of topConnections) {
-      const hiddenIdx = conn.index;
-      const hiddenRow = Math.floor(hiddenIdx / cols);
-      const hiddenCol = hiddenIdx % cols;
-      const toX = gridOffsetX + hiddenCol * spacing;
-      const toY = gridOffsetY + hiddenRow * spacing;
-      
-      const lineWidth = Math.max(0.5, Math.min(2, Math.abs(conn.weight) * 1.5));
-      const alpha = Math.min(0.6, conn.activation * 0.7);
-      
-      const traceLength = 0.4;
-      const traceStart = connectionProgress;
-      const traceEnd = (connectionProgress + traceLength) % 1;
-      
-      ctx.strokeStyle = color;
-      ctx.globalAlpha = alpha;
-      ctx.lineWidth = lineWidth;
-      
-      ctx.beginPath();
-      
-      if (traceEnd > traceStart) {
-        const startX = activeBit.x + (toX - activeBit.x) * traceStart;
-        const startY = activeBit.y + (toY - activeBit.y) * traceStart;
-        const endX = activeBit.x + (toX - activeBit.x) * traceEnd;
-        const endY = activeBit.y + (toY - activeBit.y) * traceEnd;
-        
-        ctx.moveTo(startX, startY);
-        ctx.lineTo(endX, endY);
-      } else {
-        const startX = activeBit.x + (toX - activeBit.x) * traceStart;
-        const startY = activeBit.y + (toY - activeBit.y) * traceStart;
-        const endX = activeBit.x + (toX - activeBit.x) * traceEnd;
-        const endY = activeBit.y + (toY - activeBit.y) * traceEnd;
-        
-        ctx.moveTo(startX, startY);
-        ctx.lineTo(toX, toY);
-        ctx.moveTo(activeBit.x, activeBit.y);
-        ctx.lineTo(endX, endY);
-      }
-      
-      ctx.stroke();
-    }
-    
-    ctx.globalAlpha = 1;
-  }
-  
-  /**
-   * Draw connections FROM a single point TO a grid with animated tracing
-   * Shows only ONE synapse at a time, cycling through them
-   */
-  drawLayerConnectionsToGrid(ctx, fromX, fromY, gridOffsetX, gridOffsetY, rows, cols, spacing, weights, activations, maxActivation, animPhase, maxConnections, color) {
-    // Collect strongest connections
-    const connections = [];
-    for (let i = 0; i < weights.length; i++) {
-      const weight = weights[i];
-      const activation = activations[i] / maxActivation;
-      const strength = Math.abs(weight) * activation;
-      connections.push({ index: i, strength, weight, activation });
-    }
-    
-    // Sort by strength and take top N
-    connections.sort((a, b) => b.strength - a.strength);
-    const topConnections = connections.slice(0, maxConnections);
-    
-    if (topConnections.length === 0) return;
-    
-    // Cycle through connections: show one at a time
-    const connectionDuration = 0.5; // Time per connection in seconds
-    const totalCycleTime = topConnections.length * connectionDuration;
-    const cyclePhase = (this.synapseAnimationTime % totalCycleTime) / connectionDuration;
-    const currentConnectionIndex = Math.floor(cyclePhase);
-    const connectionProgress = cyclePhase % 1;
-    
-    // Draw only the current connection
-    const conn = topConnections[currentConnectionIndex % topConnections.length];
-    
-    // Draw all connections faintly for context
-    for (const c of topConnections) {
-      const idx = c.index;
-      const row = Math.floor(idx / cols);
-      const col = idx % cols;
-      
-      const toX = gridOffsetX + col * spacing;
-      const toY = gridOffsetY + row * spacing;
-      
-      ctx.strokeStyle = color;
-      ctx.globalAlpha = 0.05;
-      ctx.lineWidth = 0.5;
-      ctx.beginPath();
-      ctx.moveTo(fromX, fromY);
-      ctx.lineTo(toX, toY);
-      ctx.stroke();
-    }
-    
-    // Draw the active connection with animation
-    const idx = conn.index;
-    const row = Math.floor(idx / cols);
-    const col = idx % cols;
-    
-    const toX = gridOffsetX + col * spacing;
-    const toY = gridOffsetY + row * spacing;
-    
-    // Line properties based on weight and activation
-    const lineWidth = Math.max(0.5, Math.min(2, Math.abs(conn.weight) * 1.5));
-    const alpha = Math.min(0.8, conn.activation * 0.9);
-    
-    // Animated tracing effect - use connectionProgress instead of animPhase
-    const traceLength = 0.4;
-    const traceStart = connectionProgress;
-    const traceEnd = (connectionProgress + traceLength) % 1;
-    
-    // Draw animated trace segment
-    ctx.strokeStyle = color;
-    ctx.globalAlpha = alpha;
-    ctx.lineWidth = lineWidth;
-    
-    ctx.beginPath();
-    
-    if (traceEnd > traceStart) {
-      // Normal case: trace from start to end
-      const startX = fromX + (toX - fromX) * traceStart;
-      const startY = fromY + (toY - fromY) * traceStart;
-      const endX = fromX + (toX - fromX) * traceEnd;
-      const endY = fromY + (toY - fromY) * traceEnd;
-      
-      ctx.moveTo(startX, startY);
-      ctx.lineTo(endX, endY);
-    } else {
-      // Wrapped case: draw two segments
-      const startX = fromX + (toX - fromX) * traceStart;
-      const startY = fromY + (toY - fromY) * traceStart;
-      const endX = fromX + (toX - fromX) * traceEnd;
-      const endY = fromY + (toY - fromY) * traceEnd;
-      
-      ctx.moveTo(startX, startY);
-      ctx.lineTo(toX, toY);
-      ctx.moveTo(fromX, fromY);
-      ctx.lineTo(endX, endY);
-    }
-    
-    ctx.stroke();
-    
-    ctx.globalAlpha = 1;
-  }
-  
-  /**
-   * Draw unified output synapses - ONE trace at a time across ALL output neurons
-   * This creates the same visual style as input synapses
-   */
-  drawUnifiedOutputSynapses(ctx, gridOffsetX, gridOffsetY, rows, cols, spacing, topOutputs, outputX, outputStartY, outputSpacing, activations, maxActivation, color) {
-    // Collect ALL strongest connections across ALL output neurons
-    const allConnections = [];
-    
-    for (let outIdx = 0; outIdx < topOutputs.length; outIdx++) {
-      const outputIdx = topOutputs[outIdx].index;
-      const outputY = outputStartY + outIdx * outputSpacing;
-      const weights = this.network.weights2.map(row => row[outputIdx]);
-      
-      for (let i = 0; i < weights.length; i++) {
-        const weight = weights[i];
-        const activation = activations[i] / maxActivation;
-        const strength = Math.abs(weight) * activation;
-        
-        if (strength > 0.01) { // Only include significant connections
-          const row = Math.floor(i / cols);
-          const col = i % cols;
-          const fromX = gridOffsetX + col * spacing;
-          const fromY = gridOffsetY + row * spacing;
-          
-          allConnections.push({
-            fromX, fromY,
-            toX: outputX, toY: outputY,
-            strength, weight, activation,
-            outputIdx: outIdx
-          });
-        }
-      }
-    }
-    
-    // Sort by strength and take top connections
-    allConnections.sort((a, b) => b.strength - a.strength);
-    const topConnections = allConnections.slice(0, 30); // Top 30 across all outputs
-    
-    if (topConnections.length === 0) return;
-    
-    // Cycle through connections: show ONE at a time
-    const connectionDuration = 0.3; // Faster cycling
-    const totalCycleTime = topConnections.length * connectionDuration;
-    const cyclePhase = (this.synapseAnimationTime % totalCycleTime) / connectionDuration;
-    const currentConnectionIndex = Math.floor(cyclePhase);
-    const connectionProgress = cyclePhase % 1;
-    
-    // Draw all connections very faintly for context
-    ctx.strokeStyle = color;
-    ctx.globalAlpha = 0.03;
-    ctx.lineWidth = 0.5;
-    for (const conn of topConnections) {
-      ctx.beginPath();
-      ctx.moveTo(conn.fromX, conn.fromY);
-      ctx.lineTo(conn.toX, conn.toY);
-      ctx.stroke();
-    }
-    
-    // Draw the active connection with animated trace
-    const conn = topConnections[currentConnectionIndex % topConnections.length];
-    
-    const lineWidth = Math.max(0.5, Math.min(2, Math.abs(conn.weight) * 1.5));
-    const alpha = Math.min(0.8, conn.activation * 0.9);
-    
-    // Animated tracing effect
-    const traceLength = 0.4;
-    const traceStart = connectionProgress;
-    const traceEnd = Math.min(1, connectionProgress + traceLength);
-    
-    ctx.strokeStyle = color;
-    ctx.globalAlpha = alpha;
-    ctx.lineWidth = lineWidth;
-    
-    ctx.beginPath();
-    
-    if (traceEnd > traceStart) {
-      const startX = conn.fromX + (conn.toX - conn.fromX) * traceStart;
-      const startY = conn.fromY + (conn.toY - conn.fromY) * traceStart;
-      const endX = conn.fromX + (conn.toX - conn.fromX) * traceEnd;
-      const endY = conn.fromY + (conn.toY - conn.fromY) * traceEnd;
-      
-      ctx.moveTo(startX, startY);
-      ctx.lineTo(endX, endY);
-    }
-    
-    ctx.stroke();
-    ctx.globalAlpha = 1;
-    
-    // Calculate source grid neuron index from connection position (cols is already a parameter)
-    const sourceGridIdx = this.getGridIndexFromPosition(conn.fromX, conn.fromY, gridOffsetX, gridOffsetY, spacing, cols);
-    
-    // Trigger flash on SOURCE grid neuron when synapse STARTS (leaves the neuron)
-    const sourceFlashKey = `out-src-${currentConnectionIndex}`;
-    if (traceStart < 0.15 && this.lastOutputSourceFlashKey !== sourceFlashKey && sourceGridIdx >= 0) {
-      this.gridFlashes.set(sourceGridIdx, this.synapseAnimationTime);
-      this.lastOutputSourceFlashKey = sourceFlashKey;
-    } else if (traceStart >= 0.3 && this.lastOutputSourceFlashKey === sourceFlashKey) {
-      this.lastOutputSourceFlashKey = null;
-    }
-    
-    // Trigger flash when synapse reaches the output neuron (only once per synapse)
-    const outputNeuronIdx = conn.outputIdx;
-    const flashKey = `${currentConnectionIndex}-${outputNeuronIdx}`;
-    if (traceEnd >= 0.95 && this.lastOutputFlashIdx !== flashKey) {
-      this.outputFlashes.set(outputNeuronIdx, this.synapseAnimationTime);
-      this.lastOutputFlashIdx = flashKey;
-    } else if (traceEnd < 0.5 && this.lastOutputFlashIdx === flashKey) {
-      // Reset when synapse moves away from completion zone
-      this.lastOutputFlashIdx = null;
-    }
-  }
-  
-  /**
-   * Get grid neuron index from screen position
-   */
-  getGridIndexFromPosition(x, y, gridOffsetX, gridOffsetY, spacing, cols) {
-    const col = Math.round((x - gridOffsetX) / spacing);
-    const row = Math.round((y - gridOffsetY) / spacing);
-    if (col < 0 || row < 0 || col >= cols || row >= CONFIG.grid.rows) return -1;
-    return row * cols + col;
-  }
-  
-  /**
-   * Draw connections FROM a grid TO a single point with animated tracing
-   * Shows only ONE synapse at a time, cycling through them
-   */
-  drawLayerConnectionsFromGrid(ctx, gridOffsetX, gridOffsetY, rows, cols, spacing, toX, toY, weights, activations, maxActivation, animPhase, maxConnections, color) {
-    // Collect strongest connections
-    const connections = [];
-    for (let i = 0; i < weights.length; i++) {
-      const weight = weights[i];
-      const activation = activations[i] / maxActivation;
-      const strength = Math.abs(weight) * activation;
-      connections.push({ index: i, strength, weight, activation });
-    }
-    
-    // Sort by strength and take top N
-    connections.sort((a, b) => b.strength - a.strength);
-    const topConnections = connections.slice(0, maxConnections);
-    
-    if (topConnections.length === 0) return;
-    
-    // Cycle through connections: show one at a time
-    const connectionDuration = 0.5; // Time per connection in seconds
-    const totalCycleTime = topConnections.length * connectionDuration;
-    const cyclePhase = (this.synapseAnimationTime % totalCycleTime) / connectionDuration;
-    const currentConnectionIndex = Math.floor(cyclePhase);
-    const connectionProgress = cyclePhase % 1;
-    
-    // Initialize synapse trail tracking if needed
-    if (!this.synapseTrails) {
-      this.synapseTrails = new Map();
-    }
-    
-    // Draw only the current connection
-    const conn = topConnections[currentConnectionIndex % topConnections.length];
-    
-    const idx = conn.index;
-    const row = Math.floor(idx / cols);
-    const col = idx % cols;
-    
-    const fromX = gridOffsetX + col * spacing;
-    const fromY = gridOffsetY + row * spacing;
-    
-    // Create a unique key for this synapse trail
-    const trailKey = `${fromX},${fromY},${toX},${toY}`;
-    
-    // Draw fading trails for all synapses (fade out over time)
-    const fadeDuration = 1.5; // Seconds to fade out
-    const trailsToRemove = [];
-    
-    for (const [key, trail] of this.synapseTrails.entries()) {
-      const age = this.synapseAnimationTime - trail.startTime;
-      const fadeAlpha = Math.max(0, 1 - (age / fadeDuration));
-      
-      if (fadeAlpha <= 0) {
-        trailsToRemove.push(key);
-        continue;
-      }
-      
-      // Draw faded trail - MUST reach toX, toY
-      ctx.strokeStyle = color;
-      ctx.globalAlpha = fadeAlpha * 0.4; // Fade to 40% max
-      ctx.lineWidth = Math.max(0.5, Math.min(1.5, Math.abs(trail.weight) * fadeAlpha));
-      ctx.beginPath();
-      ctx.moveTo(trail.fromX, trail.fromY);
-      ctx.lineTo(trail.toX, trail.toY); // Always draw full line to destination
-      ctx.stroke();
-    }
-    
-    // Remove faded trails
-    for (const key of trailsToRemove) {
-      this.synapseTrails.delete(key);
-    }
-    
-    // Draw the active connection with animation - MUST reach toX, toY
-    const lineWidth = Math.max(0.5, Math.min(2, Math.abs(conn.weight) * 1.5));
-    const alpha = Math.min(0.8, conn.activation * 0.9);
-    
-    // Animated tracing effect - trace from fromX,fromY to toX,toY
-    const traceLength = 0.4;
-    const traceStart = connectionProgress;
-    const traceEnd = Math.min(1, connectionProgress + traceLength);
-    
-    // Draw animated trace segment - ensure it reaches toX, toY
-    ctx.strokeStyle = color;
-    ctx.globalAlpha = alpha;
-    ctx.lineWidth = lineWidth;
-    
-    ctx.beginPath();
-    
-    if (traceEnd > traceStart) {
-      const startX = fromX + (toX - fromX) * traceStart;
-      const startY = fromY + (toY - fromY) * traceStart;
-      const endX = fromX + (toX - fromX) * traceEnd;
-      const endY = fromY + (toY - fromY) * traceEnd;
-      
-      ctx.moveTo(startX, startY);
-      ctx.lineTo(endX, endY);
-    } else {
-      // Handle wrap-around case
-      const startX = fromX + (toX - fromX) * traceStart;
-      const startY = fromY + (toY - fromY) * traceStart;
-      
-      ctx.moveTo(startX, startY);
-      ctx.lineTo(toX, toY); // Always reach the destination
-      ctx.moveTo(fromX, fromY);
-      const endX = fromX + (toX - fromX) * traceEnd;
-      const endY = fromY + (toY - fromY) * traceEnd;
-      ctx.lineTo(endX, endY);
-    }
-    
-    ctx.stroke();
-    
-    // Track when this synapse completes (reaches destination) - add to trails
-    if (connectionProgress >= 0.95 && !this.synapseTrails.has(trailKey)) {
-      this.synapseTrails.set(trailKey, { 
-        startTime: this.synapseAnimationTime,
-        fromX, fromY, toX, toY,
-        weight: conn.weight,
-        activation: conn.activation
-      });
-    }
-    
-    ctx.globalAlpha = 1;
-  }
-  
   drawInputOutput(ctx) {
     if (!this.currentTestCase) return;
     if (!this.fsm.is('training')) return; // Only show during training
@@ -1851,7 +1368,8 @@ class Day19Demo extends Game {
     const aOrig = this.currentTestCase.a ?? this.currentTestCase.original?.[0] ?? 0;
     const bOrig = this.currentTestCase.b ?? this.currentTestCase.original?.[1] ?? 0;
     const target = this.currentTestCase.target;
-    const prediction = this.network.predict(aOrig, bOrig);
+    // Use cached prediction (from worker) - main thread network has stale weights!
+    const prediction = this.cachedPrediction ?? this.network.predict(aOrig, bOrig);
     const correct = prediction === target;
     
     const gridCenterX = this.width / 2;

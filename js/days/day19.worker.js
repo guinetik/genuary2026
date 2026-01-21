@@ -3,7 +3,8 @@
  * Based on Google's grokking implementation
  */
 
-import { FactoredNetwork, generateAllPairs, splitData, calcAccuracy } from './grokking-mlp.js';
+import { FactoredNetwork, generateAllPairs, splitData, calcAccuracy } from './day19.grokking.js';
+import { shuffledIndices } from './day19.utils.js';
 
 console.log('[Worker] Factored MLP module loaded');
 
@@ -33,8 +34,8 @@ self.onmessage = function(e) {
         // Create network
         network = new FactoredNetwork(config);
         
-        // Generate and split data
-        const allData = generateAllPairs(config.nTokens, config.symmetric !== false);
+        // Generate and split data (symmetric defaults to true)
+        const allData = generateAllPairs(config.nTokens, config.symmetric ?? true);
         const split = splitData(allData, config.trainFraction || 0.4);
         trainData = split.train;
         testData = split.test;
@@ -63,12 +64,7 @@ self.onmessage = function(e) {
       
       for (let e = 0; e < epochsPerFrame; e++) {
         // Shuffle training indices
-        const indices = [];
-        for (let i = 0; i < trainData.length; i++) indices.push(i);
-        for (let i = indices.length - 1; i > 0; i--) {
-          const j = Math.floor(Math.random() * (i + 1));
-          [indices[i], indices[j]] = [indices[j], indices[i]];
-        }
+        const indices = shuffledIndices(trainData.length);
         
         // Full batch training (like Google's implementation)
         network.resetGradients();
@@ -106,8 +102,29 @@ self.onmessage = function(e) {
       self.postMessage({
         type: 'forward',
         hiddenActivations: network.getGridActivations(), // 256 values for 16x16 grid
-        outputActivations: Array.from(probs),
+        outputActivations: probs, // Float32Array - no need to convert
         prediction: network.predict(a, b),
+      });
+      break;
+    }
+    
+    case 'syncWeights': {
+      // Send all network weights to main thread for synchronization
+      // postMessage uses structured clone which handles Float32Array[] natively
+      if (!network) return;
+      
+      self.postMessage({
+        type: 'syncWeights',
+        weights: {
+          embed: network.embed,       // Float32Array[] - cloned by structured clone
+          Whidden: network.Whidden,   // Float32Array[] - cloned by structured clone
+          Wout: network.Wout,         // Float32Array[] - cloned by structured clone
+        },
+        config: {
+          nTokens: network.nTokens,
+          embedSize: network.embedSize,
+          hiddenSize: network.hiddenSize,
+        }
       });
       break;
     }
@@ -117,7 +134,7 @@ self.onmessage = function(e) {
       const config = data.config;
       network = new FactoredNetwork(config);
       
-      const allData = generateAllPairs(config.nTokens, config.symmetric !== false);
+      const allData = generateAllPairs(config.nTokens, config.symmetric ?? true);
       const split = splitData(allData, config.trainFraction || 0.4);
       trainData = split.train;
       testData = split.test;
@@ -132,7 +149,7 @@ self.onmessage = function(e) {
     
     case 'grokMode': {
       // Toggle grok mode: swap test set with train set
-      const { enabled } = data;
+      const enabled = e.data.enabled;
       if (enabled) {
         // Save original and swap
         originalTestData = testData;
@@ -174,7 +191,7 @@ function sendState() {
     trainAccuracy,
     testAccuracy,
     hiddenActivations: network.getGridActivations(), // 256 values for grid
-    outputActivations: Array.from(network.outputActivations),
+    outputActivations: network.outputActivations, // Float32Array - no need to convert
     hiddenSize: network.hiddenSize, // Actual hidden size
     nTokens: network.nTokens,
   });

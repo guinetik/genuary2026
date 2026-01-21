@@ -60,7 +60,7 @@ export const INTERPRETATIONS = {
   16: "Maxwell's Demon: a tiny demon sorts hot and cold gas particles, seemingly violating the second law of thermodynamics. Order emerges from chaos... or does it? 😈",
   17: 'Infinite Poincaré: hyperbolic tessellation that never ends. Zoom in or out forever through nested disks within disks. Click to change pattern, drag to pan, scroll to dive deeper.',
   18: "Langton's Ant × Particle Collider: two ants walk opposing planes (screen & exclusion blend). When paths cross, matter collides in bursts of light. Press [R] to restart.",
-  19: 'Grokking Neural Network: a neural network learns modular arithmetic (a + b mod 97). The 16×16 grid visualizes hidden layer activations. Watch it transition from memorization to generalization - the grokking phenomenon! Click to restart training.',
+  19: 'Grokking: a 16×16 neural network learns modular arithmetic. Watch hidden neurons light up as it trains. If you think nothing is happening, wait. Click to restart.',
   20: 'Ouroboros: the ancient serpent eating its own tail. One continuous line, eternally consuming and regenerating. Click to grow, drag to rotate.',
   21: 'Bauhaus Poster: Living geometric composition with cycling colors, breathing shapes, and a wandering cursor that leaves trails. Move mouse for parallax, click to regenerate.',
   22: 'Etch-a-Sketch: terminal-style drawing toy with rotary knobs. Drag to draw, shake to clear, [S] exports SVG for pen plotters.',
