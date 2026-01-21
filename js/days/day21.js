@@ -2,14 +2,16 @@
  * Genuary 2026 - Day 21
  * Prompt: "Bauhaus Poster"
  *
- * BAUHAUS INTERACTIVE POSTER
- * An homage to the German art school's geometric aesthetic (1919-1933).
- * Classic Bauhaus elements: primary colors, geometric shapes, asymmetric composition.
+ * PROCEDURAL BAUHAUS - Farnsworth Edition
+ * An homage to the German art school's geometric aesthetic (1919-1933)
+ * featuring Mies van der Rohe's Farnsworth House (1951).
  *
  * Features:
+ * - Farnsworth House SVG as architectural anchor
  * - Multi-layer parallax mouse tracking using gcanvas shapes
  * - Classic Bauhaus color palette (red, yellow, blue, black, cream)
  * - Tweenetik animations for smooth entrances
+ * - Subtle rotation and breathing animations
  * - Click to regenerate composition
  */
 
@@ -24,9 +26,13 @@ import {
   Ring,
   Arc,
   PieSlice,
+  SVGShape,
   Tweenetik,
   Easing,
 } from '@guinetik/gcanvas';
+
+// Farnsworth House SVG path data
+const FARNSWORTH_PATH = "M 155.707 30.955 L 188.99 30.955 L 188.99 38.17 L 155.707 38.17 L 155.707 30.955 Z M 147.561 38.17 L 147.561 30.955 L 151.518 30.955 L 151.518 38.17 L 147.561 38.17 Z M 19.551 34.912 L 60.98 34.912 L 60.98 38.17 L 19.551 38.17 L 19.551 34.912 Z M 62.376 30.955 L 103.572 30.955 L 103.572 32.119 L 62.376 32.119 L 62.376 30.955 Z M 62.376 9.775 L 87.978 9.775 L 87.978 28.395 L 62.376 28.395 L 62.376 9.775 Z M 168.508 9.775 L 188.99 9.775 L 188.99 28.395 L 168.508 28.395 L 168.508 9.775 Z M 125.683 28.395 L 125.683 9.775 L 146.165 9.775 L 146.165 28.395 L 125.683 28.395 Z M 104.736 9.775 L 125.218 9.775 L 125.218 28.395 L 104.736 28.395 L 104.736 9.775 Z M 103.572 9.775 L 103.572 28.395 L 88.211 28.395 L 88.211 9.775 L 103.572 9.775 Z M 103.572 38.17 L 62.376 38.17 L 62.376 34.912 L 103.572 34.912 L 103.572 38.17 Z M 104.736 34.912 L 115.442 34.912 L 115.442 32.352 L 104.736 32.352 L 104.736 30.955 L 146.165 30.955 L 146.165 38.17 L 104.736 38.17 L 104.736 34.912 Z M 147.561 28.395 L 147.561 9.775 L 168.043 9.775 L 168.043 28.395 L 147.561 28.395 Z M 200.86 28.395 L 190.387 28.395 L 190.387 9.775 L 200.86 9.775 L 200.86 28.395 Z M 155.707 38.869 L 209.472 38.869 L 209.472 38.17 L 190.154 38.17 L 190.154 30.955 L 201.093 30.955 L 201.093 28.628 L 201.093 28.395 L 201.093 9.775 L 201.093 7.448 L 201.093 7.215 L 201.093 6.517 L 169.672 6.517 L 169.672 4.655 L 155.707 4.655 L 155.707 0 L 151.751 0 L 151.751 4.655 L 137.786 4.655 L 137.786 6.517 L 50.041 6.517 L 50.041 7.215 L 50.506 7.215 L 50.506 9.775 L 61.213 9.775 L 61.213 28.395 L 50.506 28.395 L 50.506 30.955 L 61.213 30.955 L 61.213 32.119 L 7.681 32.119 L 7.681 34.679 L 18.387 34.679 L 18.387 37.938 L 0 37.938 L 0 38.636 L 151.518 38.636";
 
 const CONFIG = {
   // Classic Bauhaus palette
@@ -37,6 +43,9 @@ const CONFIG = {
     black: '#1A1A1A',
     cream: '#F5F0E6',
     darkCream: '#E8E0D0',
+    // Farnsworth accents
+    gold: '#C9A227',
+    warmBlue: '#4A6B8A',
   },
 
   // Parallax depth layers (0 = far/slow, 1 = near/fast)
@@ -52,8 +61,15 @@ const CONFIG = {
   parallaxSmoothing: 0.08,
   entranceDuration: 0.6,
 
-  // Composition
+  // Composition bounds (normalized 0-1)
   margin: 0.08,
+  houseReserve: 0.25, // Reserve bottom 25% for house
+  textReserve: 0.12, // Reserve bottom 12% for text (within house area)
+  maxParallaxOffset: 0.04, // Max parallax movement to account for
+  
+  // House settings
+  houseWidth: 0.65, // Width as fraction of canvas
+  houseOpacity: 1,
 };
 
 /**
@@ -77,9 +93,16 @@ class ParallaxShape extends GameObject {
     this.x = this.baseX * game.width;
     this.y = this.baseY * game.height;
 
-    // Animation scale
-    this.scaleX = 1;
-    this.scaleY = 1;
+    // Animation scale - start at 0 (hidden) until entrance animation
+    this.scaleX = 0;
+    this.scaleY = 0;
+    
+    // Subtle animation properties
+    this.rotationSpeed = options.rotationSpeed || 0;
+    this.breatheSpeed = options.breatheSpeed || 0;
+    this.breatheAmount = options.breatheAmount || 0;
+    this.baseRotation = shape.rotation || 0;
+    this.time = Math.random() * 100; // Random phase offset
   }
 
   /**
@@ -111,14 +134,15 @@ class ParallaxShape extends GameObject {
    */
   update(dt) {
     super.update(dt);
+    this.time += dt;
 
     // Get mouse offset from game
     const mouseOffsetX = this.game.mouseOffsetX || 0;
     const mouseOffsetY = this.game.mouseOffsetY || 0;
 
     // Parallax offset based on depth
-    const parallaxX = mouseOffsetX * this.depth * 0.08;
-    const parallaxY = mouseOffsetY * this.depth * 0.08;
+    const parallaxX = mouseOffsetX * this.depth * CONFIG.maxParallaxOffset;
+    const parallaxY = mouseOffsetY * this.depth * CONFIG.maxParallaxOffset;
 
     // Target normalized position
     const targetX = this.baseX + parallaxX;
@@ -131,6 +155,11 @@ class ParallaxShape extends GameObject {
     // Convert to actual canvas coordinates
     this.x = this.normX * this.game.width;
     this.y = this.normY * this.game.height;
+    
+    // Subtle rotation animation
+    if (this.rotationSpeed !== 0) {
+      this.shape.rotation = this.baseRotation + this.time * this.rotationSpeed;
+    }
   }
 
   /**
@@ -142,8 +171,13 @@ class ParallaxShape extends GameObject {
     // Apply position and scale to shape
     this.shape.x = this.x;
     this.shape.y = this.y;
-    this.shape.scaleX = this.scaleX;
-    this.shape.scaleY = this.scaleY;
+    
+    // Breathing effect
+    const breathe = this.breatheAmount > 0 
+      ? 1 + Math.sin(this.time * this.breatheSpeed) * this.breatheAmount 
+      : 1;
+    this.shape.scaleX = this.scaleX * breathe;
+    this.shape.scaleY = this.scaleY * breathe;
 
     // Draw the shape
     this.shape.draw();
@@ -183,6 +217,12 @@ class BauhausPosterDemo extends Game {
     this.textOpacity = 0;
     this.dateSlideY = 20;
     this.dateOpacity = 0;
+    
+    // House animation state
+    this.houseProgress = 0;
+
+    // Create Farnsworth House SVG shape
+    this.createHouseShape();
 
     // Generate composition
     this.generateComposition();
@@ -190,7 +230,7 @@ class BauhausPosterDemo extends Game {
     // Start entrance animations
     this.startEntranceAnimations();
 
-    // Animate text after shapes
+    // Animate text and house after shapes
     this.animateText();
 
     // Add scene to pipeline
@@ -226,26 +266,42 @@ class BauhausPosterDemo extends Game {
   }
 
   /**
-   * Add a shape with parallax wrapper to the scene
+   * Create the Farnsworth House SVG shape
    */
-  addShape(shape, x, y, depth, delay) {
-    const parallaxShape = new ParallaxShape(this, shape, {
-      baseX: x,
-      baseY: y,
-      depth: depth,
-      delay: delay,
+  createHouseShape() {
+    const margin = Math.min(this.width, this.height) * CONFIG.margin;
+    const textAreaHeight = this.height * CONFIG.textReserve;
+    
+    // Calculate scale to fit house width
+    const targetWidth = this.width * CONFIG.houseWidth;
+    // Original SVG is about 209 units wide, 39 units tall
+    const houseScale = targetWidth / 209;
+    const houseHeight = 39 * houseScale;
+    
+    // Calculate position at bottom center (foundation matches border)
+    const houseX = this.width / 2;
+    const houseY = this.height - houseHeight / 2 - margin;
+    
+    // Create the SVG shape with position
+    this.houseShape = new SVGShape(FARNSWORTH_PATH, {
+      x: houseX,
+      y: houseY,
+      stroke: CONFIG.colors.black,
+      lineWidth: 2,
+      color: null, // No fill, just stroke
+      scale: houseScale,
+      centerPath: true,
+      animationProgress: 0, // Start at 0 for drawing animation
     });
-
-    this.parallaxShapes.push(parallaxShape);
-    this.scene.add(parallaxShape);
   }
+
 
   /**
    * Generate a Bauhaus-style composition procedurally
    */
   generateComposition() {
     this.parallaxShapes = [];
-    const { colors, layers } = CONFIG;
+    const { colors, layers, margin, houseReserve, maxParallaxOffset } = CONFIG;
     const minDim = Math.min(this.width, this.height);
 
     // Color palettes for different shape types
@@ -257,36 +313,60 @@ class BauhausPosterDemo extends Game {
     const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
     const rand = (min, max) => min + Math.random() * (max - min);
     const randInt = (min, max) => Math.floor(rand(min, max + 1));
+    
+    // Calculate safe bounds (accounting for margin, house area, and parallax)
+    // Shapes go in the "sky" area above the house
+    const safeLeft = margin + maxParallaxOffset;
+    const safeRight = 1 - margin - maxParallaxOffset;
+    const safeTop = margin + maxParallaxOffset;
+    const safeBottom = 1 - houseReserve - maxParallaxOffset; // Stop above house
+    
+    /**
+     * Get safe position for a shape given its normalized size
+     * @param {number} sizeNorm - Shape size as fraction of minDim
+     */
+    const getSafePos = (sizeNorm) => {
+      const halfSize = sizeNorm * 0.5;
+      return {
+        x: rand(safeLeft + halfSize, safeRight - halfSize),
+        y: rand(safeTop + halfSize, safeBottom - halfSize),
+      };
+    };
 
     // Layer configs: [depth, count range, size range]
+    // All shapes appear together after house is drawn (1.5s)
+    const houseDrawTime = 1.5;
     const layerConfigs = [
-      { depth: layers.background, count: [2, 4], sizeRange: [0.25, 0.5], delayBase: 0 },
-      { depth: layers.far, count: [3, 5], sizeRange: [0.12, 0.25], delayBase: 0.1 },
-      { depth: layers.mid, count: [4, 7], sizeRange: [0.06, 0.15], delayBase: 0.25 },
-      { depth: layers.near, count: [3, 6], sizeRange: [0.04, 0.12], delayBase: 0.4 },
-      { depth: layers.front, count: [3, 5], sizeRange: [0.02, 0.08], delayBase: 0.5 },
+      { depth: layers.background, count: [2, 3], sizeRange: [0.2, 0.35], delayBase: houseDrawTime },
+      { depth: layers.far, count: [2, 4], sizeRange: [0.1, 0.2], delayBase: houseDrawTime },
+      { depth: layers.mid, count: [3, 5], sizeRange: [0.05, 0.12], delayBase: houseDrawTime },
+      { depth: layers.near, count: [2, 4], sizeRange: [0.03, 0.08], delayBase: houseDrawTime },
+      { depth: layers.front, count: [2, 4], sizeRange: [0.02, 0.05], delayBase: houseDrawTime },
     ];
-
-    let shapeIndex = 0;
 
     for (const layer of layerConfigs) {
       const count = randInt(layer.count[0], layer.count[1]);
 
       for (let i = 0; i < count; i++) {
-        const size = rand(layer.sizeRange[0], layer.sizeRange[1]) * minDim;
-        const x = rand(0.1, 0.9);
-        const y = rand(0.1, 0.85);
-        const delay = layer.delayBase + rand(0, 0.15);
-        const rotation = pick([0, Math.PI / 4, Math.PI / 2, -Math.PI / 4]) + rand(-0.2, 0.2);
+        const sizeNorm = rand(layer.sizeRange[0], layer.sizeRange[1]);
+        const size = sizeNorm * minDim;
+        const pos = getSafePos(sizeNorm);
+        const delay = layer.delayBase; // All shapes appear together
+        const rotation = pick([0, Math.PI / 4, Math.PI / 2, -Math.PI / 4]) + rand(-0.1, 0.1);
 
-        // Pick shape type based on layer
+        // Pick shape type
         const shapeType = randInt(0, 7);
         let shape;
 
-        // Background prefers rectangles, front prefers small shapes
+        // Background prefers neutrals, front prefers primary colors
         const color = layer.depth < 0.2
           ? pick(neutralColors)
           : pick(layer.depth > 0.7 ? allColors : primaryColors);
+          
+        // Subtle animation params (more for front layers)
+        const rotationSpeed = layer.depth > 0.5 && Math.random() < 0.3 ? rand(-0.1, 0.1) : 0;
+        const breatheSpeed = layer.depth > 0.3 && Math.random() < 0.4 ? rand(0.5, 1.5) : 0;
+        const breatheAmount = breatheSpeed > 0 ? rand(0.02, 0.05) : 0;
 
         switch (shapeType) {
           case 0: // Circle
@@ -294,10 +374,10 @@ class BauhausPosterDemo extends Game {
             break;
 
           case 1: // Rectangle
-            const isLine = Math.random() < 0.3;
+            const isLine = Math.random() < 0.25;
             shape = new Rectangle({
-              width: isLine ? size * rand(2, 4) : size,
-              height: isLine ? size * 0.08 : size * rand(0.6, 1.5),
+              width: isLine ? size * rand(1.5, 2.5) : size,
+              height: isLine ? size * 0.08 : size * rand(0.6, 1.4),
               color,
               rotation,
             });
@@ -322,7 +402,7 @@ class BauhausPosterDemo extends Game {
           case 5: // Arc (stroke only)
             shape = new Arc(size * 0.5, 0, Math.PI * rand(0.5, 1.5), {
               stroke: pick(primaryColors),
-              lineWidth: rand(2, 6),
+              lineWidth: rand(2, 5),
             });
             break;
 
@@ -339,47 +419,77 @@ class BauhausPosterDemo extends Game {
             shape = new Circle(size * 0.3, { color });
         }
 
-        this.addShape(shape, x, y, layer.depth, delay);
-        shapeIndex++;
+        this.addShapeWithAnimation(shape, pos.x, pos.y, layer.depth, delay, {
+          rotationSpeed,
+          breatheSpeed,
+          breatheAmount,
+        });
       }
     }
 
-    // Always add 2-3 prominent lines for Bauhaus feel
+    // Always add 2-3 prominent lines for Bauhaus feel (constrained to safe area)
     const lineCount = randInt(2, 3);
     for (let i = 0; i < lineCount; i++) {
       const isVertical = Math.random() < 0.5;
-      this.addShape(
+      const lineLength = rand(0.25, 0.4);
+      const pos = getSafePos(lineLength);
+      
+      this.addShapeWithAnimation(
         new Rectangle({
-          width: isVertical ? minDim * 0.012 : minDim * rand(0.4, 0.7),
-          height: isVertical ? minDim * rand(0.4, 0.7) : minDim * 0.012,
+          width: isVertical ? minDim * 0.01 : minDim * lineLength,
+          height: isVertical ? minDim * lineLength : minDim * 0.01,
           color: colors.black,
         }),
-        rand(0.2, 0.8),
-        rand(0.2, 0.7),
+        pos.x,
+        pos.y,
         layers.mid,
-        rand(0.3, 0.4)
+        rand(0.3, 0.4),
+        {}
       );
     }
 
     // Always add one large primary color shape as anchor
     const anchorColor = pick(primaryColors);
     const anchorType = randInt(0, 2);
-    const anchorSize = minDim * rand(0.15, 0.22);
+    const anchorSizeNorm = rand(0.12, 0.18);
+    const anchorSize = minDim * anchorSizeNorm;
+    const anchorPos = getSafePos(anchorSizeNorm);
     let anchorShape;
 
     if (anchorType === 0) {
       anchorShape = new Circle(anchorSize, { color: anchorColor });
     } else if (anchorType === 1) {
       anchorShape = new Rectangle({
-        width: anchorSize * 1.2,
-        height: anchorSize * rand(1, 1.5),
+        width: anchorSize * 1.1,
+        height: anchorSize * rand(0.9, 1.3),
         color: anchorColor,
       });
     } else {
       anchorShape = new Triangle(anchorSize, { color: anchorColor });
     }
 
-    this.addShape(anchorShape, rand(0.25, 0.75), rand(0.3, 0.6), layers.far, 0.15);
+    this.addShapeWithAnimation(anchorShape, anchorPos.x, anchorPos.y, layers.far, 0.15, {
+      breatheSpeed: 0.8,
+      breatheAmount: 0.02,
+    });
+  }
+  
+  /**
+   * Add a shape with parallax and optional animation
+   */
+  addShapeWithAnimation(shape, x, y, depth, delay, animOptions = {}) {
+    const parallaxShape = new ParallaxShape(this, shape, {
+      baseX: x,
+      baseY: y,
+      depth: depth,
+      delay: delay,
+      rotationSpeed: animOptions.rotationSpeed || 0,
+      breatheSpeed: animOptions.breatheSpeed || 0,
+      breatheAmount: animOptions.breatheAmount || 0,
+    });
+
+    this.parallaxShapes.push(parallaxShape);
+    this.scene.add(parallaxShape);
   }
 
   /**
@@ -392,7 +502,7 @@ class BauhausPosterDemo extends Game {
   }
 
   /**
-   * Animate the text elements
+   * Animate the text elements and house
    */
   animateText() {
     // Reset text state
@@ -400,14 +510,23 @@ class BauhausPosterDemo extends Game {
     this.textOpacity = 0;
     this.dateSlideY = 20;
     this.dateOpacity = 0;
+    this.houseProgress = 0;
 
-    // Animate "BAUHAUS" text - slide up and fade in
+    // Animate house drawing - path traces itself
+    Tweenetik.to(
+      this,
+      { houseProgress: 1 },
+      1.5, // 1.5 seconds to draw the house
+      Easing.easeInOutQuad
+    );
+
+    // Animate "BAUHAUS" text - slide up and fade in (after shapes start appearing)
     Tweenetik.to(
       this,
       { textSlideY: 0, textOpacity: 1 },
       0.8,
       Easing.easeOutCubic,
-      { delay: 0.6 }
+      { delay: 2.0 }
     );
 
     // Animate date - slide up and fade in
@@ -416,7 +535,7 @@ class BauhausPosterDemo extends Game {
       { dateSlideY: 0, dateOpacity: 1 },
       0.6,
       Easing.easeOutCubic,
-      { delay: 0.9 }
+      { delay: 2.3 }
     );
   }
 
@@ -426,6 +545,9 @@ class BauhausPosterDemo extends Game {
   regenerate() {
     // Kill existing tweens
     Tweenetik.killAll();
+
+    // Recreate house shape
+    this.createHouseShape();
 
     // Clear scene and regenerate
     this.scene.clear();
@@ -454,6 +576,9 @@ class BauhausPosterDemo extends Game {
     // Clear with background (super.render() handles pipeline)
     super.render();
 
+    // Draw Farnsworth House
+    this.renderFarnsworthHouse(ctx, w, h);
+
     // Draw poster border ON TOP of shapes
     const margin = Math.min(w, h) * CONFIG.margin;
     ctx.strokeStyle = CONFIG.colors.black;
@@ -464,43 +589,50 @@ class BauhausPosterDemo extends Game {
     this.renderBauhausText(ctx, w, h);
   }
 
+  /**
+   * Render the Farnsworth House SVG
+   */
+  renderFarnsworthHouse(ctx, w, h) {
+    if (!this.houseShape || this.houseProgress <= 0) return;
+
+    // Update animation progress
+    this.houseShape.setAnimationProgress(this.houseProgress);
+    
+    // Draw the house path (SVGShape handles its own positioning)
+    this.houseShape.render();
+  }
+
   renderBauhausText(ctx, w, h) {
     const { colors } = CONFIG;
-    const baseTextY = h * 0.96; // Moved down for more space above
-    const letterSize = Math.min(w, h) * 0.025;
-    const spacing = letterSize * 1.8;
+    const baseTextY = h * 0.95;
+    const letterSize = Math.min(w, h) * 0.022;
     const centerX = w * 0.5;
 
-    // Draw "BAUHAUS" with slide animation
+    // Draw "BAUHAUS" main title with slide animation
     if (this.textOpacity > 0) {
       ctx.save();
       ctx.globalAlpha = this.textOpacity;
 
       const textY = baseTextY + this.textSlideY;
       ctx.fillStyle = colors.black;
-      ctx.font = `bold ${letterSize * 1.5}px 'Helvetica Neue', Helvetica, Arial, sans-serif`;
+      ctx.font = `bold ${letterSize * 2.2}px 'Helvetica Neue', Helvetica, Arial, sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-
-      const letters = 'BAUHAUS';
-      const startX = centerX - spacing * 3.5;
-      for (let i = 0; i < letters.length; i++) {
-        ctx.fillText(letters[i], startX + i * spacing, textY);
-      }
+      ctx.fillText('BAUHAUS', centerX, textY);
       ctx.restore();
     }
 
     // Draw date with slide animation
     if (this.dateOpacity > 0) {
       ctx.save();
-      ctx.globalAlpha = this.dateOpacity;
+      ctx.globalAlpha = this.dateOpacity * 0.6;
 
-      const dateY = baseTextY + letterSize * 0.9 + this.dateSlideY;
+      const dateY = baseTextY + letterSize * 1.6 + this.dateSlideY;
       ctx.fillStyle = colors.black;
-      ctx.font = `${letterSize * 0.7}px 'Helvetica Neue', Helvetica, Arial, sans-serif`;
+      ctx.font = `300 ${letterSize * 0.65}px 'Helvetica Neue', Helvetica, Arial, sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText('1919-1933', centerX, dateY);
+      ctx.fillText('1919 — 1933', centerX, dateY);
       ctx.restore();
     }
   }
@@ -511,12 +643,21 @@ class BauhausPosterDemo extends Game {
     this.mouseX = this.width / 2;
     this.mouseY = this.height / 2;
 
+    // Recreate house shape with new dimensions
+    this.createHouseShape();
+
     // Clear and regenerate
     Tweenetik.killAll();
     this.scene.clear();
     this.generateComposition();
     this.startEntranceAnimations();
     this.animateText();
+  }
+
+  destroy() {
+    Tweenetik.killAll();
+    this.houseShape = null;
+    super.destroy?.();
   }
 }
 

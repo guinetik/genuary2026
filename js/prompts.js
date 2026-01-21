@@ -62,7 +62,7 @@ export const INTERPRETATIONS = {
   18: "Langton's Ant × Particle Collider: two ants walk opposing planes (screen & exclusion blend). When paths cross, matter collides in bursts of light. Press [R] to restart.",
   19: 'Grokking: a 16×16 neural network learns modular arithmetic. Watch hidden neurons light up as it trains. If you think nothing is happening, wait. Click to restart.',
   20: 'Ouroboros: the ancient serpent eating its own tail. One continuous line, eternally consuming and regenerating. Click to grow, drag to rotate.',
-  21: 'Bauhaus Poster: Living geometric composition with cycling colors, breathing shapes, and a wandering cursor that leaves trails. Move mouse for parallax, click to regenerate.',
+  21: 'Procedural Bauhaus: Living geometric composition with primary colors and breathing shapes. Parallax layers respond to mouse, click to regenerate.',
   22: 'Etch-a-Sketch: terminal-style drawing toy with rotary knobs. Drag to draw, shake to clear, [S] exports SVG for pen plotters.',
   23: 'Liquid Glass: Apple-inspired metaball blobs with frosted glass refraction, chromatic aberration, and fresnel rim lighting. Move mouse to attract.',
   24: 'Spirograph Nightmare: π (irrational) creates patterns that NEVER close. 3.14 (rational) eventually meets itself. Click to toggle and watch the difference.',

@@ -286,15 +286,33 @@ class Day20Demo extends Game {
     const angle = t * Math.PI * 2 * this.coils - time * 0.5 + this.phaseOffset + this.lungeOffset;
     
     // Smooth radius transition
-    // As perfection increases, the shape becomes a perfect circle
     const chaos = 1 - this.perfection;
     const baseR = this.isOuroboros ? this.currentRadius : (CONFIG.baseRadius * this.size);
     
     const undulation = Math.sin(t * Math.PI * 8 * this.coils + time * 2) * 0.05 * this.size * chaos;
     const r = baseR + undulation;
 
+    // Circle coordinates
     const circleX = Math.cos(angle) * r;
     const circleY = Math.sin(angle) * r;
+    
+    // Infinity (lemniscate) coordinates
+    // Parametric: x = a*cos(t)/(1+sin²(t)), y = a*sin(t)*cos(t)/(1+sin²(t))
+    // Simplified figure-8 that's wider horizontally
+    const infAngle = angle * 2; // Double angle for figure-8 (two loops)
+    const sinA = Math.sin(infAngle);
+    const cosA = Math.cos(infAngle);
+    const denom = 1 + sinA * sinA;
+    const infScale = r * 1.4; // Slightly larger for visual balance
+    const infX = infScale * cosA / denom;
+    const infY = infScale * sinA * cosA / denom * 0.7; // Squish vertically a bit
+    
+    // Blend from circle to infinity as perfection goes from 0.7 to 1.0
+    const infBlend = Math.max(0, Math.min(1, (this.perfection - 0.7) / 0.3));
+    const smoothInf = infBlend * infBlend * (3 - 2 * infBlend); // Smoothstep
+    
+    const shapeX = circleX * (1 - smoothInf) + infX * smoothInf;
+    const shapeY = circleY * (1 - smoothInf) + infY * smoothInf;
 
     // Slithering mode - follow the history trail
     // t=1 is head (history[0]), t=0 is tail (further back in history)
@@ -304,14 +322,16 @@ class Day20Demo extends Game {
     const followX = historyPoint ? historyPoint.x : 0;
     const followY = historyPoint ? historyPoint.y : 0;
 
-    // Blend between slithering and ouroboros
+    // Blend between slithering and ouroboros shape
     const blend = this.ouroborosBlend;
-    const x = followX * (1 - blend) + circleX * blend;
-    const y = followY * (1 - blend) + circleY * blend;
+    const x = followX * (1 - blend) + shapeX * blend;
+    const y = followY * (1 - blend) + shapeY * blend;
 
     // Z undulation for 3D effect (only in ouroboros mode)
-    // Flattens out as perfection increases
-    const z = Math.sin(t * Math.PI * 6 * this.coils + time * 1.5) * 0.08 * this.size * blend * chaos;
+    // Increases slightly for infinity shape to show the crossover
+    const zBase = Math.sin(t * Math.PI * 6 * this.coils + time * 1.5) * 0.08 * this.size * blend;
+    const zInfinity = Math.sin(angle) * 0.15 * this.size * blend * smoothInf; // Crossover depth
+    const z = zBase * chaos + zInfinity;
 
     return { x, y, z, t };
   }
@@ -321,16 +341,16 @@ class Day20Demo extends Game {
     // Less rotation when in following mode
     const rotationStrength = this.ouroborosBlend;
 
-    // Rotate around Y axis based on mouse X (only in ouroboros mode)
-    const rotY = (this.mouseX - 0.5) * Math.PI * 0.8 * rotationStrength;
+    // Rotate around Y axis based on mouse X (inverted, unclamped)
+    const rotY = -(this.mouseX - 0.5) * Math.PI * 2 * rotationStrength;
     const cosY = Math.cos(rotY);
     const sinY = Math.sin(rotY);
 
     const x1 = p.x * cosY - p.z * sinY;
     const z1 = p.x * sinY + p.z * cosY;
 
-    // Rotate around X axis based on mouse Y
-    const rotX = (this.mouseY - 0.5) * Math.PI * 0.6 * rotationStrength;
+    // Rotate around X axis based on mouse Y (inverted, unclamped)
+    const rotX = -(this.mouseY - 0.5) * Math.PI * 1.5 * rotationStrength;
     const cosX = Math.cos(rotX);
     const sinX = Math.sin(rotX);
 
@@ -429,12 +449,12 @@ class Day20Demo extends Game {
           const tailScreenX = cx + tail.x * scale;
           const tailScreenY = cy + tail.y * scale;
 
-          // Pulsing glow on tail - rainbow when close
+          // Pulsing glow on tail - terminal green
           const pulse = 0.6 + Math.sin(this.time * 6) * 0.4;
-          const tailHue = this.hueOffset + 60;
+          const tailHue = 135; // Terminal green
           const gradient = ctx.createRadialGradient(tailScreenX, tailScreenY, 0, tailScreenX, tailScreenY, 40);
           gradient.addColorStop(0, `hsla(${tailHue}, 100%, 70%, ${pulse})`);
-          gradient.addColorStop(0.5, `hsla(${tailHue + 30}, 100%, 50%, ${pulse * 0.5})`);
+          gradient.addColorStop(0.5, `hsla(${tailHue}, 100%, 50%, ${pulse * 0.5})`);
           gradient.addColorStop(1, "transparent");
           ctx.fillStyle = gradient;
           ctx.beginPath();
@@ -451,7 +471,16 @@ class Day20Demo extends Game {
         const uiHue = this.hueOffset;
         ctx.fillStyle = `hsla(${uiHue}, 80%, 60%, 0.6)`;
         const perfectionPct = Math.floor(this.perfection * 100);
-        ctx.fillText(`Consumed: ${this.totalEaten} • Form: ${perfectionPct}%`, cx, 30);
+        
+        // Show form name based on perfection
+        let formName = "Circle";
+        if (this.perfection >= 0.95) {
+          formName = "∞ Infinity";
+        } else if (this.perfection >= 0.7) {
+          formName = "Morphing...";
+        }
+        
+        ctx.fillText(`Consumed: ${this.totalEaten} • ${formName} (${perfectionPct}%)`, cx, 30);
       }
     }
   }
@@ -459,8 +488,9 @@ class Day20Demo extends Game {
   drawSnake(ctx, points) {
     if (points.length < 2) return;
 
-    // Rainbow hue shift based on consumption
-    const hueShift = this.hueOffset + this.totalEaten * 25;
+    // Terminal green (135) while slithering, rainbow after catching tail
+    const terminalGreen = 135;
+    const rainbowShift = this.hueOffset + this.totalEaten * 25;
 
     // Draw from tail to head with varying thickness
     for (let i = 1; i < points.length; i++) {
@@ -483,11 +513,12 @@ class Day20Demo extends Game {
       // Depth affects brightness
       const depthFade = 0.5 + (p1.z + 0.5) * 0.5;
 
-      // Psychedelic rainbow along body
+      // Color: terminal green while slithering, rainbow after ouroboros
       const eatFlash = this.eatPulse * 40;
-      const hue = (hueShift + t * 80 + Math.sin(this.time * 2 + t * 8) * 30) % 360;
-      const sat = 85 + t * 15;
-      const light = 35 + t * 25 + eatFlash;
+      const rainbowHue = (rainbowShift + t * 80 + Math.sin(this.time * 2 + t * 8) * 30) % 360;
+      const hue = terminalGreen * (1 - this.ouroborosBlend) + rainbowHue * this.ouroborosBlend;
+      const sat = 100 * (1 - this.ouroborosBlend) + (85 + t * 15) * this.ouroborosBlend;
+      const light = (45 + t * 15) * (1 - this.ouroborosBlend) + (35 + t * 25 + eatFlash) * this.ouroborosBlend;
 
       // Outer glow (additive)
       ctx.globalCompositeOperation = 'lighter';
@@ -526,7 +557,8 @@ class Day20Demo extends Game {
 
   drawScales(ctx, points) {
     const scaleSpacing = Math.max(3, Math.floor(points.length / 50));
-    const hueShift = this.hueOffset + this.totalEaten * 25;
+    const terminalGreen = 135;
+    const rainbowShift = this.hueOffset + this.totalEaten * 25;
 
     ctx.globalCompositeOperation = 'lighter';
     for (let i = scaleSpacing; i < points.length - scaleSpacing; i += scaleSpacing) {
@@ -536,11 +568,12 @@ class Day20Demo extends Game {
       const size = 2 + t * 5;
       const depthFade = 0.5 + (p.z + 0.5) * 0.5;
 
-      const hue = (hueShift + t * 80) % 360;
+      const rainbowHue = (rainbowShift + t * 80) % 360;
+      const hue = terminalGreen * (1 - this.ouroborosBlend) + rainbowHue * this.ouroborosBlend;
 
       ctx.beginPath();
       ctx.arc(p.x, p.y, size, 0, Math.PI * 2);
-      ctx.fillStyle = `hsla(${hue + 40}, 80%, 65%, ${0.35 * depthFade})`;
+      ctx.fillStyle = `hsla(${hue + 40 * this.ouroborosBlend}, 80%, 65%, ${0.35 * depthFade})`;
       ctx.fill();
     }
     ctx.globalCompositeOperation = 'source-over';
@@ -552,7 +585,8 @@ class Day20Demo extends Game {
   drawCometTail(ctx, points) {
     if (points.length < CONFIG.cometLength) return;
     
-    const hueShift = this.hueOffset + this.totalEaten * 25;
+    const terminalGreen = 135;
+    const rainbowShift = this.hueOffset + this.totalEaten * 25;
     
     ctx.globalCompositeOperation = 'lighter';
     
@@ -567,11 +601,12 @@ class Day20Demo extends Game {
       const glowSize = CONFIG.glowSize * (0.3 + 0.7 * progress) * (1 + this.eatPulse * 0.5);
       const alpha = progress * 0.4 * (1 + this.eatPulse);
       
-      const hue = (hueShift + 60 + i * 2) % 360;
+      const rainbowHue = (rainbowShift + 60 + i * 2) % 360;
+      const hue = terminalGreen * (1 - this.ouroborosBlend) + rainbowHue * this.ouroborosBlend;
       
       const grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, glowSize);
       grad.addColorStop(0, `hsla(${hue}, 100%, 60%, ${alpha})`);
-      grad.addColorStop(0.5, `hsla(${hue + 20}, 100%, 50%, ${alpha * 0.3})`);
+      grad.addColorStop(0.5, `hsla(${hue + 20 * this.ouroborosBlend}, 100%, 50%, ${alpha * 0.3})`);
       grad.addColorStop(1, 'transparent');
       
       ctx.fillStyle = grad;
@@ -585,106 +620,90 @@ class Day20Demo extends Game {
 
   drawHead(ctx, points) {
     if (points.length < 2) return;
+    
+    // Fade out head as we approach infinity (no head/tail distinction)
+    const headFade = Math.max(0, 1 - (this.perfection - 0.7) / 0.25);
+    if (headFade <= 0) return;
 
     const head = points[points.length - 1];
     const neck = points[points.length - 10] || points[points.length - 2];
-
-    // Head direction
     const angle = Math.atan2(head.y - neck.y, head.x - neck.x);
 
-    const headScale = 1 - this.perfection * 0.2; 
-    const headSize = (10 + 12 * this.size) * headScale * (1 + this.eatPulse * 0.2);
-    const depthFade = 0.5 + (head.z + 0.5) * 0.5;
+    // Match body thickness at head
+    const bodyThickness = (2 + 14 + this.totalEaten * 0.6) * (1 - this.perfection) + 
+                          (7 + this.totalEaten * 0.4) * this.perfection;
     
-    // Rainbow hue
-    const hueShift = this.hueOffset + this.totalEaten * 25;
-    const headHue = (hueShift + 60) % 360;
+    const depthFade = 0.5 + (head.z + 0.5) * 0.5;
+    const alpha = depthFade * headFade;
+    
+    // Terminal green while slithering, rainbow after ouroboros
+    const terminalGreen = 135;
+    const rainbowShift = this.hueOffset + this.totalEaten * 25;
+    const rainbowHue = (rainbowShift + 80) % 360;
+    const headHue = terminalGreen * (1 - this.ouroborosBlend) + rainbowHue * this.ouroborosBlend;
+    const light = (45 + 15) * (1 - this.ouroborosBlend) + (35 + 25 + this.eatPulse * 40) * this.ouroborosBlend;
 
     ctx.save();
     ctx.translate(head.x, head.y);
     ctx.rotate(angle);
 
-    // Head glow (additive)
-    ctx.globalCompositeOperation = 'lighter';
-    const glowRadius = headSize * 3 * (1 + this.eatPulse * 0.5);
-    const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, glowRadius);
-    gradient.addColorStop(0, `hsla(${headHue}, 100%, 65%, ${0.6 * depthFade})`);
-    gradient.addColorStop(0.4, `hsla(${headHue + 30}, 100%, 50%, ${0.2 * depthFade})`);
-    gradient.addColorStop(1, "transparent");
-    ctx.fillStyle = gradient;
-    ctx.beginPath();
-    ctx.arc(0, 0, glowRadius, 0, Math.PI * 2);
-    ctx.fill();
-    
-    ctx.globalCompositeOperation = 'source-over';
+    // Head shape - wider horizontally than vertically (snake head)
+    const headLength = bodyThickness * 1.8; // Long horizontally
+    const headWidth = bodyThickness * 1.1;  // Slightly wider than body
 
-    // Head shape (triangle-ish)
+    // Main head ellipse - stretched horizontal
     ctx.beginPath();
-    ctx.moveTo(headSize, 0);
-    ctx.lineTo(-headSize * 0.5, -headSize * 0.6);
-    ctx.lineTo(-headSize * 0.5, headSize * 0.6);
-    ctx.closePath();
-    ctx.fillStyle = `hsla(${headHue}, 85%, 50%, ${depthFade})`;
+    ctx.ellipse(headLength * 0.3, 0, headLength, headWidth, 0, 0, Math.PI * 2);
+    ctx.fillStyle = `hsla(${headHue}, 100%, ${light}%, ${alpha})`;
     ctx.fill();
     
-    // Head highlight
+    // Brighter core
     ctx.beginPath();
-    ctx.moveTo(headSize * 0.8, 0);
-    ctx.lineTo(-headSize * 0.3, -headSize * 0.35);
-    ctx.lineTo(-headSize * 0.3, headSize * 0.35);
-    ctx.closePath();
-    ctx.fillStyle = `hsla(${headHue}, 70%, 65%, ${0.5 * depthFade})`;
+    ctx.ellipse(headLength * 0.2, 0, headLength * 0.6, headWidth * 0.6, 0, 0, Math.PI * 2);
+    ctx.fillStyle = `hsla(${headHue}, 90%, ${light + 15}%, ${alpha * 0.6})`;
     ctx.fill();
 
-    // Eye - glows when eating
-    const eyeX = headSize * 0.2;
-    const eyeY = -headSize * 0.2;
-    const minEyeSize = 2;
-    const eyeSize = Math.max(minEyeSize, 4 * (1 - this.perfection * 0.4)) * (1 + this.eatPulse * 0.5);
+    // Eyes - two of them
+    const eyeSize = (1.2 + bodyThickness * 0.04) * headFade;
+    const eyeX = headLength * 0.4;
+    const eyeY = headWidth * 0.35;
     
-    // Eye glow
-    ctx.globalCompositeOperation = 'lighter';
-    const eyeGlow = ctx.createRadialGradient(eyeX, eyeY, 0, eyeX, eyeY, eyeSize * 3);
-    eyeGlow.addColorStop(0, `hsla(50, 100%, 80%, ${0.8 + this.eatPulse * 0.2})`);
-    eyeGlow.addColorStop(1, 'transparent');
-    ctx.fillStyle = eyeGlow;
+    // Top eye
     ctx.beginPath();
-    ctx.arc(eyeX, eyeY, eyeSize * 3, 0, Math.PI * 2);
+    ctx.arc(eyeX, -eyeY, eyeSize, 0, Math.PI * 2);
+    ctx.fillStyle = `hsla(50, 100%, 90%, ${alpha})`;
     ctx.fill();
-    ctx.globalCompositeOperation = 'source-over';
+    // Pupil
+    ctx.beginPath();
+    ctx.ellipse(eyeX, -eyeY, eyeSize * 0.3, eyeSize * 0.6, 0, 0, Math.PI * 2);
+    ctx.fillStyle = `hsla(0, 0%, 5%, ${alpha})`;
+    ctx.fill();
     
+    // Bottom eye (visible from other side when rotated)
     ctx.beginPath();
     ctx.arc(eyeX, eyeY, eyeSize, 0, Math.PI * 2);
-    ctx.fillStyle = `hsla(50, 100%, 85%, ${depthFade})`;
+    ctx.fillStyle = `hsla(50, 100%, 90%, ${alpha})`;
     ctx.fill();
-
-    // Mouth - opens WIDE when eating
-    const baseOpen = 0.2 * (1 - this.perfection);
-    const pulseOpen = this.eatPulse * 0.6;
-    const mouthOpen = Math.max(0.03, baseOpen + pulseOpen);
-    
+    // Pupil
     ctx.beginPath();
-    ctx.moveTo(headSize, 0);
-    ctx.lineTo(headSize * 0.25, -headSize * mouthOpen);
-    ctx.lineTo(headSize * 0.25, headSize * mouthOpen);
-    ctx.closePath();
-    ctx.fillStyle = `hsla(0, 60%, 20%, ${depthFade})`;
+    ctx.ellipse(eyeX, eyeY, eyeSize * 0.3, eyeSize * 0.6, 0, 0, Math.PI * 2);
+    ctx.fillStyle = `hsla(0, 0%, 5%, ${alpha})`;
     ctx.fill();
 
     ctx.restore();
 
-    // Tail being eaten - rainbow glow
+    // Tail glow (also fades) - terminal green while slithering
     const tail = points[0];
-    const tailHue = (hueShift + 120) % 360;
+    const tailRainbowHue = (rainbowShift + 120) % 360;
+    const tailHue = terminalGreen * (1 - this.ouroborosBlend) + tailRainbowHue * this.ouroborosBlend;
     
     ctx.globalCompositeOperation = 'lighter';
-    const tailGlow = ctx.createRadialGradient(tail.x, tail.y, 0, tail.x, tail.y, 25);
-    tailGlow.addColorStop(0, `hsla(${tailHue}, 100%, 60%, 0.6)`);
-    tailGlow.addColorStop(0.5, `hsla(${tailHue + 40}, 100%, 50%, 0.2)`);
+    const tailGlow = ctx.createRadialGradient(tail.x, tail.y, 0, tail.x, tail.y, 20);
+    tailGlow.addColorStop(0, `hsla(${tailHue}, 100%, 60%, ${0.5 * headFade})`);
     tailGlow.addColorStop(1, "transparent");
     ctx.fillStyle = tailGlow;
     ctx.beginPath();
-    ctx.arc(tail.x, tail.y, 25, 0, Math.PI * 2);
+    ctx.arc(tail.x, tail.y, 20, 0, Math.PI * 2);
     ctx.fill();
     ctx.globalCompositeOperation = 'source-over';
   }
