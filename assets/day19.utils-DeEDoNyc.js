@@ -1,0 +1,1 @@
+function o(n){for(let t=n.length-1;t>0;t--){const e=Math.floor(Math.random()*(t+1));[n[t],n[e]]=[n[e],n[t]]}return n}function f(n){const t=new Array(n);for(let e=0;e<n;e++)t[e]=e;return o(t)}export{o as shuffle,f as shuffledIndices};
