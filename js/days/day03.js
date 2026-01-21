@@ -9,47 +9,60 @@
  * The golden angle creates infinite spiraling beauty.
  *
  * Move mouse to disturb. Click to explode.
+ *
+ * Showcases: Painter utilities (shapes, colors, effects, gradients)
  */
 
-import { Game, Painter } from '@guinetik/gcanvas';
+import { Game, Painter } from "@guinetik/gcanvas";
 
 const CONFIG = {
   goldenAngle: 137.5077640500378,
   numSeeds: 1000,
-  baseRadiusRatio: 0.015,      // Ratio of min dimension
-  spacingRatio: 0.012,         // Ratio of min dimension
+  baseRadiusRatio: 0.015, // Ratio of min dimension
+  spacingRatio: 0.012, // Ratio of min dimension
 
   // Animation
   pulseSpeed: 1.5,
   rotationSpeed: 0.15,
   waveSpeed: 2,
-  waveAmplitudeRatio: 0.03,    // Ratio of min dimension
+  waveAmplitudeRatio: 0.03, // Ratio of min dimension
 
   // Colors - full spectrum
   hueSpeed: 30,
   saturation: 85,
 
   // Mouse interaction
-  mouseRadiusRatio: 0.25,      // Ratio of min dimension
-  mouseForceRatio: 0.15,       // Ratio of min dimension
+  mouseRadiusRatio: 0.25, // Ratio of min dimension
+  mouseForceRatio: 0.15, // Ratio of min dimension
 
   // Explosion
-  explosionForceRatio: 0.5,    // Ratio of min dimension
+  explosionForceRatio: 0.5, // Ratio of min dimension
   explosionDecay: 0.96,
 
   // Center glow
-  centerSizeRatio: 0.04,       // Ratio of min dimension
+  centerSizeRatio: 0.04, // Ratio of min dimension
 };
 
 const TAU = Math.PI * 2;
-const GOLDEN_ANGLE_RAD = CONFIG.goldenAngle * Math.PI / 180;
+const GOLDEN_ANGLE_RAD = (CONFIG.goldenAngle * Math.PI) / 180;
 
+/**
+ * GoldenVortexDemo - Phyllotaxis visualization using Painter utilities
+ * @extends Game
+ */
 class GoldenVortexDemo extends Game {
+  /**
+   * Create the demo
+   * @param {HTMLCanvasElement} canvas - Target canvas element
+   */
   constructor(canvas) {
     super(canvas);
-    this.backgroundColor = '#000';
+    this.backgroundColor = "#000";
   }
 
+  /**
+   * Initialize the demo
+   */
   init() {
     super.init();
     Painter.init(this.ctx);
@@ -63,6 +76,9 @@ class GoldenVortexDemo extends Game {
     this.explosionTime = 0;
 
     // Generate seeds with normalized values (will be scaled by canvas size)
+    const minDim = Math.min(this.width, this.height);
+    const spacing = minDim * CONFIG.spacingRatio;
+
     this.seeds = [];
     for (let i = 0; i < CONFIG.numSeeds; i++) {
       const angle = i * GOLDEN_ANGLE_RAD;
@@ -72,33 +88,36 @@ class GoldenVortexDemo extends Game {
       this.seeds.push({
         index: i,
         baseAngle: angle,
-        radiusFactor: radiusFactor,  // Normalized, will be multiplied by spacing
+        radiusFactor: radiusFactor, // Normalized, will be multiplied by spacing
         angle: angle,
-        radius: 0,  // Will be calculated each frame
+        radius: radiusFactor * spacing, // Initialize with proper value
         vx: 0,
         vy: 0,
-        sizeFactor: Math.max(0.3, 1 - i * 0.0005),  // Normalized size factor
+        sizeFactor: Math.max(0.3, 1 - i * 0.0005), // Normalized size factor
         phase: Math.random() * TAU,
       });
     }
 
     // Mouse tracking
-    this.canvas.addEventListener('mousemove', (e) => {
+    this.canvas.addEventListener("mousemove", (e) => {
       const rect = this.canvas.getBoundingClientRect();
       this.mouseX = e.clientX - rect.left - this.width / 2;
       this.mouseY = e.clientY - rect.top - this.height / 2;
     });
 
-    this.canvas.addEventListener('click', () => {
+    this.canvas.addEventListener("click", () => {
       this.explode();
     });
 
-    this.canvas.addEventListener('mouseleave', () => {
+    this.canvas.addEventListener("mouseleave", () => {
       this.mouseX = 0;
       this.mouseY = 0;
     });
   }
 
+  /**
+   * Trigger explosion effect
+   */
   explode() {
     this.exploding = true;
     this.explosionTime = this.time;
@@ -121,6 +140,10 @@ class GoldenVortexDemo extends Game {
     }
   }
 
+  /**
+   * Update game state
+   * @param {number} dt - Delta time in seconds
+   */
   update(dt) {
     super.update(dt);
 
@@ -153,8 +176,10 @@ class GoldenVortexDemo extends Game {
         seed.vy *= CONFIG.explosionDecay;
 
         // Spring back to original position
-        const targetX = Math.cos(seed.baseAngle + this.globalRotation) * baseRadius;
-        const targetY = Math.sin(seed.baseAngle + this.globalRotation) * baseRadius;
+        const targetX =
+          Math.cos(seed.baseAngle + this.globalRotation) * baseRadius;
+        const targetY =
+          Math.sin(seed.baseAngle + this.globalRotation) * baseRadius;
 
         const dx = targetX - x;
         const dy = targetY - y;
@@ -164,7 +189,9 @@ class GoldenVortexDemo extends Game {
 
         // Update angle/radius from position
         seed.angle = Math.atan2(y + seed.vy * dt, x + seed.vx * dt);
-        seed.radius = Math.sqrt((x + seed.vx * dt) ** 2 + (y + seed.vy * dt) ** 2);
+        seed.radius = Math.sqrt(
+          (x + seed.vx * dt) ** 2 + (y + seed.vy * dt) ** 2
+        );
 
         // Check if explosion is over
         if (this.time - this.explosionTime > 3) {
@@ -176,15 +203,20 @@ class GoldenVortexDemo extends Game {
         seed.angle = seed.baseAngle + this.globalRotation;
 
         // Pulsing radius
-        const pulse = Math.sin(this.time * CONFIG.pulseSpeed + seed.index * 0.02) * 0.1 + 1;
+        const pulse =
+          Math.sin(this.time * CONFIG.pulseSpeed + seed.index * 0.02) * 0.1 + 1;
 
         // Spiral wave (scaled)
-        const wave = Math.sin(this.time * CONFIG.waveSpeed - baseRadius * 0.05) * waveAmplitude;
+        const wave =
+          Math.sin(this.time * CONFIG.waveSpeed - baseRadius * 0.05) *
+          waveAmplitude;
 
-        seed.radius = baseRadius * pulse + wave * (baseRadius / (minDim * 0.25));
+        seed.radius = baseRadius * pulse + (wave * baseRadius) / (minDim * 0.25);
 
         // Mouse interaction
-        const dist = Math.sqrt((x - this.mouseX) ** 2 + (y - this.mouseY) ** 2);
+        const dist = Math.sqrt(
+          (x - this.mouseX) ** 2 + (y - this.mouseY) ** 2
+        );
         if (dist < mouseRadius) {
           const force = (mouseRadius - dist) / mouseRadius;
           seed.radius += force * mouseForce * (1 - seed.index / CONFIG.numSeeds);
@@ -194,33 +226,34 @@ class GoldenVortexDemo extends Game {
     }
   }
 
+  /**
+   * Render the scene
+   */
   render() {
-    const ctx = this.ctx;
-    const w = this.width;
-    const h = this.height;
-    const cx = w / 2;
-    const cy = h / 2;
+    // Fade trail effect using Painter
+    Painter.shapes.rect(0, 0, this.width, this.height, "rgba(0, 0, 0, 0.15)");
 
-    // Fade trail effect
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
-    ctx.fillRect(0, 0, w, h);
+    const cx = this.width / 2;
+    const cy = this.height / 2;
 
     // Draw connecting lines (subtle)
-    this.drawConnections(ctx, cx, cy);
+    this.drawConnections(cx, cy);
 
     // Draw seeds
-    this.drawSeeds(ctx, cx, cy);
+    this.drawSeeds(cx, cy);
 
     // Draw center glow
-    this.drawCenter(ctx, cx, cy);
+    this.drawCenter(cx, cy);
   }
 
-  drawConnections(ctx, cx, cy) {
-    ctx.strokeStyle = `hsla(${this.hueOffset % 360}, 70%, 50%, 0.05)`;
-    ctx.lineWidth = 0.5;
-
+  /**
+   * Draw subtle spiral connections between seeds
+   * @param {number} cx - Center X
+   * @param {number} cy - Center Y
+   */
+  drawConnections(cx, cy) {
     // Connect seeds in Fibonacci spiral pattern
-    ctx.beginPath();
+    this.ctx.beginPath();
     for (let i = 1; i < Math.min(500, this.seeds.length); i++) {
       const seed = this.seeds[i];
       const prev = this.seeds[i - 1];
@@ -230,13 +263,19 @@ class GoldenVortexDemo extends Game {
       const x2 = cx + Math.cos(seed.angle) * seed.radius;
       const y2 = cy + Math.sin(seed.angle) * seed.radius;
 
-      ctx.moveTo(x1, y1);
-      ctx.lineTo(x2, y2);
+      this.ctx.moveTo(x1, y1);
+      this.ctx.lineTo(x2, y2);
     }
-    ctx.stroke();
+    // stroke() sets styles AND strokes the current path
+    Painter.colors.stroke(`hsla(${this.hueOffset % 360}, 70%, 50%, 0.05)`, 0.5);
   }
 
-  drawSeeds(ctx, cx, cy) {
+  /**
+   * Draw all seed particles with glowing effect
+   * @param {number} cx - Center X
+   * @param {number} cy - Center Y
+   */
+  drawSeeds(cx, cy) {
     const minDim = Math.min(this.width, this.height);
     const baseSize = minDim * CONFIG.baseRadiusRatio;
 
@@ -253,50 +292,77 @@ class GoldenVortexDemo extends Game {
       const pulse = Math.sin(this.time * 4 + seed.index * 0.1) * 0.3 + 1;
       const size = baseSize * seed.sizeFactor * pulse;
 
-      // Glow
-      ctx.globalCompositeOperation = 'lighter';
+      // Skip if size is invalid (prevents gradient error)
+      if (!isFinite(size) || size <= 0 || !isFinite(x) || !isFinite(y)) continue;
 
-      const gradient = ctx.createRadialGradient(x, y, 0, x, y, size * 2);
-      gradient.addColorStop(0, `hsla(${hue}, ${CONFIG.saturation}%, ${lightness}%, 0.9)`);
-      gradient.addColorStop(0.5, `hsla(${hue}, ${CONFIG.saturation}%, ${lightness - 10}%, 0.4)`);
-      gradient.addColorStop(1, `hsla(${hue}, ${CONFIG.saturation}%, ${lightness - 20}%, 0)`);
+      // Draw glow using Painter utilities
+      Painter.effects.setBlendMode("lighter");
 
-      ctx.fillStyle = gradient;
-      ctx.beginPath();
-      ctx.arc(x, y, size * 2, 0, TAU);
-      ctx.fill();
+      // Create radial gradient for glow (x0, y0, r0, x1, y1, r1, stops)
+      const gradient = Painter.colors.radialGradient(x, y, 0, x, y, size * 2, [
+        {
+          offset: 0,
+          color: `hsla(${hue}, ${CONFIG.saturation}%, ${lightness}%, 0.9)`,
+        },
+        {
+          offset: 0.5,
+          color: `hsla(${hue}, ${CONFIG.saturation}%, ${lightness - 10}%, 0.4)`,
+        },
+        {
+          offset: 1,
+          color: `hsla(${hue}, ${CONFIG.saturation}%, ${lightness - 20}%, 0)`,
+        },
+      ]);
 
-      // Core
-      ctx.globalCompositeOperation = 'source-over';
-      ctx.fillStyle = `hsl(${hue}, ${CONFIG.saturation}%, ${lightness + 20}%)`;
-      ctx.beginPath();
-      ctx.arc(x, y, size * 0.5, 0, TAU);
-      ctx.fill();
+      // Pass gradient directly as color to fillCircle
+      Painter.shapes.fillCircle(x, y, size * 2, gradient);
+
+      // Core - bright center
+      Painter.effects.setBlendMode("source-over");
+      Painter.shapes.fillCircle(
+        x,
+        y,
+        size * 0.5,
+        `hsl(${hue}, ${CONFIG.saturation}%, ${lightness + 20}%)`
+      );
     }
   }
 
-  drawCenter(ctx, cx, cy) {
-    ctx.globalCompositeOperation = 'lighter';
+  /**
+   * Draw glowing center orb
+   * @param {number} cx - Center X
+   * @param {number} cy - Center Y
+   */
+  drawCenter(cx, cy) {
+    Painter.effects.setBlendMode("lighter");
 
     // Pulsing center (scaled to canvas)
     const minDim = Math.min(this.width, this.height);
     const pulse = Math.sin(this.time * 2) * 0.3 + 1;
     const centerSize = minDim * CONFIG.centerSizeRatio * pulse;
 
-    const gradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, centerSize);
-    gradient.addColorStop(0, `hsla(${this.hueOffset % 360}, 100%, 80%, 0.8)`);
-    gradient.addColorStop(0.3, `hsla(${(this.hueOffset + 30) % 360}, 90%, 60%, 0.4)`);
-    gradient.addColorStop(1, 'transparent');
+    // Create radial gradient for center glow (x0, y0, r0, x1, y1, r1, stops)
+    const gradient = Painter.colors.radialGradient(cx, cy, 0, cx, cy, centerSize, [
+      { offset: 0, color: `hsla(${this.hueOffset % 360}, 100%, 80%, 0.8)` },
+      {
+        offset: 0.3,
+        color: `hsla(${(this.hueOffset + 30) % 360}, 90%, 60%, 0.4)`,
+      },
+      { offset: 1, color: "transparent" },
+    ]);
 
-    ctx.fillStyle = gradient;
-    ctx.beginPath();
-    ctx.arc(cx, cy, centerSize, 0, TAU);
-    ctx.fill();
+    // Pass gradient directly as color to fillCircle
+    Painter.shapes.fillCircle(cx, cy, centerSize, gradient);
 
-    ctx.globalCompositeOperation = 'source-over';
+    Painter.effects.setBlendMode("source-over");
   }
 }
 
+/**
+ * Initialize Day 3 demo
+ * @param {HTMLCanvasElement} canvas - Target canvas element
+ * @returns {{stop: Function, game: GoldenVortexDemo}} Demo control object
+ */
 export default function day03(canvas) {
   const game = new GoldenVortexDemo(canvas);
   game.start();
