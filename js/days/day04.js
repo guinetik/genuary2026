@@ -20,6 +20,29 @@ const CONFIG = {
   wallHeight: 320,         // Short wall - lamp posts rise above it
   wallY: 250,              // Match sidewalkY so wall meets ground
   wallZ: 350,
+  wallExtent: 5000,        // Half-width of wall/street (scales for 4K)
+
+  // Building facade details
+  buildingExtraHeightMin: 40,
+  buildingExtraHeightMax: 160,
+  buildingDepth: 16,
+  buildingBaseColors: ['#121212', '#161616', '#1b1b1b'],
+  buildingTrimColor: '#242424',
+  buildingShadowColor: '#0f0f0f',
+  buildingEdgeColor: '#2a2a2a',
+  buildingCorniceHeight: 16,
+  buildingRoofStepMin: 18,
+  buildingRoofStepMax: 50,
+  buildingRoofInsetMin: 40,
+  buildingRoofInsetMax: 120,
+  buildingWindowWidth: 46,
+  buildingWindowHeight: 30,
+  buildingWindowGapX: 26,
+  buildingWindowGapY: 24,
+  buildingWindowInsetX: 36,
+  buildingWindowInsetY: 40,
+  buildingWindowLitChance: 0.45,
+  buildingWindowDarkColor: 'rgba(8, 8, 8, 0.85)',
 
   // Sky
   starCount: 80,
@@ -31,13 +54,14 @@ const CONFIG = {
   gutterWidth: 40,
 
   // Z positions - sidewalk needs LARGE Z range to be visible
-  streetNearZ: 50,         // Street closest to camera
+  streetNearZ: -100,       // Street extends much closer to camera for 4K
   gutterZ: 120,            // Gutter
   sidewalkZ: 180,          // Sidewalk from 180 to 350 = 170 units (BIG)
 
   // Pattern sections
   sectionWidth: 500,
   patternScale: 3,
+  visibleSections: 16,     // More sections for wider screens
 
   // Scrolling - tuned to match runner's stride
   scrollSpeed: 140,
@@ -45,10 +69,12 @@ const CONFIG = {
   // Lamp posts - spacing between them
   lampSpacing: 1000,
   lampHeight: 450,          // Taller than wall
+  lampRange: 2500,          // How far to render lamps
 
   // Sidewalk slabs
   slabWidth: 150,
   slabDepth: 50,           // Smaller depth for thinner sidewalk
+  slabRange: 2500,         // How far to render slabs
 
   // Runner sprite (120x120 frames, all 50 at 24fps for smooth motion)
   runnerSrc: './spritesheet_small.png',
@@ -142,6 +168,179 @@ class StreetArtDemo extends Game {
   _seededRandom(seed) {
     const x = Math.sin(seed * 9999) * 10000;
     return x - Math.floor(x);
+  }
+
+  /**
+   * Return a deterministic building spec for a wall section.
+   * @param {number} sectionIndex
+   * @returns {{height: number, baseColor: string, roofStepHeight: number, roofInset: number, windowSeed: number}}
+   */
+  _getBuildingSpec(sectionIndex) {
+    const seed = sectionIndex * 91.73;
+    const extra = CONFIG.buildingExtraHeightMin +
+      Math.floor(this._seededRandom(seed) * (CONFIG.buildingExtraHeightMax - CONFIG.buildingExtraHeightMin));
+    const colorIndex = Math.floor(this._seededRandom(seed * 1.1) * CONFIG.buildingBaseColors.length);
+    const roofStepHeight = this._seededRandom(seed * 1.2) > 0.55
+      ? CONFIG.buildingRoofStepMin +
+        Math.floor(this._seededRandom(seed * 1.3) * (CONFIG.buildingRoofStepMax - CONFIG.buildingRoofStepMin))
+      : 0;
+    const roofInset = CONFIG.buildingRoofInsetMin +
+      Math.floor(this._seededRandom(seed * 1.4) * (CONFIG.buildingRoofInsetMax - CONFIG.buildingRoofInsetMin));
+
+    return {
+      height: CONFIG.wallHeight + extra,
+      baseColor: CONFIG.buildingBaseColors[colorIndex],
+      roofStepHeight,
+      roofInset,
+      windowSeed: seed * 3.33,
+    };
+  }
+
+  /**
+   * Draw a filled quad from projected corners.
+   * @param {CanvasRenderingContext2D} ctx
+   * @param {number} cx
+   * @param {number} cy
+   * @param {{x: number, y: number}} tl
+   * @param {{x: number, y: number}} tr
+   * @param {{x: number, y: number}} br
+   * @param {{x: number, y: number}} bl
+   * @param {string} color
+   */
+  _drawQuad(ctx, cx, cy, tl, tr, br, bl, color) {
+    const points = this._orderScreenQuad([
+      { x: cx + tl.x, y: cy + tl.y },
+      { x: cx + tr.x, y: cy + tr.y },
+      { x: cx + br.x, y: cy + br.y },
+      { x: cx + bl.x, y: cy + bl.y },
+    ]);
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y);
+    ctx.lineTo(points[1].x, points[1].y);
+    ctx.lineTo(points[2].x, points[2].y);
+    ctx.lineTo(points[3].x, points[3].y);
+    ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.fill();
+  }
+
+  /**
+   * Order screen-space quad points to avoid self-intersection.
+   * @param {{x: number, y: number}[]} points
+   * @returns {{x: number, y: number}[]}
+   */
+  _orderScreenQuad(points) {
+    const center = points.reduce((acc, p) => {
+      acc.x += p.x;
+      acc.y += p.y;
+      return acc;
+    }, { x: 0, y: 0 });
+    center.x /= points.length;
+    center.y /= points.length;
+    return points
+      .slice()
+      .sort((a, b) => Math.atan2(a.y - center.y, a.x - center.x) -
+        Math.atan2(b.y - center.y, b.x - center.x));
+  }
+
+  /**
+   * Fill a quad using screen-space points.
+   * @param {CanvasRenderingContext2D} ctx
+   * @param {{x: number, y: number}[]} points
+   * @param {string} color
+   */
+  _fillScreenQuad(ctx, points, color) {
+    const ordered = this._orderScreenQuad(points);
+    ctx.beginPath();
+    ctx.moveTo(ordered[0].x, ordered[0].y);
+    ctx.lineTo(ordered[1].x, ordered[1].y);
+    ctx.lineTo(ordered[2].x, ordered[2].y);
+    ctx.lineTo(ordered[3].x, ordered[3].y);
+    ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.fill();
+  }
+
+  /**
+   * Render facade trims and windows for a building section.
+   * @param {CanvasRenderingContext2D} ctx
+   * @param {number} cx
+   * @param {number} cy
+   * @param {number} sectionIndex
+   * @param {number} worldLeft
+   * @param {number} worldRight
+   * @param {number} buildingTop
+   * @param {number} buildingBottom
+   * @param {number} facadeZ
+   */
+  _renderBuildingDetails(ctx, cx, cy, sectionIndex, worldLeft, worldRight, buildingTop, buildingBottom, facadeZ) {
+    const spec = this._getBuildingSpec(sectionIndex);
+    const corniceBottom = buildingTop + CONFIG.buildingCorniceHeight;
+    const corniceTL = this.camera.project(worldLeft, buildingTop, facadeZ);
+    const corniceTR = this.camera.project(worldRight, buildingTop, facadeZ);
+    const corniceBR = this.camera.project(worldRight, corniceBottom, facadeZ);
+    const corniceBL = this.camera.project(worldLeft, corniceBottom, facadeZ);
+    this._drawQuad(ctx, cx, cy, corniceTL, corniceTR, corniceBR, corniceBL, CONFIG.buildingTrimColor);
+
+    if (spec.roofStepHeight > 0) {
+      const stepLeft = worldLeft + spec.roofInset;
+      const stepRight = worldRight - spec.roofInset;
+      const stepTop = buildingTop - spec.roofStepHeight;
+      const stepBottom = buildingTop;
+      const stepTL = this.camera.project(stepLeft, stepTop, facadeZ);
+      const stepTR = this.camera.project(stepRight, stepTop, facadeZ);
+      const stepBR = this.camera.project(stepRight, stepBottom, facadeZ);
+      const stepBL = this.camera.project(stepLeft, stepBottom, facadeZ);
+      this._drawQuad(ctx, cx, cy, stepTL, stepTR, stepBR, stepBL, CONFIG.buildingTrimColor);
+    }
+
+    const edgeTop = this.camera.project(worldLeft, buildingTop, facadeZ);
+    const edgeBottom = this.camera.project(worldLeft, buildingBottom, facadeZ);
+    const edgeRightTop = this.camera.project(worldRight, buildingTop, facadeZ);
+    const edgeRightBottom = this.camera.project(worldRight, buildingBottom, facadeZ);
+    const edgeWidth = Math.max(1, 2 * ((edgeTop.scale + edgeRightTop.scale) * 0.5));
+    ctx.strokeStyle = CONFIG.buildingEdgeColor;
+    ctx.lineWidth = edgeWidth;
+    ctx.beginPath();
+    ctx.moveTo(cx + edgeTop.x, cy + edgeTop.y);
+    ctx.lineTo(cx + edgeBottom.x, cy + edgeBottom.y);
+    ctx.moveTo(cx + edgeRightTop.x, cy + edgeRightTop.y);
+    ctx.lineTo(cx + edgeRightBottom.x, cy + edgeRightBottom.y);
+    ctx.stroke();
+
+    const insetX = CONFIG.buildingWindowInsetX;
+    const insetY = CONFIG.buildingWindowInsetY + CONFIG.buildingCorniceHeight;
+    const availableWidth = (worldRight - worldLeft) - insetX * 2;
+    const availableHeight = (buildingBottom - buildingTop) - insetY * 2;
+    const windowW = CONFIG.buildingWindowWidth;
+    const windowH = CONFIG.buildingWindowHeight;
+    const gapX = CONFIG.buildingWindowGapX;
+    const gapY = CONFIG.buildingWindowGapY;
+    const cols = Math.max(1, Math.floor((availableWidth + gapX) / (windowW + gapX)));
+    const rows = Math.max(1, Math.floor((availableHeight + gapY) / (windowH + gapY)));
+    const gridWidth = cols * windowW + (cols - 1) * gapX;
+    const gridHeight = rows * windowH + (rows - 1) * gapY;
+    const startX = worldLeft + insetX + (availableWidth - gridWidth) * 0.5;
+    const startY = buildingTop + insetY + (availableHeight - gridHeight) * 0.5;
+    const litColor = `hsla(${CONFIG.hue}, 70%, 65%, 0.85)`;
+
+    for (let row = 0; row < rows; row++) {
+      const wy1 = startY + row * (windowH + gapY);
+      const wy2 = wy1 + windowH;
+      for (let col = 0; col < cols; col++) {
+        const wx1 = startX + col * (windowW + gapX);
+        const wx2 = wx1 + windowW;
+        const seed = spec.windowSeed + row * 13.1 + col * 7.7;
+        const isLit = this._seededRandom(seed) < CONFIG.buildingWindowLitChance;
+        const color = isLit ? litColor : CONFIG.buildingWindowDarkColor;
+
+        const tl = this.camera.project(wx1, wy1, facadeZ);
+        const tr = this.camera.project(wx2, wy1, facadeZ);
+        const br = this.camera.project(wx2, wy2, facadeZ);
+        const bl = this.camera.project(wx1, wy2, facadeZ);
+        this._drawQuad(ctx, cx, cy, tl, tr, br, bl, color);
+      }
+    }
   }
 
   _getPatternGenerators() {
@@ -444,9 +643,9 @@ class StreetArtDemo extends Game {
 
     // Draw scene
     this._renderSky(ctx, w, h);
+    this._renderSidewalk(ctx, cx, cy, w, h);
     this._renderWall(ctx, cx, cy);
     this._renderPatternSections(ctx, cx, cy);
-    this._renderSidewalk(ctx, cx, cy, w, h);
     this._renderRunner(ctx, cx, cy);
     this._renderLampPosts(ctx, cx, cy);
   }
@@ -520,8 +719,8 @@ class StreetArtDemo extends Game {
   }
 
   _renderWall(ctx, cx, cy) {
-    const wallLeft = -2000;
-    const wallRight = 2000;
+    const wallLeft = -CONFIG.wallExtent;
+    const wallRight = CONFIG.wallExtent;
     const wallTop = CONFIG.wallY - CONFIG.wallHeight;
     const wallBottom = CONFIG.wallY;
     const wallZ = CONFIG.wallZ;
@@ -543,13 +742,12 @@ class StreetArtDemo extends Game {
 
   _renderPatternSections(ctx, cx, cy) {
     const sectionWidth = CONFIG.sectionWidth;
-    const wallTop = CONFIG.wallY - CONFIG.wallHeight;
     const wallBottom = CONFIG.wallY;
-    const wallZ = CONFIG.wallZ - 1;
+    const facadeZ = CONFIG.wallZ - CONFIG.buildingDepth;
 
     // Calculate visible sections based on scroll
-    const startSection = Math.floor(this.scrollOffset / sectionWidth) - 2;
-    const visibleSections = 10;
+    const startSection = Math.floor(this.scrollOffset / sectionWidth) - 3;
+    const visibleSections = CONFIG.visibleSections;
 
     for (let i = 0; i < visibleSections; i++) {
       const sectionIndex = startSection + i;
@@ -558,10 +756,21 @@ class StreetArtDemo extends Game {
       const worldLeft = sectionIndex * sectionWidth - this.scrollOffset;
       const worldRight = worldLeft + sectionWidth;
 
-      const tl = this.camera.project(worldLeft, wallTop, wallZ);
-      const tr = this.camera.project(worldRight, wallTop, wallZ);
-      const br = this.camera.project(worldRight, wallBottom, wallZ);
-      const bl = this.camera.project(worldLeft, wallBottom, wallZ);
+      const spec = this._getBuildingSpec(sectionIndex);
+      const buildingTop = CONFIG.wallY - spec.height;
+      const tl = this.camera.project(worldLeft, buildingTop, facadeZ);
+      const tr = this.camera.project(worldRight, buildingTop, facadeZ);
+      const br = this.camera.project(worldRight, wallBottom, facadeZ);
+      const bl = this.camera.project(worldLeft, wallBottom, facadeZ);
+
+      this._drawQuad(ctx, cx, cy, tl, tr, br, bl, spec.baseColor);
+
+      const shadowTopY = wallBottom - CONFIG.buildingCorniceHeight;
+      const shadowTL = this.camera.project(worldLeft, shadowTopY, facadeZ);
+      const shadowTR = this.camera.project(worldRight, shadowTopY, facadeZ);
+      const shadowBR = this.camera.project(worldRight, wallBottom, facadeZ);
+      const shadowBL = this.camera.project(worldLeft, wallBottom, facadeZ);
+      this._drawQuad(ctx, cx, cy, shadowTL, shadowTR, shadowBR, shadowBL, CONFIG.buildingShadowColor);
 
       // Skip if off screen
       const minX = Math.min(tl.x, bl.x);
@@ -603,6 +812,7 @@ class StreetArtDemo extends Game {
         const maxQY = Math.max(screenTL.y, screenTR.y, screenBR.y, screenBL.y);
 
         // Draw stretched to bounding box (clipped to quad)
+        ctx.imageSmoothingEnabled = false;
         ctx.drawImage(collage, minQX, minQY, maxQX - minQX, maxQY - minQY);
         ctx.restore();
       } else {
@@ -618,6 +828,8 @@ class StreetArtDemo extends Game {
         ctx.fillStyle = `hsl(${hue}, 60%, 20%)`;
         ctx.fill();
       }
+
+      this._renderBuildingDetails(ctx, cx, cy, sectionIndex, worldLeft, worldRight, buildingTop, wallBottom, facadeZ);
 
       // Black section divider
       ctx.strokeStyle = '#000';
@@ -636,51 +848,71 @@ class StreetArtDemo extends Game {
     const sidewalkZ = CONFIG.sidewalkZ;
     const gutterZ = CONFIG.gutterZ;
     const streetNearZ = CONFIG.streetNearZ;
+    const extent = CONFIG.wallExtent;
 
-    // === STREET (big dark area, lowest level) ===
-    const streetFL = this.camera.project(-2000, streetY, streetNearZ);
-    const streetFR = this.camera.project(2000, streetY, streetNearZ);
-    const streetBL = this.camera.project(-2000, streetY, gutterZ);
-    const streetBR = this.camera.project(2000, streetY, gutterZ);
+    const wallBaseL = this.camera.project(-extent, sidewalkY, wallZ);
+    const wallBaseR = this.camera.project(extent, sidewalkY, wallZ);
+    const baseLX = cx + wallBaseL.x;
+    const baseRX = cx + wallBaseR.x;
+    const baseLY = cy + wallBaseL.y;
+    const baseRY = cy + wallBaseR.y;
+    const leftIsL = baseLX <= baseRX;
+    const topLeftX = leftIsL ? baseLX : baseRX;
+    const topLeftY = leftIsL ? baseLY : baseRY;
+    const topRightX = leftIsL ? baseRX : baseLX;
+    const topRightY = leftIsL ? baseRY : baseLY;
 
+    ctx.save();
     ctx.beginPath();
     ctx.moveTo(0, h);
     ctx.lineTo(w, h);
-    ctx.lineTo(cx + streetBR.x, cy + streetBR.y);
-    ctx.lineTo(cx + streetBL.x, cy + streetBL.y);
+    ctx.lineTo(topRightX, topRightY);
+    ctx.lineTo(topLeftX, topLeftY);
     ctx.closePath();
+    ctx.clip();
+
+    // === STREET (big dark area, lowest level) ===
+    const streetFL = this.camera.project(-extent, streetY, streetNearZ);
+    const streetFR = this.camera.project(extent, streetY, streetNearZ);
+    const streetBL = this.camera.project(-extent, streetY, gutterZ);
+    const streetBR = this.camera.project(extent, streetY, gutterZ);
+
     ctx.fillStyle = CONFIG.streetColor;
-    ctx.fill();
+    const streetFrontY = Math.min(cy + streetFL.y, cy + streetFR.y);
+    const streetFillY = Math.max(0, Math.min(h, Math.floor(streetFrontY)));
+    ctx.fillRect(0, streetFillY, w, h - streetFillY);
+    this._fillScreenQuad(ctx, [
+      { x: cx + streetFL.x, y: cy + streetFL.y },
+      { x: cx + streetFR.x, y: cy + streetFR.y },
+      { x: cx + streetBR.x, y: cy + streetBR.y },
+      { x: cx + streetBL.x, y: cy + streetBL.y },
+    ], CONFIG.streetColor);
 
     // === GUTTER (narrow dark channel) ===
-    const gutterFL = this.camera.project(-2000, streetY, gutterZ);
-    const gutterFR = this.camera.project(2000, streetY, gutterZ);
-    const gutterBL = this.camera.project(-2000, streetY, sidewalkZ);
-    const gutterBR = this.camera.project(2000, streetY, sidewalkZ);
+    const gutterFL = this.camera.project(-extent, streetY, gutterZ);
+    const gutterFR = this.camera.project(extent, streetY, gutterZ);
+    const gutterBL = this.camera.project(-extent, streetY, sidewalkZ);
+    const gutterBR = this.camera.project(extent, streetY, sidewalkZ);
 
-    ctx.beginPath();
-    ctx.moveTo(cx + gutterFL.x, cy + gutterFL.y);
-    ctx.lineTo(cx + gutterFR.x, cy + gutterFR.y);
-    ctx.lineTo(cx + gutterBR.x, cy + gutterBR.y);
-    ctx.lineTo(cx + gutterBL.x, cy + gutterBL.y);
-    ctx.closePath();
-    ctx.fillStyle = CONFIG.gutterColor;
-    ctx.fill();
+    this._fillScreenQuad(ctx, [
+      { x: cx + gutterFL.x, y: cy + gutterFL.y },
+      { x: cx + gutterFR.x, y: cy + gutterFR.y },
+      { x: cx + gutterBR.x, y: cy + gutterBR.y },
+      { x: cx + gutterBL.x, y: cy + gutterBL.y },
+    ], CONFIG.gutterColor);
 
     // === CURB FACE (3D vertical face showing the step) ===
-    const curbTopL = this.camera.project(-2000, sidewalkY, sidewalkZ);
-    const curbTopR = this.camera.project(2000, sidewalkY, sidewalkZ);
-    const curbBotL = this.camera.project(-2000, streetY, sidewalkZ);
-    const curbBotR = this.camera.project(2000, streetY, sidewalkZ);
+    const curbTopL = this.camera.project(-extent, sidewalkY, sidewalkZ);
+    const curbTopR = this.camera.project(extent, sidewalkY, sidewalkZ);
+    const curbBotL = this.camera.project(-extent, streetY, sidewalkZ);
+    const curbBotR = this.camera.project(extent, streetY, sidewalkZ);
 
-    ctx.beginPath();
-    ctx.moveTo(cx + curbTopL.x, cy + curbTopL.y);
-    ctx.lineTo(cx + curbTopR.x, cy + curbTopR.y);
-    ctx.lineTo(cx + curbBotR.x, cy + curbBotR.y);
-    ctx.lineTo(cx + curbBotL.x, cy + curbBotL.y);
-    ctx.closePath();
-    ctx.fillStyle = '#333';
-    ctx.fill();
+    this._fillScreenQuad(ctx, [
+      { x: cx + curbTopL.x, y: cy + curbTopL.y },
+      { x: cx + curbTopR.x, y: cy + curbTopR.y },
+      { x: cx + curbBotR.x, y: cy + curbBotR.y },
+      { x: cx + curbBotL.x, y: cy + curbBotL.y },
+    ], '#333');
 
     // Curb edge highlight
     ctx.strokeStyle = '#444';
@@ -691,19 +923,17 @@ class StreetArtDemo extends Game {
     ctx.stroke();
 
     // === SIDEWALK (thin strip against wall, highest level) ===
-    const swFL = this.camera.project(-2000, sidewalkY, sidewalkZ);
-    const swFR = this.camera.project(2000, sidewalkY, sidewalkZ);
-    const swBL = this.camera.project(-2000, sidewalkY, wallZ);
-    const swBR = this.camera.project(2000, sidewalkY, wallZ);
+    const swFL = this.camera.project(-extent, sidewalkY, sidewalkZ);
+    const swFR = this.camera.project(extent, sidewalkY, sidewalkZ);
+    const swBL = this.camera.project(-extent, sidewalkY, wallZ);
+    const swBR = this.camera.project(extent, sidewalkY, wallZ);
 
-    ctx.beginPath();
-    ctx.moveTo(cx + swFL.x, cy + swFL.y);
-    ctx.lineTo(cx + swFR.x, cy + swFR.y);
-    ctx.lineTo(cx + swBR.x, cy + swBR.y);
-    ctx.lineTo(cx + swBL.x, cy + swBL.y);
-    ctx.closePath();
-    ctx.fillStyle = CONFIG.sidewalkColor;
-    ctx.fill();
+    this._fillScreenQuad(ctx, [
+      { x: cx + swFL.x, y: cy + swFL.y },
+      { x: cx + swFR.x, y: cy + swFR.y },
+      { x: cx + swBR.x, y: cy + swBR.y },
+      { x: cx + swBL.x, y: cy + swBL.y },
+    ], CONFIG.sidewalkColor);
 
     // === SIDEWALK SLAB GRID (vertical lines only, chunky/stepped for low-res look) ===
     const slabW = CONFIG.slabWidth;
@@ -711,8 +941,23 @@ class StreetArtDemo extends Game {
 
     // Vertical slab lines (SCROLL with scene) - thick stepped
     ctx.fillStyle = CONFIG.slabLineColor;
-    const startX = Math.floor((this.scrollOffset - 1000) / slabW) * slabW;
-    for (let wx = startX; wx < this.scrollOffset + 1000; wx += slabW) {
+    const sidewalkClip = this._orderScreenQuad([
+      { x: cx + swFL.x, y: cy + swFL.y },
+      { x: cx + swFR.x, y: cy + swFR.y },
+      { x: cx + swBR.x, y: cy + swBR.y },
+      { x: cx + swBL.x, y: cy + swBL.y },
+    ]);
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(sidewalkClip[0].x, sidewalkClip[0].y);
+    ctx.lineTo(sidewalkClip[1].x, sidewalkClip[1].y);
+    ctx.lineTo(sidewalkClip[2].x, sidewalkClip[2].y);
+    ctx.lineTo(sidewalkClip[3].x, sidewalkClip[3].y);
+    ctx.closePath();
+    ctx.clip();
+    const slabRange = CONFIG.slabRange;
+    const startX = Math.floor((this.scrollOffset - slabRange) / slabW) * slabW;
+    for (let wx = startX; wx < this.scrollOffset + slabRange; wx += slabW) {
       const worldX = wx - this.scrollOffset;
       const near = this.camera.project(worldX, sidewalkY, sidewalkZ);
       const far = this.camera.project(worldX, sidewalkY, wallZ);
@@ -727,6 +972,8 @@ class StreetArtDemo extends Game {
         ctx.fillRect(x1, py, gridPixel, gridPixel);
       }
     }
+    ctx.restore();
+    ctx.restore();
   }
 
   _renderRunner(ctx, cx, cy) {
@@ -785,10 +1032,11 @@ class StreetArtDemo extends Game {
     const spacing = CONFIG.lampSpacing;
     const groundY = CONFIG.sidewalkY;
     const lampZ = (CONFIG.sidewalkZ + CONFIG.wallZ) / 2;  // Middle of sidewalk
+    const lampRange = CONFIG.lampRange;
 
     // Calculate which lamp posts are visible (wider range)
-    const startLamp = Math.floor((this.scrollOffset - 1200) / spacing);
-    const endLamp = Math.ceil((this.scrollOffset + 1200) / spacing);
+    const startLamp = Math.floor((this.scrollOffset - lampRange) / spacing);
+    const endLamp = Math.ceil((this.scrollOffset + lampRange) / spacing);
 
     for (let i = startLamp; i <= endLamp; i++) {
       // World X position (scrolls with scene)
