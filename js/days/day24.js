@@ -10,7 +10,7 @@
  * Click to toggle between modes. Watch the difference!
  */
 
-import { Game } from '@guinetik/gcanvas';
+import { Game, Painter } from '@guinetik/gcanvas';
 
 // Mode constants
 const MODE = {
@@ -144,6 +144,7 @@ class PerfectionistNightmare extends Game {
 
   init() {
     super.init();
+    Painter.init(this.ctx);
 
     // State
     this.time = 0;
@@ -222,14 +223,11 @@ class PerfectionistNightmare extends Game {
     this.circles.forEach((c) => c.reset());
     
     // Clear main canvas thoroughly
-    const ctx = this.ctx;
-    ctx.save();
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.shadowBlur = 0;
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.fillStyle = this.backgroundColor;
-    ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-    ctx.restore();
+    Painter.save();
+    Painter.effects.clearShadow();
+    Painter.effects.setBlendMode('source-over');
+    Painter.shapes.rect(0, 0, this.canvas.width, this.canvas.height, this.backgroundColor);
+    Painter.restore();
     
     // Recreate offscreen canvas entirely (guarantees clean state)
     this.offscreenCanvas = document.createElement('canvas');
@@ -365,14 +363,11 @@ class PerfectionistNightmare extends Game {
   }
 
   render() {
-    const ctx = this.ctx;
-
     // Draw baked trails from offscreen canvas as the background
     if (this.offscreenCanvas) {
-      ctx.drawImage(this.offscreenCanvas, 0, 0);
+      this.ctx.drawImage(this.offscreenCanvas, 0, 0);
     } else {
-      ctx.fillStyle = this.backgroundColor;
-      ctx.fillRect(0, 0, this.width, this.height);
+      Painter.shapes.rect(0, 0, this.width, this.height, this.backgroundColor);
     }
 
     // Draw only active (recent) paths with full effects
@@ -383,7 +378,7 @@ class PerfectionistNightmare extends Game {
     });
 
     // Reset shadow for text
-    ctx.shadowBlur = 0;
+    Painter.effects.clearShadow();
 
     // Render UI text
     this.renderUI();
@@ -401,10 +396,8 @@ class PerfectionistNightmare extends Game {
 
     // Multiple glow layers
     CONFIG.glowLayers.forEach((blur) => {
-      ctx.shadowBlur = blur;
-      ctx.shadowColor = `hsla(${circle.hue}, 100%, 60%, 0.4)`;
-      ctx.strokeStyle = `hsla(${circle.hue}, 100%, ${50 + blur}%, 0.3)`;
-      ctx.lineWidth = 3;
+      Painter.effects.dropShadow(`hsla(${circle.hue}, 100%, 60%, 0.4)`, blur);
+      Painter.colors.stroke(`hsla(${circle.hue}, 100%, ${50 + blur}%, 0.3)`, 3);
       ctx.beginPath();
       ctx.moveTo(path[0].x, path[0].y);
 
@@ -417,11 +410,10 @@ class PerfectionistNightmare extends Game {
       ctx.stroke();
     });
 
-    ctx.shadowBlur = 0;
+    Painter.effects.clearShadow();
 
     // Solid core line
-    ctx.strokeStyle = `hsla(${circle.hue}, 100%, 70%, 0.9)`;
-    ctx.lineWidth = 2;
+    Painter.colors.stroke(`hsla(${circle.hue}, 100%, 70%, 0.9)`, 2);
     ctx.beginPath();
     ctx.moveTo(path[0].x, path[0].y);
     for (let i = 1; i < path.length; i++) {
@@ -435,34 +427,30 @@ class PerfectionistNightmare extends Game {
    * @param {SpiroCircle} circle
    */
   renderCircleGeometry(circle) {
-    const ctx = this.ctx;
-
     // Draw circles with glow
-    ctx.shadowBlur = 30;
-    ctx.shadowColor = `hsla(${circle.hue}, 100%, 60%, 0.5)`;
-    ctx.strokeStyle = `hsla(${circle.hue}, 80%, 60%, 0.2)`;
-    ctx.lineWidth = 2;
+    Painter.effects.dropShadow(`hsla(${circle.hue}, 100%, 60%, 0.5)`, 30);
 
     // Inner circle
-    ctx.beginPath();
-    ctx.arc(circle.cx1, circle.cy1, circle.innerR, 0, Math.PI * 2);
-    ctx.stroke();
+    Painter.shapes.strokeCircle(
+      circle.cx1, circle.cy1, circle.innerR,
+      `hsla(${circle.hue}, 80%, 60%, 0.2)`, 2
+    );
 
     // Trace circle
-    ctx.beginPath();
-    ctx.arc(circle.cx2, circle.cy2, circle.traceR, 0, Math.PI * 2);
-    ctx.stroke();
+    Painter.shapes.strokeCircle(
+      circle.cx2, circle.cy2, circle.traceR,
+      `hsla(${circle.hue}, 80%, 60%, 0.2)`, 2
+    );
 
     // Connecting lines
-    ctx.shadowBlur = 15;
-    ctx.strokeStyle = `hsla(${circle.hue}, 70%, 60%, 0.15)`;
-    ctx.lineWidth = 1;
+    Painter.effects.dropShadow(`hsla(${circle.hue}, 100%, 60%, 0.5)`, 15);
+    const ctx = this.ctx;
     ctx.beginPath();
     ctx.moveTo(this.centerX, this.centerY);
     ctx.lineTo(circle.cx1, circle.cy1);
     ctx.lineTo(circle.cx2, circle.cy2);
     ctx.lineTo(circle.px, circle.py);
-    ctx.stroke();
+    Painter.colors.stroke(`hsla(${circle.hue}, 70%, 60%, 0.15)`, 1);
   }
 
   /**
@@ -470,27 +458,20 @@ class PerfectionistNightmare extends Game {
    * @param {SpiroCircle} circle
    */
   renderTracingPoint(circle) {
-    const ctx = this.ctx;
-
-    // Radial gradient for glow
-    const gradient = ctx.createRadialGradient(
-      circle.px,
-      circle.py,
-      0,
-      circle.px,
-      circle.py,
-      15
+    // Radial gradient for glow (x0, y0, r0, x1, y1, r1, stops)
+    const gradient = Painter.colors.radialGradient(
+      circle.px, circle.py, 0,
+      circle.px, circle.py, 15,
+      [
+        { offset: 0, color: `hsla(${circle.hue}, 100%, 80%, 1)` },
+        { offset: 0.5, color: `hsla(${circle.hue}, 100%, 60%, 0.6)` },
+        { offset: 1, color: `hsla(${circle.hue}, 100%, 40%, 0)` },
+      ]
     );
-    gradient.addColorStop(0, `hsla(${circle.hue}, 100%, 80%, 1)`);
-    gradient.addColorStop(0.5, `hsla(${circle.hue}, 100%, 60%, 0.6)`);
-    gradient.addColorStop(1, `hsla(${circle.hue}, 100%, 40%, 0)`);
 
-    ctx.shadowBlur = 25;
-    ctx.shadowColor = `hsla(${circle.hue}, 100%, 60%, 0.8)`;
-    ctx.fillStyle = gradient;
-    ctx.beginPath();
-    ctx.arc(circle.px, circle.py, 6, 0, Math.PI * 2);
-    ctx.fill();
+    Painter.effects.dropShadow(`hsla(${circle.hue}, 100%, 60%, 0.8)`, 25);
+    // fillCircle takes (x, y, radius, color) - pass gradient as color
+    Painter.shapes.fillCircle(circle.px, circle.py, 15, gradient);
   }
 
   /**
@@ -512,14 +493,14 @@ class PerfectionistNightmare extends Game {
    * Render UI text overlays
    */
   renderUI() {
-    const ctx = this.ctx;
     const fontSize = 12 * this.scale;
+    const fontLarge = 16 * this.scale;
+    const font = `${fontSize}px monospace`;
+    const fontL = `${fontLarge}px monospace`;
 
-    // Info text
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
-    ctx.font = `${fontSize}px monospace`;
-    ctx.fillText(this.getModeLabel(), 20, 30);
-    ctx.fillText(`θ = ${this.time.toFixed(2)}`, 20, 50);
+    // Info text - fillText(text, x, y, color, font)
+    Painter.text.fillText(this.getModeLabel(), 20, 30, 'rgba(255, 255, 255, 0.15)', font);
+    Painter.text.fillText(`θ = ${this.time.toFixed(2)}`, 20, 50, 'rgba(255, 255, 255, 0.15)', font);
 
     // Conditional messages
     if (
@@ -527,9 +508,7 @@ class PerfectionistNightmare extends Game {
       this.time > CONFIG.rationalMessageStart &&
       this.time < CONFIG.rationalMessageEnd
     ) {
-      ctx.fillStyle = 'rgba(255, 100, 100, 0.3)';
-      ctx.font = `${16 * this.scale}px monospace`;
-      ctx.fillText('we will meet again', 20, 80);
+      Painter.text.fillText('we will meet again', 20, 80, 'rgba(255, 100, 100, 0.3)', fontL);
     }
 
     if (
@@ -537,9 +516,7 @@ class PerfectionistNightmare extends Game {
       this.time > CONFIG.irrationalMessageStart &&
       this.time < CONFIG.irrationalMessageEnd
     ) {
-      ctx.fillStyle = 'rgba(100, 200, 255, 0.3)';
-      ctx.font = `${16 * this.scale}px monospace`;
-      ctx.fillText('never closing...', 20, 80);
+      Painter.text.fillText('never closing...', 20, 80, 'rgba(100, 200, 255, 0.3)', fontL);
     }
 
     if (
@@ -547,9 +524,7 @@ class PerfectionistNightmare extends Game {
       this.time > CONFIG.chaosMessageStart &&
       this.time < CONFIG.chaosMessageEnd
     ) {
-      ctx.fillStyle = 'rgba(255, 150, 255, 0.3)';
-      ctx.font = `${16 * this.scale}px monospace`;
-      ctx.fillText('lost in infinity...', 20, 80);
+      Painter.text.fillText('lost in infinity...', 20, 80, 'rgba(255, 150, 255, 0.3)', fontL);
     }
   }
 }
