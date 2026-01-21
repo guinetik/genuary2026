@@ -19,7 +19,20 @@
  * - Press 'ESC' to stop auto-drawing
  */
 
-import { Game, Painter, Keys, Mouse, Button, Scene } from '@guinetik/gcanvas';
+import {
+  Game,
+  Painter,
+  Keys,
+  Mouse,
+  Button,
+  ToggleButton,
+  Scene,
+  GameObject,
+  Circle,
+  Rectangle,
+  Group,
+  HorizontalLayout,
+} from '@guinetik/gcanvas';
 
 const CONFIG = {
   colors: {
@@ -37,56 +50,38 @@ const CONFIG = {
     textDim: 'rgba(0, 255, 0, 0.4)',
   },
 
-  // Frame dimensions (proportions)
   frame: {
-    padding: 0.08,        // Padding around screen
+    padding: 0.08,
     cornerRadius: 20,
-    knobSize: 0.07,       // Knob radius relative to min dimension
-    knobY: 0.84,          // Knob Y position (proportion of height)
+    knobSize: 0.07,
+    knobY: 0.84,
   },
 
-  // Drawing
   line: {
     width: 2,
-    maxPoints: 10000,     // Limit for performance
-    sensitivity: 0.3,     // How much knob rotation moves cursor
+    maxPoints: 10000,
+    sensitivity: 0.6,   // Higher = cursor moves more per knob rotation
   },
 
-  // Grid
   grid: {
-    spacing: 20,          // Grid cell size in pixels
+    spacing: 20,
   },
 
-  // Knob physics
   knob: {
-    friction: 0.92,
+    friction: 0.75,      // Higher friction = stops faster
     maxSpeed: 15,
   },
 
-  // Sand physics for clear animation
-  sand: {
-    gravity: 400,
-    maxParticles: 500,
-    friction: 0.98,
-    bounce: 0.3,
-  },
-
-  // Auto-draw settings
   autoDraw: {
-    speed: 150,           // Pixels per second
-    knobRotationScale: 0.02, // How much knobs rotate per pixel moved
+    speed: 150,
+    knobRotationScale: 0.02,
   },
 };
 
-// Preset SVG patterns for demo
+// Preset SVG patterns
 const PRESET_PATTERNS = {
-  // Guinetik logo (two interlocking shapes)
   logo: `M 0 30.276 L 0 9.358 L 0 0.845 L 17.139 0.845 L 17.139 -5.247 L 5.189 -5.247 L 5.189 -19.273 L 0 -19.273 L 0 -4.975 L 0 0.845 L -8.618 0.845 L -25.071 0.845 L -25.071 9.757 L -7.593 9.757 L -7.593 30.276 L 0 30.276 Z M 50 20.33 L 50 6.031 L 50 0.211 L 75.068 0.211 L 75.068 -8.702 L 57.59 -8.702 L 57.59 -29.22 L 50 -29.22 L 50 -8.303 L 50 0.211 L 32.859 0.211 L 32.859 6.304 L 44.806 6.304 L 44.806 20.33 L 50 20.33 Z`,
-  
-  // Simple star
   star: `M 0.5 0.1 L 0.6 0.4 L 0.9 0.4 L 0.65 0.6 L 0.75 0.9 L 0.5 0.7 L 0.25 0.9 L 0.35 0.6 L 0.1 0.4 L 0.4 0.4 Z`,
-  
-  // Spiral
   spiral: (() => {
     let path = 'M 0.5 0.5';
     for (let i = 0; i < 720; i += 5) {
@@ -98,13 +93,499 @@ const PRESET_PATTERNS = {
     }
     return path;
   })(),
-  
-  // House
   house: `M 0.2 0.7 L 0.2 0.4 L 0.5 0.15 L 0.8 0.4 L 0.8 0.7 L 0.2 0.7 M 0.35 0.7 L 0.35 0.5 L 0.5 0.5 L 0.5 0.7 M 0.6 0.45 L 0.7 0.45 L 0.7 0.55 L 0.6 0.55 L 0.6 0.45`,
 };
 
 /**
- * Etch-a-Sketch Demo
+ * Knob - A rotary control GameObject using Circle shapes
+ */
+class Knob extends GameObject {
+  constructor(game, options = {}) {
+    super(game, options);
+
+    this.radius = options.radius || 40;
+    this.label = options.label || '';
+    this.axis = options.label === 'X' ? 'x' : 'y'; // Which axis this knob controls
+    this.angle = 0;
+    this.velocity = 0;
+    this.dragging = false;
+    this.returning = false;
+    this.lastAngle = 0;
+    this.dragStartAngle = 0;
+    
+    // Grid mode (digital) state
+    this.accumulatedRotation = 0;
+    this.gridStepThreshold = Math.PI / 6; // 30° of rotation triggers one grid step
+    this.discreteAngle = 0; // Snapped angle for grid mode display
+
+    // Create visual elements
+    this.createVisuals();
+
+    // Set up interaction
+    this.interactive = true;
+    this.setupInteraction();
+  }
+
+  createVisuals() {
+    const r = this.radius;
+
+    // Outer ring (glows when active)
+    this.outerRing = new Circle(r + 4, {
+      color: CONFIG.colors.frameBorder,
+    });
+
+    // Main knob body
+    this.body = new Circle(r, {
+      color: CONFIG.colors.knob,
+    });
+
+    // Center highlight (centered in knob)
+    this.highlight = new Circle(r * 0.2, {
+      x: 0,
+      y: 0,
+      color: CONFIG.colors.knobHighlight,
+    });
+
+    // Position indicator dot - start at 12 o'clock (top)
+    this.indicator = new Circle(4, {
+      x: 0,
+      y: -r * 0.7,
+      color: CONFIG.colors.knobRing,
+    });
+
+    // Grip lines group
+    this.gripLines = [];
+    const gripCount = 8;
+    for (let i = 0; i < gripCount; i++) {
+      const angle = (i / gripCount) * Math.PI * 2;
+      this.gripLines.push({
+        angle,
+        innerR: r * 0.5,
+        outerR: r * 0.85,
+      });
+    }
+  }
+
+  setupInteraction() {
+    this.on('inputdown', (e) => {
+      this.dragging = true;
+      this.lastAngle = this.angle;
+      this.accumulatedRotation = 0; // Reset for grid mode
+      this.outerRing.color = CONFIG.colors.knobRing;
+    });
+
+    this.game.events.on('mouseup', () => {
+      if (this.dragging) {
+        this.dragging = false;
+        this.returning = true; // Start returning to 0
+        this.accumulatedRotation = 0;
+        this.discreteAngle = 0;
+        this.outerRing.color = CONFIG.colors.frameBorder;
+      }
+    });
+
+    this.game.events.on('mousemove', () => {
+      if (this.dragging) {
+        // Convert knob position to canvas coordinates (scene is centered)
+        const knobCanvasX = this.game.width / 2 + this.x;
+        const knobCanvasY = this.game.height / 2 + this.y;
+        
+        // Angle from knob center to mouse, offset so 12 o'clock = 0
+        const mouseAngle = Math.atan2(
+          Mouse.y - knobCanvasY,
+          Mouse.x - knobCanvasX
+        ) + Math.PI / 2;
+        
+        // Calculate delta for velocity (handle wrap-around)
+        let delta = mouseAngle - this.lastAngle;
+        if (delta > Math.PI) delta -= Math.PI * 2;
+        if (delta < -Math.PI) delta += Math.PI * 2;
+        
+        if (this.game.gridMode) {
+          // DIGITAL MODE: Accumulate rotation and trigger discrete steps
+          this.accumulatedRotation += delta;
+          
+          // Check if we've rotated enough for a grid step
+          while (Math.abs(this.accumulatedRotation) >= this.gridStepThreshold) {
+            const direction = this.accumulatedRotation > 0 ? 1 : -1;
+            const gridSize = CONFIG.grid.spacing;
+            
+            // Move cursor one grid cell
+            if (this.axis === 'x') {
+              this.game.screen.moveCursor(gridSize * direction, 0);
+            } else {
+              this.game.screen.moveCursor(0, gridSize * direction);
+            }
+            
+            // Snap knob to discrete angle (visual "click")
+            this.discreteAngle += direction * (Math.PI / 4); // 45° visual snap
+            
+            // Consume the accumulated rotation
+            this.accumulatedRotation -= direction * this.gridStepThreshold;
+          }
+          
+          // In grid mode, display the discrete snapped angle
+          this.angle = this.discreteAngle;
+        } else {
+          // ANALOG MODE: Continuous rotation
+          this.angle = mouseAngle;
+          this.velocity = delta * 3;
+        }
+        
+        this.lastAngle = mouseAngle;
+      }
+    });
+  }
+
+  update(dt) {
+    super.update(dt);
+
+    if (this.dragging) {
+      // While dragging, angle is set directly in mousemove
+      // Don't apply friction or velocity
+    } else if (this.returning) {
+      // Return to 0 after mouse release
+      const returnSpeed = 8;
+      this.angle *= Math.exp(-returnSpeed * dt);
+      this.discreteAngle *= Math.exp(-returnSpeed * dt); // Also return discrete angle
+      
+      // Snap to 0 when close
+      if (Math.abs(this.angle) < 0.01) {
+        this.angle = 0;
+        this.discreteAngle = 0;
+        this.returning = false;
+      }
+      this.velocity = 0;
+    } else {
+      // Keyboard input mode - apply velocity to angle and friction
+      this.angle += this.velocity * dt * 2;
+      this.velocity *= CONFIG.knob.friction;
+      
+      // Stop if very slow
+      if (Math.abs(this.velocity) < 0.01) {
+        this.velocity = 0;
+      }
+    }
+
+    // Update indicator position (offset by -PI/2 so it starts at 12 o'clock)
+    const displayAngle = this.angle - Math.PI / 2;
+    this.indicator.x = Math.cos(displayAngle) * this.radius * 0.7;
+    this.indicator.y = Math.sin(displayAngle) * this.radius * 0.7;
+    
+    // Indicator color: cyan in grid mode, green in analog mode
+    this.indicator.color = this.game.gridMode ? '#0ff' : CONFIG.colors.knobRing;
+  }
+
+  getBounds() {
+    return {
+      x: this.x,
+      y: this.y,
+      width: this.radius * 2,
+      height: this.radius * 2,
+    };
+  }
+
+  draw() {
+    super.draw();
+    const ctx = Painter.ctx;
+
+    // Draw outer ring
+    this.outerRing.render();
+
+    // Draw body
+    this.body.render();
+
+    // Draw grip lines
+    ctx.save();
+    ctx.strokeStyle = CONFIG.colors.frameBorder;
+    ctx.lineWidth = 2;
+
+    for (const grip of this.gripLines) {
+      const angle = this.angle + grip.angle;
+      ctx.beginPath();
+      ctx.moveTo(
+        Math.cos(angle) * grip.innerR,
+        Math.sin(angle) * grip.innerR
+      );
+      ctx.lineTo(
+        Math.cos(angle) * grip.outerR,
+        Math.sin(angle) * grip.outerR
+      );
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // Draw highlight and indicator
+    this.highlight.render();
+    this.indicator.render();
+
+    // Draw label below
+    if (this.label) {
+      ctx.save();
+      ctx.fillStyle = CONFIG.colors.textDim;
+      ctx.font = '12px "Fira Code", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(this.label, 0, this.radius + 20);
+      ctx.restore();
+    }
+  }
+}
+
+/**
+ * DrawingScreen - The green screen area where drawing happens
+ */
+class DrawingScreen extends GameObject {
+  constructor(game, options = {}) {
+    super(game, options);
+
+    this.screenWidth = options.screenWidth || 400;
+    this.screenHeight = options.screenHeight || 300;
+    this.points = [];
+    this.cursorX = this.screenWidth / 2;
+    this.cursorY = this.screenHeight / 2;
+
+    // Sand particles for clear animation
+    this.sandParticles = [];
+    this.isClearing = false;
+    this.shakeOffset = 0;
+    this.shakeDecay = 0.85;
+
+    // Add initial point
+    this.points.push({ x: this.cursorX, y: this.cursorY });
+
+    // Create background rectangle
+    this.background = new Rectangle({
+      width: this.screenWidth,
+      height: this.screenHeight,
+      color: CONFIG.colors.screen,
+      stroke: CONFIG.colors.screenBorder,
+      lineWidth: 2,
+    });
+  }
+
+  /**
+   * Move cursor and add point to the line
+   */
+  moveCursor(dx, dy) {
+    this.cursorX += dx;
+    this.cursorY += dy;
+
+    // Clamp to screen bounds
+    const padding = 5;
+    this.cursorX = Math.max(padding, Math.min(this.screenWidth - padding, this.cursorX));
+    this.cursorY = Math.max(padding, Math.min(this.screenHeight - padding, this.cursorY));
+
+    // Add point if moved enough
+    const lastPoint = this.points[this.points.length - 1];
+    const dist = Math.sqrt(
+      (this.cursorX - lastPoint.x) ** 2 + (this.cursorY - lastPoint.y) ** 2
+    );
+
+    if (dist > 1) {
+      this.points.push({ x: this.cursorX, y: this.cursorY });
+
+      if (this.points.length > CONFIG.line.maxPoints) {
+        this.points.shift();
+      }
+    }
+  }
+
+  /**
+   * Clear the screen with sand effect
+   */
+  clear() {
+    if (this.isClearing || this.points.length < 2) return;
+
+    this.isClearing = true;
+    this.shakeOffset = 20;
+
+    // Convert points to sand particles
+    this.sandParticles = [];
+    const maxParticles = 500;
+    const step = Math.max(1, Math.floor(this.points.length / maxParticles));
+
+    for (let i = 0; i < this.points.length; i += step) {
+      const p = this.points[i];
+      this.sandParticles.push({
+        x: p.x,
+        y: p.y,
+        vx: (Math.random() - 0.5) * 50,
+        vy: (Math.random() - 0.5) * 20,
+        size: CONFIG.line.width + Math.random() * 2,
+        alpha: 1,
+      });
+    }
+
+    // Reset drawing
+    this.points = [];
+    this.cursorX = this.screenWidth / 2;
+    this.cursorY = this.screenHeight / 2;
+    this.points.push({ x: this.cursorX, y: this.cursorY });
+  }
+
+  /**
+   * Get points for SVG export
+   */
+  getPoints() {
+    return this.points;
+  }
+
+  update(dt) {
+    super.update(dt);
+
+    // Update shake
+    if (this.shakeOffset > 0.5) {
+      this.shakeOffset *= this.shakeDecay;
+    } else {
+      this.shakeOffset = 0;
+    }
+
+    // Update sand particles
+    if (this.sandParticles.length > 0) {
+      const gravity = 400;
+      const friction = 0.98;
+      const bounce = 0.3;
+
+      for (let i = this.sandParticles.length - 1; i >= 0; i--) {
+        const p = this.sandParticles[i];
+
+        p.vy += gravity * dt;
+        p.vx *= friction;
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+
+        // Bounce off bottom
+        if (p.y > this.screenHeight - p.size) {
+          p.y = this.screenHeight - p.size;
+          p.vy *= -bounce;
+          p.vx *= 0.8;
+        }
+
+        // Fade out when settled
+        if (p.y >= this.screenHeight - p.size - 5 && Math.abs(p.vy) < 20) {
+          p.alpha -= dt * 2;
+        }
+
+        // Remove dead particles
+        if (p.alpha <= 0 || p.y > this.screenHeight + 10) {
+          this.sandParticles.splice(i, 1);
+        }
+      }
+
+      if (this.sandParticles.length === 0) {
+        this.isClearing = false;
+      }
+    }
+  }
+
+  draw() {
+    super.draw();
+    const ctx = Painter.ctx;
+
+    ctx.save();
+
+    // Apply shake offset
+    if (this.shakeOffset > 0) {
+      const offsetX = (Math.random() - 0.5) * this.shakeOffset * 2;
+      const offsetY = (Math.random() - 0.5) * this.shakeOffset * 2;
+      ctx.translate(offsetX, offsetY);
+    }
+
+    // Draw background
+    ctx.save();
+    ctx.translate(-this.screenWidth / 2, -this.screenHeight / 2);
+
+    // Background
+    ctx.fillStyle = CONFIG.colors.screen;
+    ctx.strokeStyle = CONFIG.colors.screenBorder;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(0, 0, this.screenWidth, this.screenHeight, 8);
+    ctx.fill();
+    ctx.stroke();
+
+    // Grid
+    ctx.strokeStyle = CONFIG.colors.grid;
+    ctx.lineWidth = 1;
+    const spacing = CONFIG.grid.spacing;
+
+    for (let x = 0; x <= this.screenWidth; x += spacing) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, this.screenHeight);
+      ctx.stroke();
+    }
+    for (let y = 0; y <= this.screenHeight; y += spacing) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(this.screenWidth, y);
+      ctx.stroke();
+    }
+
+    // Scanlines
+    ctx.globalAlpha = 0.03;
+    ctx.fillStyle = '#0f0';
+    for (let y = 0; y < this.screenHeight; y += 3) {
+      ctx.fillRect(0, y, this.screenWidth, 1);
+    }
+    ctx.globalAlpha = 1;
+
+    // Draw the line
+    if (this.points.length >= 2) {
+      ctx.strokeStyle = CONFIG.colors.line;
+      ctx.lineWidth = CONFIG.line.width;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+
+      ctx.beginPath();
+      ctx.moveTo(this.points[0].x, this.points[0].y);
+      for (let i = 1; i < this.points.length; i++) {
+        ctx.lineTo(this.points[i].x, this.points[i].y);
+      }
+      ctx.stroke();
+
+      // Glow
+      ctx.strokeStyle = 'rgba(0, 255, 0, 0.3)';
+      ctx.lineWidth = CONFIG.line.width + 4;
+      ctx.stroke();
+    }
+
+    // Draw sand particles
+    for (const p of this.sandParticles) {
+      ctx.globalAlpha = p.alpha;
+      ctx.fillStyle = CONFIG.colors.line;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // Draw cursor
+    const cursorSize = 6;
+    ctx.strokeStyle = CONFIG.colors.line;
+    ctx.lineWidth = 1;
+    ctx.globalAlpha = 0.8;
+
+    ctx.beginPath();
+    ctx.moveTo(this.cursorX - cursorSize, this.cursorY);
+    ctx.lineTo(this.cursorX + cursorSize, this.cursorY);
+    ctx.moveTo(this.cursorX, this.cursorY - cursorSize);
+    ctx.lineTo(this.cursorX, this.cursorY + cursorSize);
+    ctx.stroke();
+
+    ctx.fillStyle = CONFIG.colors.line;
+    ctx.beginPath();
+    ctx.arc(this.cursorX, this.cursorY, 3, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.globalAlpha = 1;
+    ctx.restore();
+    ctx.restore();
+  }
+}
+
+/**
+ * Etch-a-Sketch Demo - Main game class
  */
 class EtchASketchDemo extends Game {
   constructor(canvas) {
@@ -120,149 +601,136 @@ class EtchASketchDemo extends Game {
     Keys.init(this);
     Mouse.init(this);
 
+    // Create main scene
+    this.mainScene = new Scene(this, { anchor: 'center' });
+    this.pipeline.add(this.mainScene);
+
+    // Create UI scene for buttons
+
     // Calculate dimensions
     this.updateDimensions();
 
-    // Drawing state
-    this.points = [];
-    this.cursorX = this.screenCx;
-    this.cursorY = this.screenCy;
+    // Create drawing screen (positioned higher, closer to top)
+    this.screen = new DrawingScreen(this, {
+      x: 0,
+      y: -this.height * 0.12,
+      screenWidth: this.screenW,
+      screenHeight: this.screenH,
+    });
+    this.mainScene.add(this.screen);
 
-    // Add initial point
-    this.points.push({ x: this.cursorX, y: this.cursorY });
+    // Create knobs
+    const knobRadius = Math.min(this.width, this.height) * CONFIG.frame.knobSize;
 
-    // Knob state
-    this.leftKnob = {
-      angle: 0,
-      velocity: 0,
-      dragging: false,
-      lastAngle: 0,
-    };
-    this.rightKnob = {
-      angle: 0,
-      velocity: 0,
-      dragging: false,
-      lastAngle: 0,
-    };
+    this.leftKnob = new Knob(this, {
+      x: -this.width * 0.3,
+      y: this.height * 0.34,
+      radius: knobRadius,
+      label: 'X',
+    });
+    this.mainScene.add(this.leftKnob);
 
-    // Shake detection for clear
-    this.shakeHistory = [];
-    this.lastShakeTime = 0;
-
-    // Sand particles for clear animation
-    this.sandParticles = [];
-    this.isClearing = false;
-
-    // Mouse tracking
-    this.dragStartAngle = 0;
+    this.rightKnob = new Knob(this, {
+      x: this.width * 0.3,
+      y: this.height * 0.34,
+      radius: knobRadius,
+      label: 'Y',
+    });
+    this.mainScene.add(this.rightKnob);
 
     // Auto-draw state
     this.autoDrawing = false;
-    this.autoDrawPath = [];      // Array of {x, y} normalized points
-    this.autoDrawIndex = 0;      // Current point index
-    this.autoDrawProgress = 0;   // Progress to next point (0-1)
+    this.autoDrawPath = [];
+    this.autoDrawIndex = 0;
+    this.autoDrawProgress = 0;
 
-    // Set up event listeners
+    // Grid snap mode
+    this.gridMode = false;
+    this._lastLeft = false;
+    this._lastRight = false;
+    this._lastUp = false;
+    this._lastDown = false;
+
+    // Shake detection
+    this.shakeHistory = [];
+    this.lastShakeTime = 0;
+
+    // Set up events
     this.setupEvents();
 
-    // Create hidden file input for SVG loading
+    // Create file input
     this.createFileInput();
 
-    // Create mobile UI buttons
+    // Create mobile buttons
     this.createMobileUI();
   }
 
-  /**
-   * Calculate screen and knob dimensions based on canvas size
-   */
   updateDimensions() {
     const w = this.width;
     const h = this.height;
     const minDim = Math.min(w, h);
     const padding = minDim * CONFIG.frame.padding;
 
-    // Screen area (where drawing happens)
-    this.screenX = padding * 2;
-    this.screenY = padding * 1.5;
-    this.screenW = w - padding * 4;
-    this.screenH = h * 0.68;  // Leave room for knobs below
-    // Calculate grid-aligned center
-    const spacing = CONFIG.grid.spacing;
-    const rawCx = this.screenX + this.screenW / 2;
-    const rawCy = this.screenY + this.screenH / 2;
-    this.screenCx = Math.round((rawCx - this.screenX) / spacing) * spacing + this.screenX;
-    this.screenCy = Math.round((rawCy - this.screenY) / spacing) * spacing + this.screenY;
-
-    // Knob dimensions
-    this.knobRadius = minDim * CONFIG.frame.knobSize;
-    this.knobY = h * CONFIG.frame.knobY;
-    this.leftKnobX = w * 0.2;
-    this.rightKnobX = w * 0.8;
+    // Bigger screen with tighter margins
+    this.screenW = w - padding * 2.5;
+    this.screenH = h * 0.65;
   }
 
-  /**
-   * Set up mouse, touch, and keyboard events using engine's event system
-   */
   setupEvents() {
-    // Mouse events via engine
-    this.events.on('mousedown', (e) => this.onPointerDown(e));
-    this.events.on('mousemove', (e) => this.onPointerMove(e));
-    this.events.on('mouseup', () => this.onPointerUp());
-
-    // Touch events (still need raw for now)
-    this.canvas.addEventListener('touchstart', (e) => {
-      e.preventDefault();
-      this.onPointerDown(e.touches[0]);
-    });
-    this.canvas.addEventListener('touchmove', (e) => {
-      e.preventDefault();
-      this.onPointerMove(e.touches[0]);
-    });
-    this.canvas.addEventListener('touchend', () => this.onPointerUp());
-
-    // Keyboard events via Keys
-    const step = 0.15;
-
-    // Arrow keys
-    this.events.on(Keys.LEFT, () => { this.leftKnob.velocity -= step; });
-    this.events.on(Keys.RIGHT, () => { this.leftKnob.velocity += step; });
-    this.events.on(Keys.UP, () => { this.rightKnob.velocity -= step; });
-    this.events.on(Keys.DOWN, () => { this.rightKnob.velocity += step; });
-
-    // A/D for X axis
-    this.events.on(Keys.A, () => { this.leftKnob.velocity -= step; });
-    this.events.on(Keys.D, () => { this.leftKnob.velocity += step; });
-
-    // W/S for Y axis
-    this.events.on(Keys.W, () => { this.rightKnob.velocity -= step; });
-    this.events.on(Keys.S, () => { this.rightKnob.velocity += step; });
-
-    // J/L for Y axis (alternative)
-    this.events.on(Keys.J, () => { this.rightKnob.velocity -= step; });
-    this.events.on(Keys.L, () => { this.rightKnob.velocity += step; });
+    // Movement keys are handled in update() via Keys.isDown()
 
     // Actions
-    this.events.on(Keys.C, () => this.clearScreen());
+    this.events.on(Keys.C, () => this.screen.clear());
     this.events.on(Keys.G, () => this.exportSVG());
 
     // Auto-draw controls
     this.events.on('keydown', (e) => {
-      if (e.key === 'p' || e.key === 'P') {
-        this.fileInput.click(); // Open file picker
-      }
+      if (e.key === 'p' || e.key === 'P') this.fileInput.click();
       if (e.key === '1') this.startPresetDraw('logo');
       if (e.key === '2') this.startPresetDraw('star');
       if (e.key === '3') this.startPresetDraw('spiral');
       if (e.key === '4') this.startPresetDraw('house');
-      if (e.key === 'Escape' && this.autoDrawing) {
-        this.stopAutoDraw();
+      if (e.key === 'Escape') this.stopAutoDraw();
+    });
+
+    // Shake detection
+    this.events.on('mousemove', () => {
+      const now = Date.now();
+      this.shakeHistory.push({ x: Mouse.x, y: Mouse.y, time: now });
+      this.shakeHistory = this.shakeHistory.filter(p => now - p.time < 500);
+
+      if (this.detectShake()) {
+        this.screen.clear();
       }
     });
   }
 
-  /**
-   * Create hidden file input for SVG loading
-   */
+  detectShake() {
+    if (this.shakeHistory.length < 10) return false;
+
+    let totalDist = 0;
+    let dirChanges = 0;
+    let lastDx = 0;
+
+    for (let i = 1; i < this.shakeHistory.length; i++) {
+      const dx = this.shakeHistory[i].x - this.shakeHistory[i - 1].x;
+      const dy = this.shakeHistory[i].y - this.shakeHistory[i - 1].y;
+      totalDist += Math.abs(dx) + Math.abs(dy);
+
+      if (lastDx !== 0 && Math.sign(dx) !== Math.sign(lastDx)) {
+        dirChanges++;
+      }
+      lastDx = dx;
+    }
+
+    const now = Date.now();
+    if (totalDist > 500 && dirChanges > 6 && now - this.lastShakeTime > 1000) {
+      this.lastShakeTime = now;
+      return true;
+    }
+    return false;
+  }
+
   createFileInput() {
     this.fileInput = document.createElement('input');
     this.fileInput.type = 'file';
@@ -272,52 +740,42 @@ class EtchASketchDemo extends Game {
 
     this.fileInput.addEventListener('change', (e) => {
       const file = e.target.files[0];
-      if (file) {
-        this.loadSVGFile(file);
-      }
-      this.fileInput.value = ''; // Reset for next use
+      if (file) this.loadSVGFile(file);
+      this.fileInput.value = '';
     });
   }
 
-  /**
-   * Create mobile-friendly UI buttons
-   */
   createMobileUI() {
-    // Create UI scene for buttons
-    this.uiScene = new Scene(this);
-    this.pipeline.add(this.uiScene);
-
     const btnHeight = 35;
     const btnWidth = 55;
     const spacing = 8;
     const bottomPadding = 40;
 
-    // Button definitions
-    const buttons = [
+    // Create HorizontalLayout for buttons
+    this.buttonLayout = new HorizontalLayout(this, {
+      spacing,
+      y: this.height - bottomPadding,
+      x: this.width / 2,
+    });
+    this.pipeline.add(this.buttonLayout);
+
+    const buttonConfigs = [
       { text: '1', action: () => this.startPresetDraw('logo') },
       { text: '2', action: () => this.startPresetDraw('star') },
       { text: '3', action: () => this.startPresetDraw('spiral') },
       { text: '4', action: () => this.startPresetDraw('house') },
-      { text: 'CLR', action: () => this.clearScreen() },
+      { text: 'CLR', action: () => this.screen.clear() },
       { text: 'SVG', action: () => this.exportSVG() },
     ];
 
-    // Calculate total width and starting X position
-    const totalWidth = buttons.length * btnWidth + (buttons.length - 1) * spacing;
-    const startX = (this.width - totalWidth) / 2 + btnWidth / 2;
-    const btnY = this.height - bottomPadding;
-
-    this.mobileButtons = [];
-
-    buttons.forEach((btnConfig, i) => {
+    // Create and add buttons to layout
+    buttonConfigs.forEach(cfg => {
       const btn = new Button(this, {
-        x: startX + i * (btnWidth + spacing),
-        y: btnY,
         width: btnWidth,
         height: btnHeight,
-        text: btnConfig.text,
+        text: cfg.text,
         font: '12px "Fira Code", monospace',
-        onClick: btnConfig.action,
+        onClick: cfg.action,
         colorDefaultBg: 'rgba(0, 0, 0, 0.8)',
         colorDefaultStroke: 'rgba(0, 255, 0, 0.5)',
         colorDefaultText: '#0f0',
@@ -328,480 +786,244 @@ class EtchASketchDemo extends Game {
         colorPressedStroke: '#0f0',
         colorPressedText: '#000',
       });
-      this.uiScene.add(btn);
-      this.mobileButtons.push(btn);
+      this.buttonLayout.add(btn);
     });
+
+    // Add GRID toggle button
+    this.gridButton = new ToggleButton(this, {
+      width: btnWidth,
+      height: btnHeight,
+      text: 'GRID',
+      font: '12px "Fira Code", monospace',
+      onToggle: (isOn) => {
+        this.gridMode = isOn;
+      },
+      colorDefaultBg: 'rgba(0, 0, 0, 0.8)',
+      colorDefaultStroke: 'rgba(0, 255, 0, 0.5)',
+      colorDefaultText: '#0f0',
+      colorHoverBg: '#0f0',
+      colorHoverStroke: '#0f0',
+      colorHoverText: '#000',
+      colorPressedBg: '#0a0',
+      colorPressedStroke: '#0f0',
+      colorPressedText: '#000',
+      colorActiveBg: '#0ff',
+      colorActiveStroke: '#0ff',
+      colorActiveText: '#000',
+    });
+    this.buttonLayout.add(this.gridButton);
   }
 
-  /**
-   * Update button positions on resize
-   */
-  updateMobileUI() {
-    if (!this.mobileButtons || this.mobileButtons.length === 0) return;
-
-    const btnWidth = 55;
-    const spacing = 8;
-    const bottomPadding = 40;
-
-    const totalWidth = this.mobileButtons.length * btnWidth + (this.mobileButtons.length - 1) * spacing;
-    const startX = (this.width - totalWidth) / 2 + btnWidth / 2;
-    const btnY = this.height - bottomPadding;
-
-    this.mobileButtons.forEach((btn, i) => {
-      btn.x = startX + i * (btnWidth + spacing);
-      btn.y = btnY;
-    });
-  }
-
-  /**
-   * Load and parse an SVG file
-   */
   loadSVGFile(file) {
     const reader = new FileReader();
     reader.onload = (e) => {
-      const svgText = e.target.result;
-      const pathData = this.extractPathFromSVG(svgText);
-      if (pathData) {
-        this.startAutoDraw(pathData);
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(e.target.result, 'image/svg+xml');
+      const path = doc.querySelector('path');
+      if (path) {
+        this.startAutoDraw(path.getAttribute('d'));
       }
     };
     reader.readAsText(file);
   }
 
-  /**
-   * Extract path data from SVG string
-   */
-  extractPathFromSVG(svgText) {
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(svgText, 'image/svg+xml');
-    const paths = doc.querySelectorAll('path');
-    
-    if (paths.length === 0) {
-      console.warn('[Day22] No paths found in SVG');
-      return null;
-    }
-
-    // Get the d attribute from the first path
-    return paths[0].getAttribute('d');
-  }
-
-  /**
-   * Start auto-drawing a preset pattern
-   */
-  startPresetDraw(presetName) {
-    const pathData = PRESET_PATTERNS[presetName];
+  startPresetDraw(name) {
+    const pathData = PRESET_PATTERNS[name];
     if (pathData) {
-      this.clearScreen();
-      setTimeout(() => this.startAutoDraw(pathData, true), 500);
+      // Turn off grid mode when loading a preset
+      if (this.gridMode) {
+        this.gridMode = false;
+        this.gridButton.toggle(false);
+      }
+      this.screen.clear();
+      setTimeout(() => this.startAutoDraw(pathData, name === 'star' || name === 'spiral' || name === 'house'), 500);
     }
   }
 
-  /**
-   * Parse SVG path data and start auto-drawing
-   * @param {string} pathData - SVG path d attribute
-   * @param {boolean} isNormalized - If true, coordinates are 0-1 normalized
-   */
   startAutoDraw(pathData, isNormalized = false) {
-    const points = this.parseSVGPathToPoints(pathData, isNormalized);
-    
-    if (points.length < 2) {
-      console.warn('[Day22] Not enough points to draw');
-      return;
-    }
+    const points = this.parseSVGPath(pathData, isNormalized);
+    if (points.length < 2) return;
 
-    console.log(`[Day22] Starting auto-draw with ${points.length} points`);
+    this.screen.clear();
 
-    // Clear and start fresh
-    this.clearScreen();
-    
-    // Wait for clear animation
     setTimeout(() => {
       this.autoDrawPath = points;
       this.autoDrawIndex = 0;
       this.autoDrawProgress = 0;
       this.autoDrawing = true;
 
-      // Move cursor to start point
       const start = points[0];
-      this.cursorX = start.x;
-      this.cursorY = start.y;
-      this.points = [{ x: this.cursorX, y: this.cursorY }];
+      this.screen.cursorX = start.x;
+      this.screen.cursorY = start.y;
+      this.screen.points = [{ x: start.x, y: start.y }];
     }, 100);
   }
 
-  /**
-   * Parse SVG path data into screen-space points
-   */
-  parseSVGPathToPoints(pathData, isNormalized) {
+  parseSVGPath(pathData, isNormalized) {
     const points = [];
-    let currentX = 0;
-    let currentY = 0;
+    let cx = 0, cy = 0;
 
-    // Parse SVG path commands
-    const commandRegex = /([MLHVCSQTAZmlhvcsqtaz])([^MLHVCSQTAZmlhvcsqtaz]*)/g;
+    const regex = /([MLHVZmlhvz])([^MLHVZmlhvz]*)/g;
     let match;
 
-    while ((match = commandRegex.exec(pathData)) !== null) {
-      const command = match[1];
-      const argsStr = match[2].trim();
-      const args = argsStr.length > 0
-        ? argsStr.split(/[\s,]+/).map(parseFloat).filter(n => !isNaN(n))
-        : [];
+    while ((match = regex.exec(pathData)) !== null) {
+      const cmd = match[1];
+      const args = match[2].trim().split(/[\s,]+/).map(parseFloat).filter(n => !isNaN(n));
 
-      switch (command) {
-        case 'M': // Absolute moveto
+      switch (cmd) {
+        case 'M':
           for (let i = 0; i < args.length; i += 2) {
-            currentX = args[i];
-            currentY = args[i + 1];
-            points.push({ x: currentX, y: currentY, move: i === 0 });
+            cx = args[i]; cy = args[i + 1];
+            points.push({ x: cx, y: cy, move: i === 0 });
           }
           break;
-        case 'm': // Relative moveto
+        case 'm':
           for (let i = 0; i < args.length; i += 2) {
-            currentX += args[i];
-            currentY += args[i + 1];
-            points.push({ x: currentX, y: currentY, move: i === 0 });
+            cx += args[i]; cy += args[i + 1];
+            points.push({ x: cx, y: cy, move: i === 0 });
           }
           break;
-        case 'L': // Absolute lineto
+        case 'L':
           for (let i = 0; i < args.length; i += 2) {
-            currentX = args[i];
-            currentY = args[i + 1];
-            points.push({ x: currentX, y: currentY });
+            cx = args[i]; cy = args[i + 1];
+            points.push({ x: cx, y: cy });
           }
           break;
-        case 'l': // Relative lineto
+        case 'l':
           for (let i = 0; i < args.length; i += 2) {
-            currentX += args[i];
-            currentY += args[i + 1];
-            points.push({ x: currentX, y: currentY });
+            cx += args[i]; cy += args[i + 1];
+            points.push({ x: cx, y: cy });
           }
           break;
-        case 'H': // Absolute horizontal
-          for (const x of args) {
-            currentX = x;
-            points.push({ x: currentX, y: currentY });
-          }
+        case 'H':
+          for (const x of args) { cx = x; points.push({ x: cx, y: cy }); }
           break;
-        case 'h': // Relative horizontal
-          for (const dx of args) {
-            currentX += dx;
-            points.push({ x: currentX, y: currentY });
-          }
+        case 'h':
+          for (const dx of args) { cx += dx; points.push({ x: cx, y: cy }); }
           break;
-        case 'V': // Absolute vertical
-          for (const y of args) {
-            currentY = y;
-            points.push({ x: currentX, y: currentY });
-          }
+        case 'V':
+          for (const y of args) { cy = y; points.push({ x: cx, y: cy }); }
           break;
-        case 'v': // Relative vertical
-          for (const dy of args) {
-            currentY += dy;
-            points.push({ x: currentX, y: currentY });
-          }
+        case 'v':
+          for (const dy of args) { cy += dy; points.push({ x: cx, y: cy }); }
           break;
         case 'Z':
         case 'z':
-          // Close path - return to first point
           if (points.length > 0) {
-            const first = points[0];
-            points.push({ x: first.x, y: first.y });
-            currentX = first.x;
-            currentY = first.y;
+            points.push({ x: points[0].x, y: points[0].y });
+            cx = points[0].x; cy = points[0].y;
           }
           break;
-        // TODO: Add curve support (C, S, Q, T, A)
       }
     }
 
-    // Convert to screen coordinates
+    // Scale to screen
+    const sw = this.screen.screenWidth;
+    const sh = this.screen.screenHeight;
+
     if (isNormalized) {
-      // Normalized 0-1 coordinates
-      return points.map(p => ({
-        x: this.screenX + p.x * this.screenW,
-        y: this.screenY + p.y * this.screenH,
-        move: p.move
-      }));
-    } else {
-      // Find bounds and scale to fit screen
-      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-      for (const p of points) {
-        minX = Math.min(minX, p.x);
-        minY = Math.min(minY, p.y);
-        maxX = Math.max(maxX, p.x);
-        maxY = Math.max(maxY, p.y);
-      }
-
-      const svgW = maxX - minX || 1;
-      const svgH = maxY - minY || 1;
-      const scale = Math.min(
-        (this.screenW * 0.8) / svgW,
-        (this.screenH * 0.8) / svgH
-      );
-      const offsetX = this.screenX + (this.screenW - svgW * scale) / 2;
-      const offsetY = this.screenY + (this.screenH - svgH * scale) / 2;
-
-      return points.map(p => ({
-        x: offsetX + (p.x - minX) * scale,
-        y: offsetY + (p.y - minY) * scale,
-        move: p.move
-      }));
+      return points.map(p => ({ x: p.x * sw, y: p.y * sh, move: p.move }));
     }
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const p of points) {
+      minX = Math.min(minX, p.x); minY = Math.min(minY, p.y);
+      maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y);
+    }
+
+    const svgW = maxX - minX || 1;
+    const svgH = maxY - minY || 1;
+    const scale = Math.min((sw * 0.8) / svgW, (sh * 0.8) / svgH);
+    const offX = (sw - svgW * scale) / 2;
+    const offY = (sh - svgH * scale) / 2;
+
+    return points.map(p => ({
+      x: offX + (p.x - minX) * scale,
+      y: offY + (p.y - minY) * scale,
+      move: p.move,
+    }));
   }
 
-  /**
-   * Stop auto-drawing
-   */
   stopAutoDraw() {
     this.autoDrawing = false;
     this.autoDrawPath = [];
-    console.log('[Day22] Auto-draw stopped');
+    // Return knobs to original position
+    this.leftKnob.returning = true;
+    this.rightKnob.returning = true;
   }
 
-  /**
-   * Update auto-draw animation
-   */
   updateAutoDraw(dt) {
     if (!this.autoDrawing || this.autoDrawPath.length < 2) return;
 
     const speed = CONFIG.autoDraw.speed;
-    const currentPoint = this.autoDrawPath[this.autoDrawIndex];
-    const nextIndex = this.autoDrawIndex + 1;
+    const curr = this.autoDrawPath[this.autoDrawIndex];
+    const nextIdx = this.autoDrawIndex + 1;
 
-    if (nextIndex >= this.autoDrawPath.length) {
-      // Finished drawing
+    if (nextIdx >= this.autoDrawPath.length) {
       this.autoDrawing = false;
-      console.log('[Day22] Auto-draw complete!');
+      // Return knobs to original position
+      this.leftKnob.returning = true;
+      this.rightKnob.returning = true;
       return;
     }
 
-    const nextPoint = this.autoDrawPath[nextIndex];
-    const dx = nextPoint.x - currentPoint.x;
-    const dy = nextPoint.y - currentPoint.y;
+    const next = this.autoDrawPath[nextIdx];
+    const dx = next.x - curr.x;
+    const dy = next.y - curr.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
 
     if (dist < 0.1) {
-      // Skip to next point
-      this.autoDrawIndex = nextIndex;
+      this.autoDrawIndex = nextIdx;
       return;
     }
 
-    // Calculate movement this frame
-    const moveAmount = speed * dt;
-    this.autoDrawProgress += moveAmount / dist;
+    this.autoDrawProgress += (speed * dt) / dist;
 
     if (this.autoDrawProgress >= 1) {
-      // Reached next point
       this.autoDrawProgress = 0;
-      this.autoDrawIndex = nextIndex;
-      this.cursorX = nextPoint.x;
-      this.cursorY = nextPoint.y;
+      this.autoDrawIndex = nextIdx;
+      this.screen.cursorX = next.x;
+      this.screen.cursorY = next.y;
     } else {
-      // Interpolate position
-      this.cursorX = currentPoint.x + dx * this.autoDrawProgress;
-      this.cursorY = currentPoint.y + dy * this.autoDrawProgress;
+      this.screen.cursorX = curr.x + dx * this.autoDrawProgress;
+      this.screen.cursorY = curr.y + dy * this.autoDrawProgress;
     }
 
-    // Animate knobs based on movement direction
+    // Animate knobs
     const knobScale = CONFIG.autoDraw.knobRotationScale;
     this.leftKnob.angle += dx * knobScale;
     this.rightKnob.angle += dy * knobScale;
 
-    // Add point to drawing (skip if it's a move command)
-    if (!nextPoint.move) {
-      const lastPoint = this.points[this.points.length - 1];
-      const pointDist = Math.sqrt(
-        (this.cursorX - lastPoint.x) ** 2 + (this.cursorY - lastPoint.y) ** 2
-      );
-      if (pointDist > 1) {
-        this.points.push({ x: this.cursorX, y: this.cursorY });
+    // Add point
+    if (!next.move) {
+      const last = this.screen.points[this.screen.points.length - 1];
+      const d = Math.sqrt((this.screen.cursorX - last.x) ** 2 + (this.screen.cursorY - last.y) ** 2);
+      if (d > 1) {
+        this.screen.points.push({ x: this.screen.cursorX, y: this.screen.cursorY });
       }
     } else {
-      // Move command - jump without drawing
-      this.points.push({ x: this.cursorX, y: this.cursorY });
+      this.screen.points.push({ x: this.screen.cursorX, y: this.screen.cursorY });
     }
   }
 
-  /**
-   * Handle pointer down (mouse or touch)
-   */
-  onPointerDown(e) {
-    // Use Mouse coordinates from engine (already canvas-relative)
-    const x = Mouse.x;
-    const y = Mouse.y;
-
-    // Check if clicking on left knob
-    const leftDist = Math.sqrt(
-      (x - this.leftKnobX) ** 2 + (y - this.knobY) ** 2
-    );
-    if (leftDist < this.knobRadius * 1.5) {
-      this.leftKnob.dragging = true;
-      this.dragStartAngle = Math.atan2(y - this.knobY, x - this.leftKnobX);
-      this.leftKnob.lastAngle = this.leftKnob.angle;
-      return;
-    }
-
-    // Check if clicking on right knob
-    const rightDist = Math.sqrt(
-      (x - this.rightKnobX) ** 2 + (y - this.knobY) ** 2
-    );
-    if (rightDist < this.knobRadius * 1.5) {
-      this.rightKnob.dragging = true;
-      this.dragStartAngle = Math.atan2(y - this.knobY, x - this.rightKnobX);
-      this.rightKnob.lastAngle = this.rightKnob.angle;
-      return;
-    }
-  }
-
-  /**
-   * Handle pointer move
-   */
-  onPointerMove(e) {
-    // Use Mouse coordinates from engine
-    const x = Mouse.x;
-    const y = Mouse.y;
-
-    // Track for shake detection
-    const now = Date.now();
-    this.shakeHistory.push({ x, y, time: now });
-    // Keep last 500ms of history
-    this.shakeHistory = this.shakeHistory.filter((p) => now - p.time < 500);
-
-    // Check for shake gesture
-    if (this.detectShake()) {
-      this.clearScreen();
-    }
-
-    // Update dragging knob
-    if (this.leftKnob.dragging) {
-      const angle = Math.atan2(y - this.knobY, x - this.leftKnobX);
-      let delta = angle - this.dragStartAngle;
-
-      // Handle angle wraparound
-      if (delta > Math.PI) delta -= Math.PI * 2;
-      if (delta < -Math.PI) delta += Math.PI * 2;
-
-      this.leftKnob.angle = this.leftKnob.lastAngle + delta;
-      this.leftKnob.velocity = delta * 0.5;
-    }
-
-    if (this.rightKnob.dragging) {
-      const angle = Math.atan2(y - this.knobY, x - this.rightKnobX);
-      let delta = angle - this.dragStartAngle;
-
-      if (delta > Math.PI) delta -= Math.PI * 2;
-      if (delta < -Math.PI) delta += Math.PI * 2;
-
-      this.rightKnob.angle = this.rightKnob.lastAngle + delta;
-      this.rightKnob.velocity = delta * 0.5;
-    }
-  }
-
-  /**
-   * Handle pointer up
-   */
-  onPointerUp() {
-    this.leftKnob.dragging = false;
-    this.rightKnob.dragging = false;
-  }
-
-  /**
-   * Detect shake gesture for clearing
-   */
-  detectShake() {
-    if (this.shakeHistory.length < 10) return false;
-
-    // Calculate total movement
-    let totalDist = 0;
-    let dirChanges = 0;
-    let lastDx = 0;
-
-    for (let i = 1; i < this.shakeHistory.length; i++) {
-      const dx = this.shakeHistory[i].x - this.shakeHistory[i - 1].x;
-      const dy = this.shakeHistory[i].y - this.shakeHistory[i - 1].y;
-      totalDist += Math.abs(dx) + Math.abs(dy);
-
-      // Count direction changes (oscillation)
-      if (lastDx !== 0 && Math.sign(dx) !== Math.sign(lastDx)) {
-        dirChanges++;
-      }
-      lastDx = dx;
-    }
-
-    // Shake = high movement + many direction changes
-    const now = Date.now();
-    if (totalDist > 500 && dirChanges > 6 && now - this.lastShakeTime > 1000) {
-      this.lastShakeTime = now;
-      return true;
-    }
-
-    return false;
-  }
-
-  /**
-   * Clear the drawing with sand falling effect
-   */
-  clearScreen() {
-    if (this.isClearing || this.points.length < 2) return;
-
-    this.isClearing = true;
-
-    // Animate shake effect
-    this.shakeOffset = 20;
-    this.shakeDecay = 0.85;
-
-    // Convert line points to sand particles
-    this.sandParticles = [];
-    const step = Math.max(1, Math.floor(this.points.length / CONFIG.sand.maxParticles));
-
-    for (let i = 0; i < this.points.length; i += step) {
-      const p = this.points[i];
-      this.sandParticles.push({
-        x: p.x,
-        y: p.y,
-        vx: (Math.random() - 0.5) * 50,  // Random horizontal drift
-        vy: (Math.random() - 0.5) * 20,  // Small initial vertical velocity
-        size: CONFIG.line.width + Math.random() * 2,
-        alpha: 1,
-      });
-    }
-
-    // Clear actual drawing points
-    this.points = [];
-    this.cursorX = this.screenCx;
-    this.cursorY = this.screenCy;
-    this.points.push({ x: this.cursorX, y: this.cursorY });
-  }
-
-  /**
-   * Export drawing as SVG (pen plotter ready!)
-   */
   exportSVG() {
-    if (this.points.length < 2) return;
+    const points = this.screen.getPoints();
+    if (points.length < 2) return;
 
-    // Build SVG path
-    let pathD = `M ${this.points[0].x.toFixed(2)} ${this.points[0].y.toFixed(2)}`;
-    for (let i = 1; i < this.points.length; i++) {
-      pathD += ` L ${this.points[i].x.toFixed(2)} ${this.points[i].y.toFixed(2)}`;
+    let pathD = `M ${points[0].x.toFixed(2)} ${points[0].y.toFixed(2)}`;
+    for (let i = 1; i < points.length; i++) {
+      pathD += ` L ${points[i].x.toFixed(2)} ${points[i].y.toFixed(2)}`;
     }
+
+    const sw = this.screen.screenWidth;
+    const sh = this.screen.screenHeight;
 
     const svg = `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" 
-     width="${this.screenW}" 
-     height="${this.screenH}" 
-     viewBox="${this.screenX} ${this.screenY} ${this.screenW} ${this.screenH}">
+<svg xmlns="http://www.w3.org/2000/svg" width="${sw}" height="${sh}" viewBox="0 0 ${sw} ${sh}">
   <title>Etch-a-Sketch Export - Genuary 2026 Day 22</title>
-  <desc>Single continuous line - pen plotter ready</desc>
-  <path d="${pathD}" 
-        fill="none" 
-        stroke="#000" 
-        stroke-width="1" 
-        stroke-linecap="round" 
-        stroke-linejoin="round"/>
+  <path d="${pathD}" fill="none" stroke="#000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>`;
 
-    // Download
     const blob = new Blob([svg], { type: 'image/svg+xml' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -809,430 +1031,167 @@ class EtchASketchDemo extends Game {
     a.download = 'etch-a-sketch-day22.svg';
     a.click();
     URL.revokeObjectURL(url);
-
-    console.log('[Day22] SVG exported - pen plotter ready!');
   }
 
   update(dt) {
     super.update(dt);
 
-    // Update shake animation
-    if (this.shakeOffset > 0.5) {
-      this.shakeOffset *= this.shakeDecay;
-    } else {
-      this.shakeOffset = 0;
-    }
-
-    // Update sand particles
-    this.updateSandParticles(dt);
-
-    // Update auto-draw if active
     if (this.autoDrawing) {
       this.updateAutoDraw(dt);
-      return; // Skip manual input while auto-drawing
-    }
-
-    // Apply knob physics
-    const friction = CONFIG.knob.friction;
-    const maxSpeed = CONFIG.knob.maxSpeed;
-
-    // Left knob (X movement)
-    if (!this.leftKnob.dragging) {
-      this.leftKnob.velocity *= friction;
-    }
-    this.leftKnob.velocity = Math.max(-maxSpeed, Math.min(maxSpeed, this.leftKnob.velocity));
-    this.leftKnob.angle += this.leftKnob.velocity * dt * 10;
-
-    // Right knob (Y movement)
-    if (!this.rightKnob.dragging) {
-      this.rightKnob.velocity *= friction;
-    }
-    this.rightKnob.velocity = Math.max(-maxSpeed, Math.min(maxSpeed, this.rightKnob.velocity));
-    this.rightKnob.angle += this.rightKnob.velocity * dt * 10;
-
-    // Move cursor based on knob velocity
-    const sensitivity = CONFIG.line.sensitivity * Math.min(this.screenW, this.screenH);
-    const moveX = this.leftKnob.velocity * sensitivity * dt;
-    const moveY = this.rightKnob.velocity * sensitivity * dt;
-
-    if (Math.abs(moveX) > 0.01 || Math.abs(moveY) > 0.01) {
-      this.cursorX += moveX;
-      this.cursorY += moveY;
-
-      // Clamp to screen bounds
-      this.cursorX = Math.max(this.screenX + 5, Math.min(this.screenX + this.screenW - 5, this.cursorX));
-      this.cursorY = Math.max(this.screenY + 5, Math.min(this.screenY + this.screenH - 5, this.cursorY));
-
-      // Add point if moved enough
-      const lastPoint = this.points[this.points.length - 1];
-      const dist = Math.sqrt((this.cursorX - lastPoint.x) ** 2 + (this.cursorY - lastPoint.y) ** 2);
-
-      if (dist > 1) {
-        this.points.push({ x: this.cursorX, y: this.cursorY });
-
-        // Limit points for performance
-        if (this.points.length > CONFIG.line.maxPoints) {
-          this.points.shift();
-        }
-      }
-    }
-  }
-
-  /**
-   * Update sand particle physics
-   * @param {number} dt - Delta time
-   */
-  updateSandParticles(dt) {
-    if (this.sandParticles.length === 0) {
-      if (this.isClearing) {
-        this.isClearing = false;
-      }
       return;
     }
 
-    const gravity = CONFIG.sand.gravity;
-    const friction = CONFIG.sand.friction;
-    const bounce = CONFIG.sand.bounce;
-    const screenBottom = this.screenY + this.screenH;
-
-    for (let i = this.sandParticles.length - 1; i >= 0; i--) {
-      const p = this.sandParticles[i];
-
-      // Apply gravity
-      p.vy += gravity * dt;
-
-      // Apply friction
-      p.vx *= friction;
-
-      // Update position
-      p.x += p.vx * dt;
-      p.y += p.vy * dt;
-
-      // Bounce off bottom of screen
-      if (p.y > screenBottom - p.size) {
-        p.y = screenBottom - p.size;
-        p.vy *= -bounce;
-        p.vx *= 0.8;  // Lose energy on bounce
+    if (this.gridMode) {
+      // Grid mode: move one cell at a time on key press
+      const gridSize = CONFIG.grid.spacing;
+      
+      // Track key states for edge detection
+      const leftPressed = Keys.isDown(Keys.A) || Keys.isDown(Keys.LEFT);
+      const rightPressed = Keys.isDown(Keys.D) || Keys.isDown(Keys.RIGHT);
+      const upPressed = Keys.isDown(Keys.W) || Keys.isDown(Keys.UP) || Keys.isDown(Keys.J);
+      const downPressed = Keys.isDown(Keys.S) || Keys.isDown(Keys.DOWN) || Keys.isDown(Keys.L);
+      
+      // Detect new key presses (edge trigger)
+      if (leftPressed && !this._lastLeft) {
+        this.screen.moveCursor(-gridSize, 0);
+        this.leftKnob.angle -= 0.3;
+        this.leftKnob.returning = false;
+      }
+      if (rightPressed && !this._lastRight) {
+        this.screen.moveCursor(gridSize, 0);
+        this.leftKnob.angle += 0.3;
+        this.leftKnob.returning = false;
+      }
+      if (upPressed && !this._lastUp) {
+        this.screen.moveCursor(0, -gridSize);
+        this.rightKnob.angle -= 0.3;
+        this.rightKnob.returning = false;
+      }
+      if (downPressed && !this._lastDown) {
+        this.screen.moveCursor(0, gridSize);
+        this.rightKnob.angle += 0.3;
+        this.rightKnob.returning = false;
+      }
+      
+      // When no keys pressed, start returning knobs to 0
+      if (!leftPressed && !rightPressed && !this.leftKnob.dragging) {
+        this.leftKnob.returning = true;
+      }
+      if (!upPressed && !downPressed && !this.rightKnob.dragging) {
+        this.rightKnob.returning = true;
+      }
+      
+      // Store last key states
+      this._lastLeft = leftPressed;
+      this._lastRight = rightPressed;
+      this._lastUp = upPressed;
+      this._lastDown = downPressed;
+    } else {
+      // Normal mode: velocity-based movement
+      const speed = 1.5;
+      
+      // X axis (left knob) - A/D and Arrow keys
+      const leftPressed = Keys.isDown(Keys.A) || Keys.isDown(Keys.LEFT) || 
+                          Keys.isDown(Keys.D) || Keys.isDown(Keys.RIGHT);
+      if (Keys.isDown(Keys.A) || Keys.isDown(Keys.LEFT)) {
+        this.leftKnob.velocity = -speed;
+        this.leftKnob.returning = false;
+      } else if (Keys.isDown(Keys.D) || Keys.isDown(Keys.RIGHT)) {
+        this.leftKnob.velocity = speed;
+        this.leftKnob.returning = false;
+      } else if (!this.leftKnob.dragging && Math.abs(this.leftKnob.velocity) < 0.05) {
+        // No keys pressed and velocity near 0 - start returning
+        this.leftKnob.returning = true;
+      }
+      
+      // Y axis (right knob) - W/S/J/L and Arrow keys
+      const rightPressed = Keys.isDown(Keys.W) || Keys.isDown(Keys.UP) || Keys.isDown(Keys.J) ||
+                           Keys.isDown(Keys.S) || Keys.isDown(Keys.DOWN) || Keys.isDown(Keys.L);
+      if (Keys.isDown(Keys.W) || Keys.isDown(Keys.UP) || Keys.isDown(Keys.J)) {
+        this.rightKnob.velocity = -speed;
+        this.rightKnob.returning = false;
+      } else if (Keys.isDown(Keys.S) || Keys.isDown(Keys.DOWN) || Keys.isDown(Keys.L)) {
+        this.rightKnob.velocity = speed;
+        this.rightKnob.returning = false;
+      } else if (!this.rightKnob.dragging && Math.abs(this.rightKnob.velocity) < 0.05) {
+        // No keys pressed and velocity near 0 - start returning
+        this.rightKnob.returning = true;
       }
 
-      // Fade out once settled at bottom
-      if (p.y >= screenBottom - p.size - 5 && Math.abs(p.vy) < 20) {
-        p.alpha -= dt * 2;
-      }
+      // Move cursor based on knob velocities
+      const sensitivity = CONFIG.line.sensitivity * Math.min(this.screenW, this.screenH);
+      const moveX = this.leftKnob.velocity * sensitivity * dt;
+      const moveY = this.rightKnob.velocity * sensitivity * dt;
 
-      // Remove dead particles
-      if (p.alpha <= 0 || p.y > this.height) {
-        this.sandParticles.splice(i, 1);
+      if (Math.abs(moveX) > 0.01 || Math.abs(moveY) > 0.01) {
+        this.screen.moveCursor(moveX, moveY);
       }
     }
   }
 
   render() {
-    super.render();
+    // Draw frame background
     const ctx = this.ctx;
-    const w = this.width;
-    const h = this.height;
-
-    // Clear
-    ctx.fillStyle = CONFIG.colors.bg;
-    ctx.fillRect(0, 0, w, h);
-
-    // Apply shake offset
-    ctx.save();
-    if (this.shakeOffset > 0) {
-      const offsetX = (Math.random() - 0.5) * this.shakeOffset * 2;
-      const offsetY = (Math.random() - 0.5) * this.shakeOffset * 2;
-      ctx.translate(offsetX, offsetY);
-    }
-
-    // Draw frame
-    this.drawFrame(ctx, w, h);
-
-    // Draw screen
-    this.drawScreen(ctx);
-
-    // Draw the line
-    this.drawLine(ctx);
-
-    // Draw sand particles
-    this.drawSand(ctx);
-
-    // Draw cursor
-    this.drawCursor(ctx);
-
-    // Draw knobs
-    this.drawKnob(ctx, this.leftKnobX, this.knobY, this.leftKnob, 'X');
-    this.drawKnob(ctx, this.rightKnobX, this.knobY, this.rightKnob, 'Y');
-
-    ctx.restore();
-
-    // Draw instructions (outside shake transform)
-    this.drawInstructions(ctx, w, h);
-  }
-
-  /**
-   * Draw the etch-a-sketch frame
-   */
-  drawFrame(ctx, w, h) {
-    const r = CONFIG.frame.cornerRadius;
-
-    // Outer frame
     ctx.fillStyle = CONFIG.colors.frame;
     ctx.strokeStyle = CONFIG.colors.frameBorder;
     ctx.lineWidth = 2;
-
     ctx.beginPath();
-    ctx.roundRect(10, 10, w - 20, h - 20, r);
+    ctx.roundRect(10, 10, this.width - 20, this.height - 20, CONFIG.frame.cornerRadius);
     ctx.fill();
     ctx.stroke();
 
-    // Logo text
+    // Title
     ctx.fillStyle = CONFIG.colors.text;
     ctx.font = 'bold 16px "Fira Code", monospace';
     ctx.textAlign = 'center';
-    ctx.fillText('ETCH-A-SKETCH', w / 2, 35);
-
+    ctx.fillText('ETCH-A-SKETCH', this.width / 2, 35);
     ctx.font = '10px "Fira Code", monospace';
     ctx.fillStyle = CONFIG.colors.textDim;
-    ctx.fillText('GENUARY 2026', w / 2, 50);
-  }
+    ctx.fillText('GENUARY 2026', this.width / 2, 50);
 
-  /**
-   * Draw the green screen area with grid
-   */
-  drawScreen(ctx) {
-    // Screen background
-    ctx.fillStyle = CONFIG.colors.screen;
-    ctx.strokeStyle = CONFIG.colors.screenBorder;
-    ctx.lineWidth = 2;
-
-    ctx.beginPath();
-    ctx.roundRect(this.screenX, this.screenY, this.screenW, this.screenH, 8);
-    ctx.fill();
-    ctx.stroke();
-
-    // Draw grid
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(this.screenX, this.screenY, this.screenW, this.screenH);
-    ctx.clip();
-
-    ctx.strokeStyle = CONFIG.colors.grid;
-    ctx.lineWidth = 1;
-
-    const spacing = CONFIG.grid.spacing;
-
-    // Vertical lines
-    for (let x = this.screenX; x <= this.screenX + this.screenW; x += spacing) {
-      ctx.beginPath();
-      ctx.moveTo(x, this.screenY);
-      ctx.lineTo(x, this.screenY + this.screenH);
-      ctx.stroke();
-    }
-
-    // Horizontal lines
-    for (let y = this.screenY; y <= this.screenY + this.screenH; y += spacing) {
-      ctx.beginPath();
-      ctx.moveTo(this.screenX, y);
-      ctx.lineTo(this.screenX + this.screenW, y);
-      ctx.stroke();
-    }
-
-    ctx.restore();
-
-    // Inner glow/scanlines effect
-    ctx.save();
-    ctx.globalAlpha = 0.03;
-    for (let y = this.screenY; y < this.screenY + this.screenH; y += 3) {
-      ctx.fillStyle = '#0f0';
-      ctx.fillRect(this.screenX, y, this.screenW, 1);
-    }
-    ctx.restore();
-  }
-
-  /**
-   * Draw falling sand particles
-   */
-  drawSand(ctx) {
-    if (this.sandParticles.length === 0) return;
-
-    ctx.save();
-
-    // Clip to screen area
-    ctx.beginPath();
-    ctx.rect(this.screenX, this.screenY, this.screenW, this.screenH);
-    ctx.clip();
-
-    for (const p of this.sandParticles) {
-      ctx.globalAlpha = p.alpha;
-      ctx.fillStyle = CONFIG.colors.line;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Subtle glow
-      ctx.globalAlpha = p.alpha * 0.3;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.size * 2, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    ctx.restore();
-  }
-
-  /**
-   * Draw the continuous line
-   */
-  drawLine(ctx) {
-    if (this.points.length < 2) return;
-
-    ctx.save();
-
-    // Clip to screen area
-    ctx.beginPath();
-    ctx.rect(this.screenX, this.screenY, this.screenW, this.screenH);
-    ctx.clip();
-
-    // Draw the line
-    ctx.strokeStyle = CONFIG.colors.line;
-    ctx.lineWidth = CONFIG.line.width;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-
-    ctx.beginPath();
-    ctx.moveTo(this.points[0].x, this.points[0].y);
-
-    for (let i = 1; i < this.points.length; i++) {
-      ctx.lineTo(this.points[i].x, this.points[i].y);
-    }
-
-    ctx.stroke();
-
-    // Glow effect
-    ctx.strokeStyle = 'rgba(0, 255, 0, 0.3)';
-    ctx.lineWidth = CONFIG.line.width + 4;
-    ctx.stroke();
-
-    ctx.restore();
-  }
-
-  /**
-   * Draw the cursor position
-   */
-  drawCursor(ctx) {
-    const size = 6;
-
-    // Cursor crosshair
-    ctx.strokeStyle = CONFIG.colors.line;
-    ctx.lineWidth = 1;
-    ctx.globalAlpha = 0.8;
-
-    ctx.beginPath();
-    ctx.moveTo(this.cursorX - size, this.cursorY);
-    ctx.lineTo(this.cursorX + size, this.cursorY);
-    ctx.moveTo(this.cursorX, this.cursorY - size);
-    ctx.lineTo(this.cursorX, this.cursorY + size);
-    ctx.stroke();
-
-    // Glowing dot
-    ctx.fillStyle = CONFIG.colors.line;
-    ctx.beginPath();
-    ctx.arc(this.cursorX, this.cursorY, 3, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.globalAlpha = 1;
-  }
-
-  /**
-   * Draw a rotary knob
-   */
-  drawKnob(ctx, x, y, knobState, label) {
-    const r = this.knobRadius;
-    const isActive = knobState.dragging;
-
-    // Outer ring (glows when active)
-    ctx.beginPath();
-    ctx.arc(x, y, r + 4, 0, Math.PI * 2);
-    ctx.fillStyle = isActive ? CONFIG.colors.knobRing : CONFIG.colors.frameBorder;
-    ctx.fill();
-
-    // Knob body
-    const gradient = ctx.createRadialGradient(x - r * 0.3, y - r * 0.3, 0, x, y, r);
-    gradient.addColorStop(0, CONFIG.colors.knobHighlight);
-    gradient.addColorStop(1, CONFIG.colors.knob);
-
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.fillStyle = gradient;
-    ctx.fill();
-
-    // Knob grip lines
-    ctx.strokeStyle = CONFIG.colors.frameBorder;
-    ctx.lineWidth = 2;
-    const gripCount = 8;
-    for (let i = 0; i < gripCount; i++) {
-      const angle = knobState.angle + (i / gripCount) * Math.PI * 2;
-      const innerR = r * 0.5;
-      const outerR = r * 0.85;
-
-      ctx.beginPath();
-      ctx.moveTo(
-        x + Math.cos(angle) * innerR,
-        y + Math.sin(angle) * innerR
-      );
-      ctx.lineTo(
-        x + Math.cos(angle) * outerR,
-        y + Math.sin(angle) * outerR
-      );
-      ctx.stroke();
-    }
-
-    // Position indicator
-    const indicatorAngle = knobState.angle;
-    ctx.fillStyle = CONFIG.colors.knobRing;
-    ctx.beginPath();
-    ctx.arc(
-      x + Math.cos(indicatorAngle) * r * 0.7,
-      y + Math.sin(indicatorAngle) * r * 0.7,
-      4,
-      0,
-      Math.PI * 2
-    );
-    ctx.fill();
-
-    // Label
-    ctx.fillStyle = CONFIG.colors.textDim;
-    ctx.font = '12px "Fira Code", monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText(label, x, y + r + 20);
-  }
-
-  /**
-   * Draw instructions
-   */
-  drawInstructions(ctx, w, h) {
+    // Instructions
     ctx.fillStyle = CONFIG.colors.textDim;
     ctx.font = '10px "Fira Code", monospace';
-    ctx.textAlign = 'center';
-    
     if (this.autoDrawing) {
       ctx.fillStyle = CONFIG.colors.text;
-      ctx.fillText('AUTO-DRAWING... [ESC] to stop', w / 2, h - 15);
+      ctx.fillText('AUTO-DRAWING... [ESC] to stop', this.width / 2, this.height - 15);
     } else {
-      ctx.fillText('[A/D] X • [W/S] Y • [C] clear • [G] export • [P] load SVG • [1-4] presets', w / 2, h - 15);
+      ctx.fillText('[A/D] X • [W/S] Y • [C] clear • [G] export • [1-4] presets', this.width / 2, this.height - 15);
     }
+
+    // Render pipeline (scenes with knobs, screen, buttons)
+    super.render();
   }
 
   onResize() {
     this.updateDimensions();
-    this.updateMobileUI();
+
+    // Update screen size
+    if (this.screen) {
+      this.screen.screenWidth = this.screenW;
+      this.screen.screenHeight = this.screenH;
+      this.screen.y = -this.height * 0.12;
+    }
+
+    // Update knob positions
+    const knobRadius = Math.min(this.width, this.height) * CONFIG.frame.knobSize;
+    if (this.leftKnob) {
+      this.leftKnob.x = -this.width * 0.3;
+      this.leftKnob.y = this.height * 0.34;
+      this.leftKnob.radius = knobRadius;
+    }
+    if (this.rightKnob) {
+      this.rightKnob.x = this.width * 0.3;
+      this.rightKnob.y = this.height * 0.34;
+      this.rightKnob.radius = knobRadius;
+    }
+
+
   }
 }
 
 /**
  * Create Day 22 visualization
- * @param {HTMLCanvasElement} canvas
- * @returns {Object} Game instance with stop() method
  */
 export default function day22(canvas) {
   const game = new EtchASketchDemo(canvas);
