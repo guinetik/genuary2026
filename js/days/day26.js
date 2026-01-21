@@ -12,7 +12,7 @@
  * - Scroll: Manual zoom
  */
 
-import { Game, Camera3D, ParticleSystem, Painter, Easing } from "@guinetik/gcanvas";
+import { Game, Camera3D, ParticleSystem, Painter } from "@guinetik/gcanvas";
 
 const CONFIG = {
   background: "#000",
@@ -49,8 +49,31 @@ const CONFIG = {
     damping: 0.92,
     scatterForce: 800,
     buildDelay: 0.003, // Stagger per particle
+    infiniteSpawn: true, // Keep spawning new sponges forever
   },
 };
+
+// Grid positions for infinite sponge spawning (defined once)
+const GRID_POSITIONS = [
+  { x: 1, y: 0, z: 0 },   // right
+  { x: -1, y: 0, z: 0 },  // left
+  { x: 0, y: -1, z: 0 },  // top
+  { x: 0, y: 1, z: 0 },   // bottom
+  { x: 0, y: 0, z: 1 },   // front
+  { x: 0, y: 0, z: -1 },  // back
+  { x: 1, y: -1, z: 0 },  // top-right
+  { x: -1, y: -1, z: 0 }, // top-left
+  { x: 1, y: 1, z: 0 },   // bottom-right
+  { x: -1, y: 1, z: 0 },  // bottom-left
+  { x: 1, y: 0, z: 1 },   // front-right
+  { x: -1, y: 0, z: 1 },  // front-left
+  { x: 1, y: 0, z: -1 },  // back-right
+  { x: -1, y: 0, z: -1 }, // back-left
+  { x: 0, y: -1, z: 1 },  // top-front
+  { x: 0, y: -1, z: -1 }, // top-back
+  { x: 0, y: 1, z: 1 },   // bottom-front
+  { x: 0, y: 1, z: -1 },  // bottom-back
+];
 
 /**
  * Generate Menger Sponge cube positions recursively
@@ -126,6 +149,17 @@ class Day26Demo extends Game {
     // Build state
     this.buildTime = 0;
     this.cubesSpawned = 0;
+    
+    // Infinite spawn state
+    this.spongeCount = 0;
+    this.totalParticles = 0;
+    
+    // Persistent set for deduplication (avoids rebuilding each sponge)
+    this.existingPositions = new Set();
+    this.positionTolerance = 0.1;
+    
+    // Track next cube to spawn (avoids iterating all cubes each frame)
+    this.nextCubeIndex = 0;
 
     // Generate target positions
     this.generateTargets();
@@ -167,81 +201,65 @@ class Day26Demo extends Game {
     cubePositions.sort((a, b) => a.depth - b.depth);
 
     // Store cubes (1 particle per cube center)
-    this.cubes = cubePositions.map((cube, i) => ({
-      ...cube,
-      spawnDelay: i * CONFIG.animation.buildDelay,
-      spawned: false,
-    }));
+    const tol = this.positionTolerance;
+    this.cubes = cubePositions.map((cube, i) => {
+      // Add to deduplication set
+      const key = `${Math.round(cube.x / tol)},${Math.round(cube.y / tol)},${Math.round(cube.z / tol)}`;
+      this.existingPositions.add(key);
+      
+      return {
+        x: cube.x,
+        y: cube.y,
+        z: cube.z,
+        size: cube.size,
+        spawnDelay: i * CONFIG.animation.buildDelay,
+        spawned: false,
+      };
+    });
 
     console.log(`Menger Sponge: ${this.cubes.length} cubes/particles`);
   }
 
   createParticleSystem() {
+    // Cache for per-frame calculations
+    this._cosY = 1;
+    this._sinY = 0;
+    this._strength = CONFIG.animation.attractStrength;
+    this._damping = CONFIG.animation.damping;
+
     // Custom updater: attract each particle to its target
     const attractToTarget = (particle, dt) => {
-      if (!particle.alive || particle.custom.targetX === undefined) return;
+      if (!particle.alive) return;
+      const custom = particle.custom;
+      if (custom.targetX === undefined) return;
 
-      // Apply global rotation to target
-      const rotY = this.globalRotation;
-      const cosY = Math.cos(rotY);
-      const sinY = Math.sin(rotY);
+      // Use cached trig values (updated once per frame in update())
+      const tx = custom.targetX * this._cosY - custom.targetZ * this._sinY;
+      const tz = custom.targetX * this._sinY + custom.targetZ * this._cosY;
 
-      const tx = particle.custom.targetX * cosY - particle.custom.targetZ * sinY;
-      const tz = particle.custom.targetX * sinY + particle.custom.targetZ * cosY;
-      const ty = particle.custom.targetY;
+      // Apply zoom and calculate delta
+      const zoom = this.zoom;
+      const dx = tx * zoom - particle.x;
+      const dy = custom.targetY * zoom - particle.y;
+      const dz = tz * zoom - particle.z;
 
-      // Apply zoom
-      const targetX = tx * this.zoom;
-      const targetY = ty * this.zoom;
-      const targetZ = tz * this.zoom;
-
-      // Spring attraction
-      const dx = targetX - particle.x;
-      const dy = targetY - particle.y;
-      const dz = targetZ - particle.z;
-
-      const strength = CONFIG.animation.attractStrength;
-      particle.vx += dx * strength * dt;
-      particle.vy += dy * strength * dt;
-      particle.vz += dz * strength * dt;
-
-      // Damping
-      const damping = CONFIG.animation.damping;
-      particle.vx *= damping;
-      particle.vy *= damping;
-      particle.vz *= damping;
+      // Spring attraction + damping combined
+      const str = this._strength * dt;
+      const damp = this._damping;
+      particle.vx = (particle.vx + dx * str) * damp;
+      particle.vy = (particle.vy + dy * str) * damp;
+      particle.vz = (particle.vz + dz * str) * damp;
 
       // Apply velocity
       particle.x += particle.vx * dt;
       particle.y += particle.vy * dt;
       particle.z += particle.vz * dt;
-
-      // Check if settled based on velocity (not distance, since target rotates)
-      const speed = Math.sqrt(particle.vx ** 2 + particle.vy ** 2 + particle.vz ** 2);
-
-      if (!particle.custom.settled && speed < 50) {
-        // Lock as settled
-        particle.custom.settled = true;
-        // Set to green based on depth
-        const depthRatio = particle.custom.depth / CONFIG.maxDepth;
-        const lightness = 40 + depthRatio * 20;
-        const rgb = this.hslToRgb(135 / 360, 1, lightness / 100);
-        particle.color.r = rgb.r;
-        particle.color.g = rgb.g;
-        particle.color.b = rgb.b;
-      } else if (!particle.custom.settled) {
-        // Still flying: white/bright
-        particle.color.r = 255;
-        particle.color.g = 255;
-        particle.color.b = 255;
-      }
-      // If settled, color stays locked
     };
 
     this.particles = new ParticleSystem(this, {
       camera: this.camera,
-      depthSort: true,
-      maxParticles: 10000,
+      depthSort: true, // Required for 3D projection to work properly
+      maxParticles: 50000,
       blendMode: "source-over",
       updaters: [attractToTarget],
     });
@@ -250,79 +268,52 @@ class Day26Demo extends Game {
   }
 
   /**
-   * Convert HSL to RGB
-   */
-  hslToRgb(h, s, l) {
-    let r, g, b;
-    if (s === 0) {
-      r = g = b = l;
-    } else {
-      const hue2rgb = (p, q, t) => {
-        if (t < 0) t += 1;
-        if (t > 1) t -= 1;
-        if (t < 1/6) return p + (q - p) * 6 * t;
-        if (t < 1/2) return q;
-        if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
-        return p;
-      };
-      const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-      const p = 2 * l - q;
-      r = hue2rgb(p, q, h + 1/3);
-      g = hue2rgb(p, q, h);
-      b = hue2rgb(p, q, h - 1/3);
-    }
-    return { r: Math.round(r * 255), g: Math.round(g * 255), b: Math.round(b * 255) };
-  }
-
-  /**
    * Spawn 1 particle at cube center
    */
   spawnCube(cube) {
-    const spawnRadius = Math.max(this.width, this.height) * 0.8;
+    const spawnRadius = this._spawnRadius || (this._spawnRadius = Math.max(this.width, this.height) * 0.8);
 
     // Random spawn position (spherical distribution)
     const theta = Math.random() * Math.PI * 2;
     const phi = Math.acos(2 * Math.random() - 1);
     const r = spawnRadius * (0.3 + Math.random() * 0.7);
+    const sinPhi = Math.sin(phi);
 
-    const spawnX = r * Math.sin(phi) * Math.cos(theta);
-    const spawnY = r * Math.sin(phi) * Math.sin(theta);
+    const spawnX = r * sinPhi * Math.cos(theta);
+    const spawnY = r * sinPhi * Math.sin(theta);
     const spawnZ = r * Math.cos(phi);
 
     // Acquire particle from pool
     const p = this.particles.acquire();
 
-    // Set position
+    // Set position & velocity (slight inward bias)
     p.x = spawnX;
     p.y = spawnY;
     p.z = spawnZ;
-
-    // Set velocity (slight inward bias)
     p.vx = -spawnX * 0.5;
     p.vy = -spawnY * 0.5;
     p.vz = -spawnZ * 0.5;
 
-    // Size based on cube size (smaller cubes = smaller particles)
-    const sizeRatio = cube.size / (Math.min(this.width, this.height) * 0.35);
-    p.size = Math.max(CONFIG.particleMinSize, CONFIG.particleBaseSize * sizeRatio);
-    p.color.r = 255;
+    // Size based on cube size
+    const baseRef = this._baseSizeRef || (this._baseSizeRef = Math.min(this.width, this.height) * 0.35);
+    p.size = Math.max(CONFIG.particleMinSize, CONFIG.particleBaseSize * cube.size / baseRef);
+    
+    // Green color
+    p.color.r = 0;
     p.color.g = 255;
-    p.color.b = 255;
+    p.color.b = 0;
     p.color.a = 1;
     p.shape = CONFIG.particleShape;
 
-    // Set lifecycle (infinite)
+    // Lifecycle
     p.age = 0;
     p.lifetime = Infinity;
     p.alive = true;
 
-    // Store target in custom data (cube center)
+    // Target position (only what's needed)
     p.custom.targetX = cube.x;
     p.custom.targetY = cube.y;
     p.custom.targetZ = cube.z;
-    p.custom.depth = cube.depth;
-    p.custom.cubeSize = cube.size;
-    p.custom.baseSize = p.size;
 
     // Add to active particles
     this.particles.particles.push(p);
@@ -332,21 +323,22 @@ class Day26Demo extends Game {
   }
 
   scatterParticles() {
-    // Scatter all particles outward
-    for (const particle of this.particles.particles) {
-      if (!particle.alive) continue;
-
-      // Reset settled state so they turn white while flying
-      particle.custom.settled = false;
+    const particles = this.particles.particles;
+    const baseForce = CONFIG.animation.scatterForce;
+    
+    for (let i = 0, len = particles.length; i < len; i++) {
+      const p = particles[i];
+      if (!p.alive) continue;
 
       // Random scatter direction
       const theta = Math.random() * Math.PI * 2;
       const phi = Math.acos(2 * Math.random() - 1);
-      const force = CONFIG.animation.scatterForce * (0.5 + Math.random());
+      const force = baseForce * (0.5 + Math.random());
+      const sinPhi = Math.sin(phi);
 
-      particle.vx += force * Math.sin(phi) * Math.cos(theta);
-      particle.vy += force * Math.sin(phi) * Math.sin(theta);
-      particle.vz += force * Math.cos(phi);
+      p.vx += force * sinPhi * Math.cos(theta);
+      p.vy += force * sinPhi * Math.sin(theta);
+      p.vz += force * Math.cos(phi);
     }
   }
 
@@ -360,16 +352,94 @@ class Day26Demo extends Game {
 
     // Global rotation
     this.globalRotation += CONFIG.animation.autoRotateSpeed * dt;
+    
+    // Cache trig for particle updater
+    this._cosY = Math.cos(this.globalRotation);
+    this._sinY = Math.sin(this.globalRotation);
 
     // Smooth zoom (faster response)
     this.zoom += (this.targetZoom - this.zoom) * 0.15;
 
-    // Spawn cubes over time
-    for (const cube of this.cubes) {
-      if (!cube.spawned && this.buildTime >= cube.spawnDelay) {
+    // Spawn cubes over time (optimized: only check from next unspawned)
+    while (this.nextCubeIndex < this.cubes.length) {
+      const cube = this.cubes[this.nextCubeIndex];
+      if (this.buildTime >= cube.spawnDelay) {
         this.spawnCube(cube);
+        this.nextCubeIndex++;
+      } else {
+        break; // Cubes are sorted by spawnDelay, so stop here
       }
     }
+    
+    // Infinite spawn: when all cubes spawned, generate new sponge targets
+    if (CONFIG.animation.infiniteSpawn && this.nextCubeIndex >= this.cubes.length) {
+      this.spawnNextSponge();
+    }
+  }
+
+  /**
+   * Generate a new sponge beside/above/below - flush with no gap, shared faces
+   */
+  spawnNextSponge() {
+    this.spongeCount++;
+    this.totalParticles += this.cubesSpawned;
+    
+    // Same base size as original
+    const minDim = Math.min(this.width, this.height);
+    const baseSize = minDim * 0.35;
+    
+    // No gap - sponges share their boundary faces
+    const spacing = baseSize;
+    
+    // Get position for this sponge (gridPositions defined at module level)
+    const layer = Math.floor(this.spongeCount / GRID_POSITIONS.length) + 1;
+    const posIndex = (this.spongeCount - 1) % GRID_POSITIONS.length;
+    const pos = GRID_POSITIONS[posIndex];
+    
+    const offsetX = pos.x * spacing * layer;
+    const offsetY = pos.y * spacing * layer;
+    const offsetZ = pos.z * spacing * layer;
+
+    // Generate new cube positions
+    const cubePositions = generateMengerPositions(
+      offsetX, offsetY, offsetZ,
+      baseSize,
+      0,
+      CONFIG.maxDepth
+    );
+
+    // Filter out cubes that already exist (using persistent Set)
+    const tol = this.positionTolerance;
+    const existingSet = this.existingPositions;
+    const newCubePositions = [];
+    
+    for (const cube of cubePositions) {
+      const key = `${Math.round(cube.x / tol)},${Math.round(cube.y / tol)},${Math.round(cube.z / tol)}`;
+      if (!existingSet.has(key)) {
+        existingSet.add(key); // Add to persistent set
+        newCubePositions.push(cube);
+      }
+    }
+
+    // Sort by depth for build animation
+    newCubePositions.sort((a, b) => a.depth - b.depth);
+
+    // Add new cubes directly to array (avoid spread operator)
+    const baseDelay = this.buildTime;
+    for (let i = 0; i < newCubePositions.length; i++) {
+      const cube = newCubePositions[i];
+      this.cubes.push({
+        x: cube.x,
+        y: cube.y,
+        z: cube.z,
+        size: cube.size,
+        spawnDelay: baseDelay + i * CONFIG.animation.buildDelay,
+        spawned: false,
+      });
+    }
+    
+    const skipped = cubePositions.length - newCubePositions.length;
+    console.log(`Sponge #${this.spongeCount + 1} | New: ${newCubePositions.length} | Shared: ${skipped}`);
   }
 
   /**
@@ -391,7 +461,7 @@ class Day26Demo extends Game {
     ctx.textAlign = "left";
 
     ctx.fillText(
-      `MENGER SPONGE | Depth: ${CONFIG.maxDepth} | Cubes: ${this.cubesSpawned}/${this.cubes.length}`,
+      `MENGER SPONGE | Depth: ${CONFIG.maxDepth} | Sponges: ${this.spongeCount + 1} | Particles: ${this.cubesSpawned}`,
       10,
       this.height - 10
     );
@@ -405,37 +475,9 @@ class Day26Demo extends Game {
   }
 
   onResize() {
-    if (this.cubes) {
-      // Store old spawn states
-      const oldSpawned = this.cubes.map(c => c.spawned);
-      const oldCubesSpawned = this.cubesSpawned;
-
-      // Regenerate for new size
-      this.generateTargets();
-
-      // Restore spawn states
-      for (let i = 0; i < Math.min(oldSpawned.length, this.cubes.length); i++) {
-        this.cubes[i].spawned = oldSpawned[i];
-      }
-      this.cubesSpawned = oldCubesSpawned;
-
-      // Update existing particle targets (1 particle per cube)
-      let particleIndex = 0;
-      for (const cube of this.cubes) {
-        if (!cube.spawned) continue;
-        const particles = this.particles.particles;
-        if (particleIndex < particles.length && particles[particleIndex].alive) {
-          particles[particleIndex].custom.targetX = cube.x;
-          particles[particleIndex].custom.targetY = cube.y;
-          particles[particleIndex].custom.targetZ = cube.z;
-          particles[particleIndex].custom.depth = cube.depth;
-          // Update size for new dimensions
-          const sizeRatio = cube.size / (Math.min(this.width, this.height) * 0.35);
-          particles[particleIndex].custom.baseSize = Math.max(CONFIG.particleMinSize, CONFIG.particleBaseSize * sizeRatio);
-          particleIndex++;
-        }
-      }
-    }
+    // Clear cached values so they recalculate
+    this._spawnRadius = null;
+    this._baseSizeRef = null;
   }
 }
 
