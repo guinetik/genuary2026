@@ -29,9 +29,10 @@ import {
 const TAU = Math.PI * 2;
 
 const CONFIG = {
-  // No hard cap - complexity can grow
-  initialCount: 40,
-  maxMolecules: 150, // Soft limit for performance
+  // Molecule counts - scaled by canvas size
+  baseMolecules: 40,    // Base count for 1920x1080
+  minMolecules: 20,     // Minimum for small screens
+  maxMolecules: 200,    // Maximum for 4K screens (soft limit for performance)
 
   // Camera
   perspective: 800,
@@ -799,20 +800,38 @@ class PrimordialSoupDemo extends Game {
     this.worldWidth = this.width * 0.8;
     this.worldHeight = this.height * 0.9;
 
+    // Calculate scale based on canvas size
+    // Reference: 1920x1080 = ~2M pixels
+    const refPixels = 1920 * 1080;
+    const currentPixels = this.width * this.height;
+    const scale = currentPixels / refPixels;
+    
+    // Scale molecule count proportionally
+    this.moleculeCount = Math.floor(
+      Math.min(CONFIG.maxMolecules,
+        Math.max(CONFIG.minMolecules, CONFIG.baseMolecules * scale))
+    );
+    
+    // Scale ambient effects too
+    const bubbleCount = Math.floor(CONFIG.bubbleCount * Math.max(0.5, scale));
+    const particleCount = Math.floor(CONFIG.particleCount * Math.max(0.5, scale));
+    
+    console.log(`[Day25] Canvas: ${this.width}x${this.height}, scale: ${scale.toFixed(2)}, molecules: ${this.moleculeCount}, bubbles: ${bubbleCount}, particles: ${particleCount}`);
+
     // Ambient bubbles
     this.bubbles = [];
-    for (let i = 0; i < CONFIG.bubbleCount; i++) {
+    for (let i = 0; i < bubbleCount; i++) {
       this.bubbles.push(this.createBubble(true));
     }
 
     // Floating particles
     this.particles = [];
-    for (let i = 0; i < CONFIG.particleCount; i++) {
+    for (let i = 0; i < particleCount; i++) {
       this.particles.push(this.createParticle());
     }
 
     // Spawn primordial molecules
-    for (let i = 0; i < CONFIG.initialCount; i++) {
+    for (let i = 0; i < this.moleculeCount; i++) {
       this.spawnMolecule(true);
     }
 
@@ -915,7 +934,9 @@ class PrimordialSoupDemo extends Game {
    * @returns {Molecule3D|null}
    */
   spawnMolecule(primordialOnly = false, x, y, z, templateKey, ignoreLimit = false) {
-    if (!ignoreLimit && this.molecules.length >= CONFIG.maxMolecules) return null;
+    // Use scaled soft limit (3x initial count, capped at maxMolecules)
+    const softLimit = Math.min(CONFIG.maxMolecules, (this.moleculeCount || CONFIG.baseMolecules) * 3);
+    if (!ignoreLimit && this.molecules.length >= softLimit) return null;
 
     const key =
       templateKey ||
