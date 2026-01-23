@@ -530,7 +530,7 @@ class DrawingScreen extends GameObject {
     }
     ctx.globalAlpha = 1;
 
-    // Draw the line
+    // Draw the line (supports pen-up moves for multi-segment paths)
     if (this.points.length >= 2) {
       ctx.strokeStyle = CONFIG.colors.line;
       ctx.lineWidth = CONFIG.line.width;
@@ -540,7 +540,13 @@ class DrawingScreen extends GameObject {
       ctx.beginPath();
       ctx.moveTo(this.points[0].x, this.points[0].y);
       for (let i = 1; i < this.points.length; i++) {
-        ctx.lineTo(this.points[i].x, this.points[i].y);
+        const pt = this.points[i];
+        if (pt.move) {
+          // Pen up - move without drawing
+          ctx.moveTo(pt.x, pt.y);
+        } else {
+          ctx.lineTo(pt.x, pt.y);
+        }
       }
       ctx.stroke();
 
@@ -743,6 +749,30 @@ class EtchASketchDemo extends Game {
       if (file) this.loadSVGFile(file);
       this.fileInput.value = '';
     });
+
+    // Drag and drop support (works in fullscreen!)
+    this.dragOver = false;
+    
+    this.canvas.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      this.dragOver = true;
+    });
+
+    this.canvas.addEventListener('dragleave', (e) => {
+      e.preventDefault();
+      this.dragOver = false;
+    });
+
+    this.canvas.addEventListener('drop', (e) => {
+      e.preventDefault();
+      this.dragOver = false;
+      
+      const file = e.dataTransfer.files[0];
+      if (file && file.name.endsWith('.svg')) {
+        this.loadSVGFile(file);
+      }
+    });
   }
 
   createMobileUI() {
@@ -862,6 +892,7 @@ class EtchASketchDemo extends Game {
   parseSVGPath(pathData, isNormalized) {
     const points = [];
     let cx = 0, cy = 0;
+    let subpathStartX = 0, subpathStartY = 0; // Track start of current subpath for Z command
 
     const regex = /([MLHVZmlhvz])([^MLHVZmlhvz]*)/g;
     let match;
@@ -874,13 +905,27 @@ class EtchASketchDemo extends Game {
         case 'M':
           for (let i = 0; i < args.length; i += 2) {
             cx = args[i]; cy = args[i + 1];
-            points.push({ x: cx, y: cy, move: i === 0 });
+            if (i === 0) {
+              // First point of M is a move, save as subpath start
+              subpathStartX = cx;
+              subpathStartY = cy;
+              points.push({ x: cx, y: cy, move: true });
+            } else {
+              // Subsequent points in M are implicit lineto
+              points.push({ x: cx, y: cy });
+            }
           }
           break;
         case 'm':
           for (let i = 0; i < args.length; i += 2) {
             cx += args[i]; cy += args[i + 1];
-            points.push({ x: cx, y: cy, move: i === 0 });
+            if (i === 0) {
+              subpathStartX = cx;
+              subpathStartY = cy;
+              points.push({ x: cx, y: cy, move: true });
+            } else {
+              points.push({ x: cx, y: cy });
+            }
           }
           break;
         case 'L':
@@ -909,10 +954,10 @@ class EtchASketchDemo extends Game {
           break;
         case 'Z':
         case 'z':
-          if (points.length > 0) {
-            points.push({ x: points[0].x, y: points[0].y });
-            cx = points[0].x; cy = points[0].y;
-          }
+          // Close path back to the start of the CURRENT subpath, not the global first point
+          points.push({ x: subpathStartX, y: subpathStartY });
+          cx = subpathStartX;
+          cy = subpathStartY;
           break;
       }
     }
@@ -968,6 +1013,19 @@ class EtchASketchDemo extends Game {
     }
 
     const next = this.autoDrawPath[nextIdx];
+    
+    // If next point is a "move" command (start of new subpath), 
+    // instantly teleport there without drawing a line
+    if (next.move) {
+      this.autoDrawIndex = nextIdx;
+      this.autoDrawProgress = 0;
+      this.screen.cursorX = next.x;
+      this.screen.cursorY = next.y;
+      // Start a new line segment from this position (mark as move for renderer)
+      this.screen.points.push({ x: next.x, y: next.y, move: true });
+      return;
+    }
+    
     const dx = next.x - curr.x;
     const dy = next.y - curr.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
@@ -994,14 +1052,10 @@ class EtchASketchDemo extends Game {
     this.leftKnob.angle += dx * knobScale;
     this.rightKnob.angle += dy * knobScale;
 
-    // Add point
-    if (!next.move) {
-      const last = this.screen.points[this.screen.points.length - 1];
-      const d = Math.sqrt((this.screen.cursorX - last.x) ** 2 + (this.screen.cursorY - last.y) ** 2);
-      if (d > 1) {
-        this.screen.points.push({ x: this.screen.cursorX, y: this.screen.cursorY });
-      }
-    } else {
+    // Add point to the drawing path
+    const last = this.screen.points[this.screen.points.length - 1];
+    const d = Math.sqrt((this.screen.cursorX - last.x) ** 2 + (this.screen.cursorY - last.y) ** 2);
+    if (d > 1) {
       this.screen.points.push({ x: this.screen.cursorX, y: this.screen.cursorY });
     }
   }
@@ -1010,9 +1064,12 @@ class EtchASketchDemo extends Game {
     const points = this.screen.getPoints();
     if (points.length < 2) return;
 
+    // Build path data, using M for move points and L for line points
     let pathD = `M ${points[0].x.toFixed(2)} ${points[0].y.toFixed(2)}`;
     for (let i = 1; i < points.length; i++) {
-      pathD += ` L ${points[i].x.toFixed(2)} ${points[i].y.toFixed(2)}`;
+      const pt = points[i];
+      const cmd = pt.move ? 'M' : 'L';
+      pathD += ` ${cmd} ${pt.x.toFixed(2)} ${pt.y.toFixed(2)}`;
     }
 
     const sw = this.screen.screenWidth;
@@ -1088,7 +1145,7 @@ class EtchASketchDemo extends Game {
       this._lastDown = downPressed;
     } else {
       // Normal mode: velocity-based movement
-      const speed = 1.5;
+      const speed = 1.65;
       
       // X axis (left knob) - A/D and Arrow keys
       const leftPressed = Keys.isDown(Keys.A) || Keys.isDown(Keys.LEFT) || 
@@ -1156,11 +1213,28 @@ class EtchASketchDemo extends Game {
       ctx.fillStyle = CONFIG.colors.text;
       ctx.fillText('AUTO-DRAWING... [ESC] to stop', this.width / 2, this.height - 15);
     } else {
-      ctx.fillText('[A/D] X • [W/S] Y • [C] clear • [G] export • [1-4] presets', this.width / 2, this.height - 15);
+      ctx.fillText('[A/D] X • [W/S] Y • [C] clear • [G] export • [1-4] presets • drag SVG', this.width / 2, this.height - 15);
     }
 
     // Render pipeline (scenes with knobs, screen, buttons)
     super.render();
+
+    // Drag-and-drop overlay
+    if (this.dragOver) {
+      ctx.fillStyle = 'rgba(0, 255, 0, 0.1)';
+      ctx.fillRect(0, 0, this.width, this.height);
+      
+      ctx.strokeStyle = '#0f0';
+      ctx.lineWidth = 4;
+      ctx.setLineDash([10, 10]);
+      ctx.strokeRect(20, 20, this.width - 40, this.height - 40);
+      ctx.setLineDash([]);
+      
+      ctx.fillStyle = '#0f0';
+      ctx.font = 'bold 24px "Fira Code", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('DROP SVG FILE', this.width / 2, this.height / 2);
+    }
   }
 
   onResize() {
