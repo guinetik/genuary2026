@@ -18,6 +18,10 @@
 
 import { Game, WebGLRenderer } from '@guinetik/gcanvas';
 
+// Import shaders as raw strings (Vite handles this with ?raw suffix)
+import VERTEX_SHADER from '../../glsl/liquidg.vert?raw';
+import FRAGMENT_SHADER from '../../glsl/liquidg.frag?raw';
+
 const CONFIG = {
   // Animation
   speed: 0.3,
@@ -30,389 +34,19 @@ const CONFIG = {
   radius: 0.28,
   superellipseN: 4.0,  // Squareness (2=circle, 4=squircle, higher=more square)
   blendRadius: 0.15,
+  
+  // Interaction effects
+  hoverScale: 0.08,       // +8% scale on hover
+  dragScale: 0.20,        // +20% scale on drag
+  hoverGlow: 0.3,         // Extra glow intensity on hover
+  dragSoften: 0.8,        // Superellipse N reduction during drag (more organic)
+  rippleSpeed: 18.0,      // How fast ripples propagate outward
+  rippleDecay: 1.2,       // How fast ripples fade (lower = longer lasting)
+  rippleStrength: 0.18,   // Amplitude of ripple UV displacement
+  wobbleFreq: 12.0,       // Wobble frequency
+  wobbleDecay: 3.0,       // How fast wobble settles
+  elasticDuration: 0.6,   // Duration of elastic animations (seconds)
 };
-
-// Vertex shader - simple passthrough
-const VERTEX_SHADER = `
-precision highp float;
-
-attribute vec2 aPosition;
-attribute vec2 aUv;
-
-varying vec2 vUv;
-
-void main() {
-    vUv = aUv;
-    gl_Position = vec4(aPosition, 0.0, 1.0);
-}
-`;
-
-// Fragment shader - Liquid Glass with proper physics
-const FRAGMENT_SHADER = `
-precision highp float;
-
-varying vec2 vUv;
-
-uniform float uTime;
-uniform vec2 uResolution;
-uniform vec2 uMouse;
-uniform vec2 uDragOffset;  // Offset from click point to blob center
-uniform float uDragging;  // 0 = none, 1 = blob1, 2 = blob2
-uniform vec2 uDropPos1;
-uniform vec2 uDropPos2;
-uniform float uIOR;
-uniform float uBlurStrength;
-uniform float uRadius;
-uniform float uSuperellipseN;
-uniform float uBlendRadius;
-
-// =============================================================================
-// IQ's Superellipse SDF
-// =============================================================================
-
-vec3 sdSuperellipse(vec2 p, float r, float n) {
-    p = p / r;
-    vec2 gs = sign(p);
-    vec2 ps = abs(p);
-    float gm = pow(ps.x, n) + pow(ps.y, n);
-    float gd = pow(gm, 1.0 / n) - 1.0;
-    vec2 g = gs * pow(ps, vec2(n - 1.0)) * pow(gm, 1.0 / n - 1.0);
-    p = abs(p); 
-    if (p.y > p.x) p = p.yx;
-    n = 2.0 / n;
-    float d = 1e20;
-    const int num = 12;
-    vec2 oq = vec2(1.0, 0.0);
-    for (int i = 1; i < num; i++) {
-        float h = float(i) / float(num - 1);
-        vec2 q = vec2(pow(cos(h * 3.1415927 / 4.0), n),
-                      pow(sin(h * 3.1415927 / 4.0), n));
-        vec2 pa = p - oq;
-        vec2 ba = q - oq;
-        vec2 z = pa - ba * clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
-        float d2 = dot(z, z);
-        if (d2 < d) {
-            d = d2;
-        }
-        oq = q;
-    }
-    return vec3(sqrt(d) * sign(gd) * r, g);
-}
-
-// =============================================================================
-// Smooth minimum for blending SDFs
-// =============================================================================
-
-float smin(float a, float b, float k) {
-    float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
-    return mix(b, a, h) - k * h * (1.0 - h);
-}
-
-// =============================================================================
-// Fresnel reflectance calculation (physically accurate)
-// =============================================================================
-
-float fresnel(vec3 I, vec3 N, float ior) {
-    float cosi = clamp(dot(I, N), -1.0, 1.0);
-    float etai = 1.0, etat = ior;
-    if (cosi > 0.0) {
-        float temp = etai;
-        etai = etat;
-        etat = temp;
-    }
-    float sint = etai / etat * sqrt(max(0.0, 1.0 - cosi * cosi));
-    if (sint >= 1.0) {
-        return 1.0; // Total internal reflection
-    }
-    float cost = sqrt(max(0.0, 1.0 - sint * sint));
-    cosi = abs(cosi);
-    float Rs = ((etat * cosi) - (etai * cost)) / ((etat * cosi) + (etai * cost));
-    float Rp = ((etai * cosi) - (etat * cost)) / ((etai * cosi) + (etat * cost));
-    return (Rs * Rs + Rp * Rp) / 2.0;
-}
-
-// =============================================================================
-// Background pattern (checker + gradient)
-// =============================================================================
-
-float checker(vec2 uv, float scale) {
-    vec2 c = floor(uv * scale);
-    return mod(c.x + c.y, 2.0);
-}
-
-// =============================================================================
-// Simple geometric background pattern
-// =============================================================================
-
-float sdBox(vec2 p, vec2 b) {
-    vec2 d = abs(p) - b;
-    return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0);
-}
-
-float sdCircle(vec2 p, float r) {
-    return length(p) - r;
-}
-
-vec3 sampleBackground(vec2 uv) {
-    float time = uTime * 0.3;
-    
-    // Dark gradient base
-    vec3 col1 = vec3(0.02, 0.02, 0.05);
-    vec3 col2 = vec3(0.05, 0.02, 0.08);
-    float t = length(uv) * 0.5;
-    vec3 gradient = mix(col1, col2, t);
-    
-    // Grid of circles - creates nice magnification demo
-    float gridSize = 0.15;
-    vec2 gridUV = mod(uv + gridSize * 0.5, gridSize) - gridSize * 0.5;
-    vec2 gridID = floor((uv + gridSize * 0.5) / gridSize);
-    
-    // Alternating colored circles
-    float circleR = 0.04;
-    float circle = sdCircle(gridUV, circleR);
-    
-    // Color based on grid position
-    float hue = mod(gridID.x * 0.1 + gridID.y * 0.15 + time * 0.1, 1.0);
-    vec3 circleColor = vec3(
-        0.5 + 0.5 * sin(hue * 6.28),
-        0.5 + 0.5 * sin(hue * 6.28 + 2.09),
-        0.5 + 0.5 * sin(hue * 6.28 + 4.18)
-    ) * 0.7;
-    
-    float circleMask = smoothstep(0.005, -0.005, circle);
-    gradient = mix(gradient, circleColor, circleMask);
-    
-    // Thin grid lines
-    float lineW = 0.003;
-    float gridLineX = smoothstep(lineW, 0.0, abs(gridUV.x));
-    float gridLineY = smoothstep(lineW, 0.0, abs(gridUV.y));
-    gradient += vec3(0.08) * max(gridLineX, gridLineY);
-    
-    // Central "26" text area - simple boxes
-    vec2 p = uv;
-    
-    // Number 2
-    float two = 1e10;
-    two = min(two, sdBox(p - vec2(-0.18, 0.06), vec2(0.08, 0.015)));  // top
-    two = min(two, sdBox(p - vec2(-0.13, 0.03), vec2(0.015, 0.045))); // right top
-    two = min(two, sdBox(p - vec2(-0.18, 0.0), vec2(0.08, 0.015)));   // middle
-    two = min(two, sdBox(p - vec2(-0.23, -0.03), vec2(0.015, 0.045)));// left bottom
-    two = min(two, sdBox(p - vec2(-0.18, -0.06), vec2(0.08, 0.015))); // bottom
-    
-    // Number 6
-    float six = 1e10;
-    six = min(six, sdBox(p - vec2(0.18, 0.06), vec2(0.08, 0.015)));   // top
-    six = min(six, sdBox(p - vec2(0.13, 0.03), vec2(0.015, 0.045)));  // left top
-    six = min(six, sdBox(p - vec2(0.18, 0.0), vec2(0.08, 0.015)));    // middle
-    six = min(six, sdBox(p - vec2(0.13, -0.03), vec2(0.015, 0.045))); // left bottom
-    six = min(six, sdBox(p - vec2(0.23, -0.03), vec2(0.015, 0.045))); // right bottom
-    six = min(six, sdBox(p - vec2(0.18, -0.06), vec2(0.08, 0.015)));  // bottom
-    
-    float numbers = min(two, six);
-    float numMask = smoothstep(0.003, -0.003, numbers);
-    gradient = mix(gradient, vec3(0.95), numMask);
-    
-    return gradient;
-}
-
-// =============================================================================
-// Gaussian blur
-// =============================================================================
-
-const int samples = 16;
-const float sigma = float(samples) * 0.25;
-
-float gaussian(vec2 i) {
-    return exp(-0.5 * dot(i / sigma, i / sigma)) / (6.28 * sigma * sigma);
-}
-
-vec3 efficientBlur(vec2 uv, float blurStrength) {
-    vec3 O = vec3(0.0);
-    float totalWeight = 0.0;
-    int s = samples / 2;
-    
-    for (int i = 0; i < 64; i++) {
-        if (i >= s * s) break;
-        vec2 d = vec2(mod(float(i), float(s)), floor(float(i) / float(s))) * 2.0 - float(s) / 2.0;
-        vec2 offset = d * blurStrength * 0.002;
-        float weight = gaussian(d);
-        
-        vec3 sampleColor = sampleBackground(uv + offset);
-        O += sampleColor * weight;
-        totalWeight += weight;
-    }
-    
-    return O / totalWeight;
-}
-
-// =============================================================================
-// Main
-// =============================================================================
-
-void main() {
-    vec2 uv = (vUv - 0.5) * 2.0;
-    float aspect = uResolution.x / uResolution.y;
-    uv.x *= aspect;
-    
-    // Mouse position adjusted by drag offset (so blob doesn't jump to cursor)
-    vec2 dragOffset = uDragOffset;
-    dragOffset.x *= aspect;
-    vec2 mouse = uMouse;
-    mouse.x *= aspect;
-    vec2 adjustedMouse = mouse - dragOffset;
-    
-    // Both blobs are draggable
-    // Apply aspect ratio to drop positions to match mouse coordinate space
-    vec2 dropPos1 = uDropPos1;
-    dropPos1.x *= aspect;
-    vec2 dropPos2 = uDropPos2;
-    dropPos2.x *= aspect;
-    
-    // pos1: follows adjusted mouse if dragging blob 1, otherwise stays at drop position
-    vec2 pos1 = (uDragging > 0.5 && uDragging < 1.5) ? adjustedMouse : dropPos1;
-    
-    // pos2: follows adjusted mouse if dragging blob 2, otherwise stays at drop position
-    vec2 pos2 = (uDragging > 1.5) ? adjustedMouse : dropPos2;
-    
-    float radius = uRadius;
-    float n = uSuperellipseN;
-    
-    // Calculate distances to both superellipses
-    vec3 dg1 = sdSuperellipse(uv - pos1, radius, n);
-    vec3 dg2 = sdSuperellipse(uv - pos2, radius, n);
-    float d1 = dg1.x;
-    float d2 = dg2.x;
-    
-    // Blend the two SDFs together
-    float d = smin(d1, d2, uBlendRadius);
-    
-    // === DROP SHADOW ===
-    vec2 shadowOffset = vec2(0.0, -0.02);
-    float shadowBlur = 0.06;
-    
-    float shadow1 = sdSuperellipse(uv - pos1 - shadowOffset, radius, n).x;
-    float shadow2 = sdSuperellipse(uv - pos2 - shadowOffset, radius, n).x;
-    float shadowSDF = smin(shadow1, shadow2, uBlendRadius);
-    
-    float shadowMask = 1.0 - smoothstep(0.0, shadowBlur, shadowSDF);
-    shadowMask *= 0.15;
-    
-    // Base background
-    vec3 baseColor = sampleBackground(uv);
-    
-    // Apply shadow
-    baseColor = mix(baseColor, vec3(0.0), shadowMask);
-    
-    vec3 finalColor = baseColor;
-    
-    // === INSIDE THE GLASS ===
-    if (d < 0.0) {
-        // Blend weights for smooth center interpolation
-        float w1 = exp(-d1 * d1 * 8.0);
-        float w2 = exp(-d2 * d2 * 8.0);
-        float totalWeight = w1 + w2 + 1e-6;
-        
-        // Blended center position
-        vec2 center = (pos1 * w1 + pos2 * w2) / totalWeight;
-        
-        // Offset from center
-        vec2 offset = uv - center;
-        float distFromCenter = length(offset);
-        
-        // Depth in shape
-        float depthInShape = abs(d);
-        float normalizedDepth = clamp(depthInShape / (radius * 0.8), 0.0, 1.0);
-        
-        // Exponential distortion for lens effect
-        float edgeFactor = 1.0 - normalizedDepth;
-        float exponentialDistortion = exp(edgeFactor * 3.0) - 1.0;
-        
-        // Lens distortion
-        float baseMagnification = 0.75;
-        float lensStrength = 0.4;
-        float distortionAmount = exponentialDistortion * lensStrength;
-        
-        // Chromatic aberration - different distortion per channel
-        float baseDistortion = baseMagnification + distortionAmount * distFromCenter;
-        
-        float redDistortion = baseDistortion * 0.92;
-        float greenDistortion = baseDistortion * 1.0;
-        float blueDistortion = baseDistortion * 1.08;
-        
-        vec2 redUV = center + offset * redDistortion;
-        vec2 greenUV = center + offset * greenDistortion;
-        vec2 blueUV = center + offset * blueDistortion;
-        
-        // Apply blur with chromatic aberration
-        float blur = uBlurStrength * (edgeFactor * 0.5 + 0.5);
-        
-        vec3 redBlur = efficientBlur(redUV, blur);
-        vec3 greenBlur = efficientBlur(greenUV, blur);
-        vec3 blueBlur = efficientBlur(blueUV, blur);
-        
-        vec3 refractedColor = vec3(redBlur.r, greenBlur.g, blueBlur.b);
-        
-        // Glass tint and brightness boost
-        refractedColor *= vec3(0.95, 0.98, 1.0);
-        refractedColor += vec3(0.15);
-        
-        // === FRESNEL ===
-        vec2 eps = vec2(0.01, 0.0);
-        vec2 gradient = vec2(
-            smin(sdSuperellipse(uv + eps.xy - pos1, radius, n).x, 
-                 sdSuperellipse(uv + eps.xy - pos2, radius, n).x, uBlendRadius) -
-            smin(sdSuperellipse(uv - eps.xy - pos1, radius, n).x, 
-                 sdSuperellipse(uv - eps.xy - pos2, radius, n).x, uBlendRadius),
-            smin(sdSuperellipse(uv + eps.yx - pos1, radius, n).x, 
-                 sdSuperellipse(uv + eps.yx - pos2, radius, n).x, uBlendRadius) -
-            smin(sdSuperellipse(uv - eps.yx - pos1, radius, n).x, 
-                 sdSuperellipse(uv - eps.yx - pos2, radius, n).x, uBlendRadius)
-        );
-        vec3 normal = normalize(vec3(gradient, 0.5));
-        vec3 viewDir = vec3(0.0, 0.0, -1.0);
-        float fresnelAmount = fresnel(viewDir, normal, uIOR);
-        
-        // Fresnel reflection
-        vec3 fresnelColor = vec3(1.0, 0.98, 0.95);
-        finalColor = mix(refractedColor, fresnelColor, fresnelAmount * 0.35);
-    }
-    
-    // === EDGE HIGHLIGHT ===
-    float edgeThickness = 0.008;
-    float edgeMask = smoothstep(edgeThickness, 0.0, abs(d));
-    
-    if (edgeMask > 0.0) {
-        // Diagonal highlight pattern
-        vec2 normalizedPos = uv * 1.5;
-        
-        float diagonal1 = abs(normalizedPos.x + normalizedPos.y);
-        float diagonal2 = abs(normalizedPos.x - normalizedPos.y);
-        
-        float diagonalFactor = max(
-            smoothstep(1.0, 0.1, diagonal1),
-            smoothstep(1.0, 0.5, diagonal2)
-        );
-        diagonalFactor = pow(diagonalFactor, 1.8);
-        
-        vec3 edgeWhite = vec3(1.2);
-        vec3 internalColor = finalColor * 0.5;
-        
-        vec3 edgeColor = mix(internalColor, edgeWhite, diagonalFactor);
-        finalColor = mix(finalColor, edgeColor, edgeMask);
-    }
-    
-    // === POST PROCESSING ===
-    
-    // Subtle vignette
-    float vig = 1.0 - smoothstep(0.6, 1.4, length(uv / aspect));
-    finalColor *= 0.9 + vig * 0.1;
-    
-    // Gamma
-    finalColor = pow(finalColor, vec3(0.95));
-    
-    gl_FragColor = vec4(clamp(finalColor, 0.0, 1.0), 1.0);
-}
-`;
 
 /**
  * Liquid Glass Demo
@@ -472,12 +106,63 @@ class LiquidGlassDemo extends Game {
     this.lastDragX = 0;
     this.lastDragY = 0;
     this.dragSamples = [];  // Rolling average for smooth throw
+    
+    // ==========================================================================
+    // INTERACTION STATE - hover, drag, ripple, wobble per blob
+    // ==========================================================================
+    
+    // Hover state (which blob is being hovered, -1 = none)
+    this.hoveredBlob = -1;
+    
+    // Animated interaction values (0-1, with elastic easing)
+    this.hover1 = 0;          // Current hover intensity for blob 1
+    this.hover2 = 0;          // Current hover intensity for blob 2
+    this.drag1 = 0;           // Current drag intensity for blob 1
+    this.drag2 = 0;           // Current drag intensity for blob 2
+    
+    // Target values for elastic animation
+    this.targetHover1 = 0;
+    this.targetHover2 = 0;
+    this.targetDrag1 = 0;
+    this.targetDrag2 = 0;
+    
+    // Ripple animation (triggered on release, counts up from 0)
+    this.ripple1 = 0;
+    this.ripple2 = 0;
+    this.rippleActive1 = false;
+    this.rippleActive2 = false;
+    
+    // Wobble animation (starts on release, decays)
+    this.wobble1 = 0;
+    this.wobble2 = 0;
+    this.wobbleActive1 = false;
+    this.wobbleActive2 = false;
+    
+    // Elastic animation timing
+    this.hoverAnimTime1 = 0;
+    this.hoverAnimTime2 = 0;
+    this.dragAnimTime1 = 0;
+    this.dragAnimTime2 = 0;
 
     // Mouse events
     this.canvas.addEventListener('mousemove', (e) => {
       const rect = this.canvas.getBoundingClientRect();
       this.targetMouseX = ((e.clientX - rect.left) / rect.width - 0.5) * 2;
       this.targetMouseY = -((e.clientY - rect.top) / rect.height - 0.5) * 2;
+      
+      // Hover detection (only when not dragging)
+      if (this.dragging === 0) {
+        this.updateHoverState(this.targetMouseX, this.targetMouseY);
+      }
+    });
+    
+    this.canvas.addEventListener('mouseleave', () => {
+      // Clear hover when mouse leaves canvas
+      if (this.dragging === 0) {
+        this.hoveredBlob = -1;
+        this.targetHover1 = 0;
+        this.targetHover2 = 0;
+      }
     });
 
     this.canvas.addEventListener('mousedown', (e) => {
@@ -519,6 +204,18 @@ class LiquidGlassDemo extends Game {
         this.dragSamples = [];
         this.lastDragX = clickX;
         this.lastDragY = clickY;
+        
+        // === INTERACTION: Start drag animation ===
+        this.targetDrag1 = 1;
+        this.dragAnimTime1 = 0;
+        // Clear hover (we're now dragging)
+        this.targetHover1 = 0;
+        this.targetHover2 = 0;
+        this.hoveredBlob = -1;
+        // Stop any existing ripple
+        this.rippleActive1 = false;
+        this.ripple1 = 0;
+        
       } else if (dist2 < hitRadius) {
         this.dragging = 2;
         // Stop any existing velocity
@@ -535,6 +232,17 @@ class LiquidGlassDemo extends Game {
         this.dragSamples = [];
         this.lastDragX = clickX;
         this.lastDragY = clickY;
+        
+        // === INTERACTION: Start drag animation ===
+        this.targetDrag2 = 1;
+        this.dragAnimTime2 = 0;
+        // Clear hover
+        this.targetHover1 = 0;
+        this.targetHover2 = 0;
+        this.hoveredBlob = -1;
+        // Stop any existing ripple
+        this.rippleActive2 = false;
+        this.ripple2 = 0;
       }
     });
 
@@ -559,16 +267,42 @@ class LiquidGlassDemo extends Game {
         this.dropPos1Y = this.mouseY - this.dragOffsetY;
         this.vel1X = throwVelX;
         this.vel1Y = throwVelY;
+        
+        // === INTERACTION: Release - trigger ripple & wobble ===
+        this.targetDrag1 = 0;
+        this.dragAnimTime1 = 0;
+        this.ripple1 = 0;
+        this.rippleActive1 = true;
+        this.wobble1 = 0;
+        this.wobbleActive1 = true;
+        
       } else if (this.dragging === 2) {
         this.dropPos2X = this.mouseX - this.dragOffsetX;
         this.dropPos2Y = this.mouseY - this.dragOffsetY;
         this.vel2X = throwVelX;
         this.vel2Y = throwVelY;
+        
+        // === INTERACTION: Release - trigger ripple & wobble ===
+        this.targetDrag2 = 0;
+        this.dragAnimTime2 = 0;
+        this.ripple2 = 0;
+        this.rippleActive2 = true;
+        this.wobble2 = 0;
+        this.wobbleActive2 = true;
       }
       this.dragging = 0;
     });
 
-    this.canvas.addEventListener('mouseleave', () => {
+    // Note: The earlier mouseleave handles hover clearing
+    // This one handles drag release when dragging outside canvas
+    this.canvas.addEventListener('mouseup', (e) => {
+      // This is a duplicate listener but needed to catch mouseup outside canvas
+    }, { capture: true });
+    
+    // Handle drag release when mouse leaves while dragging
+    window.addEventListener('mouseup', () => {
+      if (this.dragging === 0) return;
+      
       // Calculate throw velocity from rolling average
       let throwVelX = 0;
       let throwVelY = 0;
@@ -587,11 +321,28 @@ class LiquidGlassDemo extends Game {
         this.dropPos1Y = this.mouseY - this.dragOffsetY;
         this.vel1X = throwVelX;
         this.vel1Y = throwVelY;
+        
+        // === INTERACTION: Release effects ===
+        this.targetDrag1 = 0;
+        this.dragAnimTime1 = 0;
+        this.ripple1 = 0;
+        this.rippleActive1 = true;
+        this.wobble1 = 0;
+        this.wobbleActive1 = true;
+        
       } else if (this.dragging === 2) {
         this.dropPos2X = this.mouseX - this.dragOffsetX;
         this.dropPos2Y = this.mouseY - this.dragOffsetY;
         this.vel2X = throwVelX;
         this.vel2Y = throwVelY;
+        
+        // === INTERACTION: Release effects ===
+        this.targetDrag2 = 0;
+        this.dragAnimTime2 = 0;
+        this.ripple2 = 0;
+        this.rippleActive2 = true;
+        this.wobble2 = 0;
+        this.wobbleActive2 = true;
       }
       this.dragging = 0;
     });
@@ -633,6 +384,13 @@ class LiquidGlassDemo extends Game {
         this.dragSamples = [];
         this.lastDragX = touchX;
         this.lastDragY = touchY;
+        
+        // === INTERACTION: Start drag animation ===
+        this.targetDrag1 = 1;
+        this.dragAnimTime1 = 0;
+        this.rippleActive1 = false;
+        this.ripple1 = 0;
+        
       } else if (dist2 < hitRadius) {
         this.dragging = 2;
         this.vel2X = 0;
@@ -646,6 +404,12 @@ class LiquidGlassDemo extends Game {
         this.dragSamples = [];
         this.lastDragX = touchX;
         this.lastDragY = touchY;
+        
+        // === INTERACTION: Start drag animation ===
+        this.targetDrag2 = 1;
+        this.dragAnimTime2 = 0;
+        this.rippleActive2 = false;
+        this.ripple2 = 0;
       }
     }, { passive: true });
 
@@ -675,14 +439,109 @@ class LiquidGlassDemo extends Game {
         this.dropPos1Y = this.mouseY - this.dragOffsetY;
         this.vel1X = throwVelX;
         this.vel1Y = throwVelY;
+        
+        // === INTERACTION: Release - trigger ripple & wobble ===
+        this.targetDrag1 = 0;
+        this.dragAnimTime1 = 0;
+        this.ripple1 = 0;
+        this.rippleActive1 = true;
+        this.wobble1 = 0;
+        this.wobbleActive1 = true;
+        
       } else if (this.dragging === 2) {
         this.dropPos2X = this.mouseX - this.dragOffsetX;
         this.dropPos2Y = this.mouseY - this.dragOffsetY;
         this.vel2X = throwVelX;
         this.vel2Y = throwVelY;
+        
+        // === INTERACTION: Release - trigger ripple & wobble ===
+        this.targetDrag2 = 0;
+        this.dragAnimTime2 = 0;
+        this.ripple2 = 0;
+        this.rippleActive2 = true;
+        this.wobble2 = 0;
+        this.wobbleActive2 = true;
       }
       this.dragging = 0;
     });
+  }
+
+  /**
+   * Check which blob the mouse is hovering over
+   * @param {number} mouseX - Mouse X in normalized coords (-1 to 1)
+   * @param {number} mouseY - Mouse Y in normalized coords (-1 to 1)
+   */
+  updateHoverState(mouseX, mouseY) {
+    const aspect = this.width / this.height;
+    const mx = mouseX * aspect;
+    
+    // Check distance to blob 1
+    const dx1 = mx - this.dropPos1X * aspect;
+    const dy1 = mouseY - this.dropPos1Y;
+    const dist1 = Math.sqrt(dx1 * dx1 + dy1 * dy1);
+    
+    // Check distance to blob 2
+    const dx2 = mx - this.dropPos2X * aspect;
+    const dy2 = mouseY - this.dropPos2Y;
+    const dist2 = Math.sqrt(dx2 * dx2 + dy2 * dy2);
+    
+    const hitRadius = CONFIG.radius * 1.1;
+    
+    // Determine hover state
+    const prevHovered = this.hoveredBlob;
+    
+    if (dist1 < hitRadius && dist1 <= dist2) {
+      this.hoveredBlob = 1;
+    } else if (dist2 < hitRadius) {
+      this.hoveredBlob = 2;
+    } else {
+      this.hoveredBlob = -1;
+    }
+    
+    // Update hover targets
+    if (this.hoveredBlob !== prevHovered) {
+      if (this.hoveredBlob === 1) {
+        this.targetHover1 = 1;
+        this.targetHover2 = 0;
+        this.hoverAnimTime1 = 0;
+      } else if (this.hoveredBlob === 2) {
+        this.targetHover1 = 0;
+        this.targetHover2 = 1;
+        this.hoverAnimTime2 = 0;
+      } else {
+        this.targetHover1 = 0;
+        this.targetHover2 = 0;
+        this.hoverAnimTime1 = 0;
+        this.hoverAnimTime2 = 0;
+      }
+    }
+  }
+  
+  /**
+   * Elastic easing function (attempt out-elastic feel)
+   * @param {number} t - Progress 0-1
+   * @returns {number} Eased value
+   */
+  easeOutElastic(t) {
+    if (t === 0 || t === 1) return t;
+    const p = 0.4;
+    return Math.pow(2, -10 * t) * Math.sin((t - p / 4) * (2 * Math.PI) / p) + 1;
+  }
+  
+  /**
+   * Animate a value toward target with elastic easing
+   * @param {number} current - Current value
+   * @param {number} target - Target value
+   * @param {number} animTime - Animation time elapsed
+   * @param {number} duration - Total animation duration
+   * @returns {number} New value
+   */
+  animateElastic(current, target, animTime, duration) {
+    if (animTime >= duration) return target;
+    const t = Math.min(animTime / duration, 1);
+    const eased = this.easeOutElastic(t);
+    const start = target === 1 ? 0 : 1;  // Infer start from target
+    return start + (target - start) * eased;
   }
 
   update(dt) {
@@ -807,6 +666,76 @@ class LiquidGlassDemo extends Game {
         this.vel2Y = Math.abs(this.vel2Y) * bounce;
       }
     }
+    
+    // =========================================================================
+    // INTERACTION ANIMATION
+    // =========================================================================
+    
+    const elasticDur = CONFIG.elasticDuration;
+    
+    // Hover animation (blob 1)
+    this.hoverAnimTime1 += dt;
+    if (this.targetHover1 !== this.hover1) {
+      const t = Math.min(this.hoverAnimTime1 / elasticDur, 1);
+      const eased = this.easeOutElastic(t);
+      const start = this.targetHover1 === 1 ? 0 : 1;
+      this.hover1 = start + (this.targetHover1 - start) * eased;
+    }
+    
+    // Hover animation (blob 2)
+    this.hoverAnimTime2 += dt;
+    if (this.targetHover2 !== this.hover2) {
+      const t = Math.min(this.hoverAnimTime2 / elasticDur, 1);
+      const eased = this.easeOutElastic(t);
+      const start = this.targetHover2 === 1 ? 0 : 1;
+      this.hover2 = start + (this.targetHover2 - start) * eased;
+    }
+    
+    // Drag animation (blob 1)
+    this.dragAnimTime1 += dt;
+    if (this.targetDrag1 !== this.drag1) {
+      const t = Math.min(this.dragAnimTime1 / elasticDur, 1);
+      const eased = this.easeOutElastic(t);
+      const start = this.targetDrag1 === 1 ? 0 : 1;
+      this.drag1 = start + (this.targetDrag1 - start) * eased;
+    }
+    
+    // Drag animation (blob 2)
+    this.dragAnimTime2 += dt;
+    if (this.targetDrag2 !== this.drag2) {
+      const t = Math.min(this.dragAnimTime2 / elasticDur, 1);
+      const eased = this.easeOutElastic(t);
+      const start = this.targetDrag2 === 1 ? 0 : 1;
+      this.drag2 = start + (this.targetDrag2 - start) * eased;
+    }
+    
+    // Ripple animation (counts up while active)
+    if (this.rippleActive1) {
+      this.ripple1 += dt;
+      if (this.ripple1 > 2.0) {  // Ripple fades out after ~2 seconds
+        this.rippleActive1 = false;
+      }
+    }
+    if (this.rippleActive2) {
+      this.ripple2 += dt;
+      if (this.ripple2 > 2.0) {
+        this.rippleActive2 = false;
+      }
+    }
+    
+    // Wobble animation (counts up while active)
+    if (this.wobbleActive1) {
+      this.wobble1 += dt;
+      if (this.wobble1 > 1.5) {  // Wobble settles after ~1.5 seconds
+        this.wobbleActive1 = false;
+      }
+    }
+    if (this.wobbleActive2) {
+      this.wobble2 += dt;
+      if (this.wobble2 > 1.5) {
+        this.wobbleActive2 = false;
+      }
+    }
   }
 
   render() {
@@ -833,6 +762,26 @@ class LiquidGlassDemo extends Game {
       uRadius: CONFIG.radius,
       uSuperellipseN: CONFIG.superellipseN,
       uBlendRadius: CONFIG.blendRadius,
+      
+      // Interaction uniforms
+      uHover1: this.hover1,
+      uHover2: this.hover2,
+      uDrag1: this.drag1,
+      uDrag2: this.drag2,
+      uRipple1: this.ripple1,
+      uRipple2: this.ripple2,
+      uWobble1: this.wobble1,
+      uWobble2: this.wobble2,
+      
+      // Interaction config
+      uHoverScale: CONFIG.hoverScale,
+      uDragScale: CONFIG.dragScale,
+      uDragSoften: CONFIG.dragSoften,
+      uRippleSpeed: CONFIG.rippleSpeed,
+      uRippleDecay: CONFIG.rippleDecay,
+      uRippleStrength: CONFIG.rippleStrength,
+      uWobbleFreq: CONFIG.wobbleFreq,
+      uWobbleDecay: CONFIG.wobbleDecay,
     });
 
     // Render
@@ -841,14 +790,6 @@ class LiquidGlassDemo extends Game {
 
     // Composite onto main canvas
     ctx.drawImage(this.webgl.getCanvas(), 0, 0, w, h);
-
-    // Overlay text
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-    ctx.font = '14px "Fira Code", monospace';
-    ctx.textAlign = 'left';
-    ctx.fillText('LIQUID GLASS', 20, 30);
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
-    ctx.fillText('Drag & throw • Billiard bouncing off walls', 20, 50);
   }
 
   /**
@@ -927,13 +868,6 @@ class LiquidGlassDemo extends Game {
       ctx.arc(pos.x - radius * 0.4, pos.y - radius * 0.4, radius * 0.35, 0, Math.PI * 2);
       ctx.fill();
     });
-
-    // Text
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-    ctx.font = '14px "Fira Code", monospace';
-    ctx.fillText('LIQUID GLASS (Canvas 2D Fallback)', 20, 30);
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
-    ctx.fillText('WebGL not available', 20, 50);
   }
 
   onResize() {
