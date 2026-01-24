@@ -314,10 +314,15 @@ class PoincareDemo extends Game {
         });
       }
       
-      // If two fingers, initialize pinch distance
+      // If two fingers, initialize pinch state
       if (this._touches.size === 2) {
         const [t1, t2] = Array.from(this._touches.values());
         this._lastPinchDist = Math.hypot(t2.x - t1.x, t2.y - t1.y);
+        // Track pinch center for panning during pinch
+        this._lastPinchCenterX = (t1.x + t2.x) / 2;
+        this._lastPinchCenterY = (t1.y + t2.y) / 2;
+        // Stop single-finger drag when pinching
+        this.isDragging = false;
       }
       
       // Single touch - start drag
@@ -343,19 +348,31 @@ class PoincareDemo extends Game {
         }
       }
       
-      // Two-finger pinch zoom
+      // Two-finger pinch zoom + pan
       if (this._touches.size === 2) {
         const [t1, t2] = Array.from(this._touches.values());
         const pinchDist = Math.hypot(t2.x - t1.x, t2.y - t1.y);
+        const pinchCenterX = (t1.x + t2.x) / 2;
+        const pinchCenterY = (t1.y + t2.y) / 2;
         
         if (this._lastPinchDist > 0) {
+          // Zoom based on pinch distance change
           const pinchRatio = this._lastPinchDist / pinchDist;
           this.targetZoom *= pinchRatio;
           this.targetZoom = Math.min(50, this.targetZoom); // Cap zoom out
           this._touchMoved = true;
+          
+          // Pan based on pinch center movement
+          const rect = this.canvas.getBoundingClientRect();
+          const dx = (pinchCenterX - this._lastPinchCenterX) / Math.min(this.width, this.height) * this.zoom * 2;
+          const dy = (pinchCenterY - this._lastPinchCenterY) / Math.min(this.width, this.height) * this.zoom * 2;
+          this.targetOffsetX -= dx;
+          this.targetOffsetY += dy;
         }
         
         this._lastPinchDist = pinchDist;
+        this._lastPinchCenterX = pinchCenterX;
+        this._lastPinchCenterY = pinchCenterY;
       }
       // Single finger drag (pan)
       else if (this._touches.size === 1 && this.isDragging) {
