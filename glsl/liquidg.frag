@@ -2,28 +2,30 @@ precision highp float;
 
 varying vec2 vUv;
 
+// =============================================================================
+// MAX BLOBS - Compile-time constant for array sizes
+// =============================================================================
+#define MAX_BLOBS 6
+
 uniform float uTime;
 uniform vec2 uResolution;
 uniform vec2 uMouse;
-uniform vec2 uDragOffset;  // Offset from click point to blob center
-uniform float uDragging;  // 0 = none, 1 = blob1, 2 = blob2
-uniform vec2 uDropPos1;
-uniform vec2 uDropPos2;
+uniform vec2 uDragOffset;
+uniform float uDragging;  // -1.0 = none, 0.0+ = blob index
 uniform float uIOR;
 uniform float uBlurStrength;
 uniform float uRadius;
 uniform float uSuperellipseN;
 uniform float uBlendRadius;
 
-// Interaction uniforms (per blob)
-uniform float uHover1;      // 0-1 hover intensity for blob 1
-uniform float uHover2;      // 0-1 hover intensity for blob 2
-uniform float uDrag1;       // 0-1 drag intensity for blob 1
-uniform float uDrag2;       // 0-1 drag intensity for blob 2
-uniform float uRipple1;     // Ripple animation time for blob 1
-uniform float uRipple2;     // Ripple animation time for blob 2
-uniform float uWobble1;     // Wobble animation time for blob 1
-uniform float uWobble2;     // Wobble animation time for blob 2
+// Dynamic blob data
+uniform float uBlobCount;
+uniform vec2 uBlobPos[MAX_BLOBS];
+uniform float uBlobScale[MAX_BLOBS];   // Spawn scale (0 → 1)
+uniform float uBlobHover[MAX_BLOBS];
+uniform float uBlobDrag[MAX_BLOBS];
+uniform float uBlobRipple[MAX_BLOBS];
+uniform float uBlobWobble[MAX_BLOBS];
 
 // Interaction config
 uniform float uHoverScale;
@@ -78,7 +80,7 @@ float smin(float a, float b, float k) {
 }
 
 // =============================================================================
-// Fresnel reflectance calculation (physically accurate)
+// Fresnel reflectance calculation
 // =============================================================================
 
 float fresnel(vec3 I, vec3 N, float ior) {
@@ -91,7 +93,7 @@ float fresnel(vec3 I, vec3 N, float ior) {
     }
     float sint = etai / etat * sqrt(max(0.0, 1.0 - cosi * cosi));
     if (sint >= 1.0) {
-        return 1.0; // Total internal reflection
+        return 1.0;
     }
     float cost = sqrt(max(0.0, 1.0 - sint * sint));
     cosi = abs(cosi);
@@ -101,16 +103,7 @@ float fresnel(vec3 I, vec3 N, float ior) {
 }
 
 // =============================================================================
-// Background pattern (checker + gradient)
-// =============================================================================
-
-float checker(vec2 uv, float scale) {
-    vec2 c = floor(uv * scale);
-    return mod(c.x + c.y, 2.0);
-}
-
-// =============================================================================
-// Simple geometric background pattern
+// Background pattern
 // =============================================================================
 
 float sdBox(vec2 p, vec2 b) {
@@ -125,22 +118,18 @@ float sdCircle(vec2 p, float r) {
 vec3 sampleBackground(vec2 uv) {
     float time = uTime * 0.3;
     
-    // Dark gradient base
     vec3 col1 = vec3(0.02, 0.02, 0.05);
     vec3 col2 = vec3(0.05, 0.02, 0.08);
     float t = length(uv) * 0.5;
     vec3 gradient = mix(col1, col2, t);
     
-    // Grid of circles - creates nice magnification demo
     float gridSize = 0.15;
     vec2 gridUV = mod(uv + gridSize * 0.5, gridSize) - gridSize * 0.5;
     vec2 gridID = floor((uv + gridSize * 0.5) / gridSize);
     
-    // Alternating colored circles
     float circleR = 0.04;
     float circle = sdCircle(gridUV, circleR);
     
-    // Color based on grid position
     float hue = mod(gridID.x * 0.1 + gridID.y * 0.15 + time * 0.1, 1.0);
     vec3 circleColor = vec3(
         0.5 + 0.5 * sin(hue * 6.28),
@@ -151,31 +140,28 @@ vec3 sampleBackground(vec2 uv) {
     float circleMask = smoothstep(0.005, -0.005, circle);
     gradient = mix(gradient, circleColor, circleMask);
     
-    // Thin grid lines
     float lineW = 0.003;
     float gridLineX = smoothstep(lineW, 0.0, abs(gridUV.x));
     float gridLineY = smoothstep(lineW, 0.0, abs(gridUV.y));
     gradient += vec3(0.08) * max(gridLineX, gridLineY);
     
-    // Central "26" text area - simple boxes
+    // "26" text
     vec2 p = uv;
     
-    // Number 2
     float two = 1e10;
-    two = min(two, sdBox(p - vec2(-0.18, 0.06), vec2(0.08, 0.015)));  // top
-    two = min(two, sdBox(p - vec2(-0.13, 0.03), vec2(0.015, 0.045))); // right top
-    two = min(two, sdBox(p - vec2(-0.18, 0.0), vec2(0.08, 0.015)));   // middle
-    two = min(two, sdBox(p - vec2(-0.23, -0.03), vec2(0.015, 0.045)));// left bottom
-    two = min(two, sdBox(p - vec2(-0.18, -0.06), vec2(0.08, 0.015))); // bottom
+    two = min(two, sdBox(p - vec2(-0.18, 0.06), vec2(0.08, 0.015)));
+    two = min(two, sdBox(p - vec2(-0.13, 0.03), vec2(0.015, 0.045)));
+    two = min(two, sdBox(p - vec2(-0.18, 0.0), vec2(0.08, 0.015)));
+    two = min(two, sdBox(p - vec2(-0.23, -0.03), vec2(0.015, 0.045)));
+    two = min(two, sdBox(p - vec2(-0.18, -0.06), vec2(0.08, 0.015)));
     
-    // Number 6
     float six = 1e10;
-    six = min(six, sdBox(p - vec2(0.18, 0.06), vec2(0.08, 0.015)));   // top
-    six = min(six, sdBox(p - vec2(0.13, 0.03), vec2(0.015, 0.045)));  // left top
-    six = min(six, sdBox(p - vec2(0.18, 0.0), vec2(0.08, 0.015)));    // middle
-    six = min(six, sdBox(p - vec2(0.13, -0.03), vec2(0.015, 0.045))); // left bottom
-    six = min(six, sdBox(p - vec2(0.23, -0.03), vec2(0.015, 0.045))); // right bottom
-    six = min(six, sdBox(p - vec2(0.18, -0.06), vec2(0.08, 0.015)));  // bottom
+    six = min(six, sdBox(p - vec2(0.18, 0.06), vec2(0.08, 0.015)));
+    six = min(six, sdBox(p - vec2(0.13, 0.03), vec2(0.015, 0.045)));
+    six = min(six, sdBox(p - vec2(0.18, 0.0), vec2(0.08, 0.015)));
+    six = min(six, sdBox(p - vec2(0.13, -0.03), vec2(0.015, 0.045)));
+    six = min(six, sdBox(p - vec2(0.23, -0.03), vec2(0.015, 0.045)));
+    six = min(six, sdBox(p - vec2(0.18, -0.06), vec2(0.08, 0.015)));
     
     float numbers = min(two, six);
     float numMask = smoothstep(0.003, -0.003, numbers);
@@ -223,173 +209,164 @@ void main() {
     float aspect = uResolution.x / uResolution.y;
     uv.x *= aspect;
     
-    // Mouse position adjusted by drag offset (so blob doesn't jump to cursor)
+    // Mouse adjusted for drag offset
     vec2 dragOffset = uDragOffset;
     dragOffset.x *= aspect;
     vec2 mouse = uMouse;
     mouse.x *= aspect;
     vec2 adjustedMouse = mouse - dragOffset;
     
-    // Both blobs are draggable
-    // Apply aspect ratio to drop positions to match mouse coordinate space
-    vec2 dropPos1 = uDropPos1;
-    dropPos1.x *= aspect;
-    vec2 dropPos2 = uDropPos2;
-    dropPos2.x *= aspect;
-    
-    // pos1: follows adjusted mouse if dragging blob 1, otherwise stays at drop position
-    vec2 pos1 = (uDragging > 0.5 && uDragging < 1.5) ? adjustedMouse : dropPos1;
-    
-    // pos2: follows adjusted mouse if dragging blob 2, otherwise stays at drop position
-    vec2 pos2 = (uDragging > 1.5) ? adjustedMouse : dropPos2;
-    
-    // =============================================================================
-    // INTERACTION EFFECTS - Scale, soften, ripple, wobble per blob
-    // =============================================================================
-    
-    // Effective radius per blob (grows on hover/drag)
-    float radius1 = uRadius * (1.0 + uHover1 * uHoverScale + uDrag1 * uDragScale);
-    float radius2 = uRadius * (1.0 + uHover2 * uHoverScale + uDrag2 * uDragScale);
-    
-    // Effective superellipse N (softens during drag - more organic/gooey)
-    float n1 = mix(uSuperellipseN, uSuperellipseN * uDragSoften, uDrag1);
-    float n2 = mix(uSuperellipseN, uSuperellipseN * uDragSoften, uDrag2);
-    
-    // Calculate base distances to both superellipses
-    vec3 dg1 = sdSuperellipse(uv - pos1, radius1, n1);
-    vec3 dg2 = sdSuperellipse(uv - pos2, radius2, n2);
-    float d1 = dg1.x;
-    float d2 = dg2.x;
-    
-    // NOTE: Ripple effect is applied INSIDE the glass as a visual distortion,
-    // not here at the SDF level. The glass edge stays perfectly static.
-    // See the "INSIDE THE GLASS" section below for ripple implementation.
-    
-    // =============================================================================
-    // WOBBLE EFFECT - Jiggly surface during drag
-    // =============================================================================
-    
-    // Wobble for blob 1 (active during drag, decays on release)
-    if (uDrag1 > 0.0 || uWobble1 > 0.0) {
-        vec2 offset1 = uv - pos1;
-        float angle1 = atan(offset1.y, offset1.x);
-        float wobbleAmount1 = uDrag1 * 0.5 + exp(-uWobble1 * uWobbleDecay) * 0.3;
-        float wobble1 = sin(angle1 * 4.0 + uTime * uWobbleFreq) * wobbleAmount1 * 0.015;
-        wobble1 += sin(angle1 * 7.0 - uTime * uWobbleFreq * 1.3) * wobbleAmount1 * 0.008;
-        d1 += wobble1;
+    // Early exit if no blobs
+    if (uBlobCount < 0.5) {
+        vec3 bg = sampleBackground(uv);
+        float vig = 1.0 - smoothstep(0.6, 1.4, length(uv / aspect));
+        bg *= 0.9 + vig * 0.1;
+        bg = pow(bg, vec3(0.95));
+        gl_FragColor = vec4(bg, 1.0);
+        return;
     }
     
-    // Wobble for blob 2
-    if (uDrag2 > 0.0 || uWobble2 > 0.0) {
-        vec2 offset2 = uv - pos2;
-        float angle2 = atan(offset2.y, offset2.x);
-        float wobbleAmount2 = uDrag2 * 0.5 + exp(-uWobble2 * uWobbleDecay) * 0.3;
-        float wobble2 = sin(angle2 * 4.0 + uTime * uWobbleFreq) * wobbleAmount2 * 0.015;
-        wobble2 += sin(angle2 * 7.0 - uTime * uWobbleFreq * 1.3) * wobbleAmount2 * 0.008;
-        d2 += wobble2;
+    // Convert blob count to int for loop comparisons
+    int blobCount = int(uBlobCount);
+    
+    // =============================================================================
+    // Calculate SDF for all blobs
+    // =============================================================================
+    
+    float d = 1e10;
+    float shadowD = 1e10;
+    
+    // Store per-blob data for interaction effects
+    float blobDistances[MAX_BLOBS];
+    vec2 blobPositions[MAX_BLOBS];
+    float blobRadii[MAX_BLOBS];
+    
+    // Calculate weighted center for lens effect
+    float totalCenterWeight = 0.0;
+    vec2 weightedCenter = vec2(0.0);
+    
+    // Combined interaction state
+    float maxDrag = 0.0;
+    float maxHover = 0.0;
+    
+    for (int i = 0; i < MAX_BLOBS; i++) {
+        if (i >= blobCount) break;
+        
+        // Get blob position (apply aspect + check if being dragged)
+        vec2 pos = uBlobPos[i];
+        pos.x *= aspect;
+        
+        // If this blob is being dragged, use mouse position
+        if (abs(uDragging - float(i)) < 0.5) {
+            pos = adjustedMouse;
+        }
+        
+        blobPositions[i] = pos;
+        
+        // Per-blob radius based on spawn scale + interaction
+        float scale = uBlobScale[i];
+        float hover = uBlobHover[i];
+        float drag = uBlobDrag[i];
+        float radius = uRadius * scale * (1.0 + hover * uHoverScale + drag * uDragScale);
+        float n = mix(uSuperellipseN, uSuperellipseN * uDragSoften, drag);
+        blobRadii[i] = radius;
+        
+        // Skip nearly invisible blobs (scale < 0.01)
+        if (scale < 0.01) continue;
+        
+        // Calculate SDF
+        float blobD = sdSuperellipse(uv - pos, radius, n).x;
+        
+        // Wobble effect (jiggly during drag)
+        if (drag > 0.0 || uBlobWobble[i] > 0.0) {
+            vec2 offset = uv - pos;
+            float angle = atan(offset.y, offset.x);
+            float wobbleAmount = drag * 0.5 + exp(-uBlobWobble[i] * uWobbleDecay) * 0.3;
+            float wobble = sin(angle * 4.0 + uTime * uWobbleFreq) * wobbleAmount * 0.015;
+            wobble += sin(angle * 7.0 - uTime * uWobbleFreq * 1.3) * wobbleAmount * 0.008;
+            blobD += wobble;
+        }
+        
+        blobDistances[i] = blobD;
+        
+        // Blend with smooth minimum
+        d = smin(d, blobD, uBlendRadius);
+        
+        // Shadow SDF (scales with blob)
+        vec2 shadowPos = pos + vec2(0.0, -0.02 * scale);
+        float shadowBlobD = sdSuperellipse(uv - shadowPos, uRadius * scale, uSuperellipseN).x;
+        shadowD = smin(shadowD, shadowBlobD, uBlendRadius);
+        
+        // Weighted center calculation
+        float w = exp(-blobD * blobD * 8.0);
+        weightedCenter += pos * w;
+        totalCenterWeight += w;
+        
+        // Track max interaction states
+        maxDrag = max(maxDrag, drag);
+        maxHover = max(maxHover, hover);
     }
     
-    // Blend the two SDFs together
-    float d = smin(d1, d2, uBlendRadius);
+    weightedCenter /= (totalCenterWeight + 1e-6);
     
-    // === DROP SHADOW ===
-    vec2 shadowOffset = vec2(0.0, -0.02);
-    float shadowBlur = 0.06;
-    
-    float shadow1 = sdSuperellipse(uv - pos1 - shadowOffset, uRadius, uSuperellipseN).x;
-    float shadow2 = sdSuperellipse(uv - pos2 - shadowOffset, uRadius, uSuperellipseN).x;
-    float shadowSDF = smin(shadow1, shadow2, uBlendRadius);
-    
-    float shadowMask = 1.0 - smoothstep(0.0, shadowBlur, shadowSDF);
-    shadowMask *= 0.15;
+    // Shadow
+    float shadowMask = (1.0 - smoothstep(0.0, 0.06, shadowD)) * 0.15;
     
     // Base background
     vec3 baseColor = sampleBackground(uv);
-    
-    // Apply shadow
     baseColor = mix(baseColor, vec3(0.0), shadowMask);
     
     vec3 finalColor = baseColor;
     
-    // === INSIDE THE GLASS ===
+    // =============================================================================
+    // Inside the glass
+    // =============================================================================
+    
     if (d < 0.0) {
-        // Blend weights for smooth center interpolation
-        float w1 = exp(-d1 * d1 * 8.0);
-        float w2 = exp(-d2 * d2 * 8.0);
-        float totalWeight = w1 + w2 + 1e-6;
-        
-        // Blended center position
-        vec2 center = (pos1 * w1 + pos2 * w2) / totalWeight;
-        
-        // Offset from center
+        vec2 center = weightedCenter;
         vec2 offset = uv - center;
         float distFromCenter = length(offset);
         
-        // Depth in shape
         float depthInShape = abs(d);
         float normalizedDepth = clamp(depthInShape / (uRadius * 0.8), 0.0, 1.0);
-        
-        // Exponential distortion for lens effect
         float edgeFactor = 1.0 - normalizedDepth;
         float exponentialDistortion = exp(edgeFactor * 3.0) - 1.0;
         
-        // Lens distortion
         float baseMagnification = 0.75;
         float lensStrength = 0.4;
         float distortionAmount = exponentialDistortion * lensStrength;
         
         // =================================================================
         // WATER RIPPLE EFFECT - Concentric waves inside the glass
-        // Distorts the view through the glass, but edge stays static
         // =================================================================
         
         vec2 rippleOffset = vec2(0.0);
         
-        // Ripple for blob 1
-        if (uRipple1 > 0.0) {
-            float dist1 = length(uv - pos1);
-            float rippleWave1 = uRipple1 * uRippleSpeed;
-            float rippleFade1 = exp(-uRipple1 * uRippleDecay);
+        for (int i = 0; i < MAX_BLOBS; i++) {
+            if (i >= blobCount) break;
             
-            // Fade ripples only at very edge (ripples fill most of the blob)
-            float edgeMask1 = smoothstep(radius1 * 0.95, radius1 * 0.5, dist1);
-            
-            // Concentric wave pattern - tighter rings
-            float phase1 = dist1 * 35.0 - rippleWave1;
-            float wave1 = sin(phase1) * 0.6 + sin(phase1 * 1.8 + 0.3) * 0.4;
-            
-            // Direction from center (for displacement)
-            vec2 dir1 = normalize(uv - pos1 + vec2(0.001));
-            
-            rippleOffset += dir1 * wave1 * rippleFade1 * edgeMask1 * uRippleStrength;
+            float ripple = uBlobRipple[i];
+            if (ripple > 0.0) {
+                float dist = length(uv - blobPositions[i]);
+                float rippleWave = ripple * uRippleSpeed;
+                float rippleFade = exp(-ripple * uRippleDecay);
+                
+                // Fade ripples only at very edge
+                float edgeMask = smoothstep(blobRadii[i] * 0.95, blobRadii[i] * 0.5, dist);
+                
+                // Concentric wave pattern
+                float phase = dist * 35.0 - rippleWave;
+                float wave = sin(phase) * 0.6 + sin(phase * 1.8 + 0.3) * 0.4;
+                
+                vec2 dir = normalize(uv - blobPositions[i] + vec2(0.001));
+                rippleOffset += dir * wave * rippleFade * edgeMask * uRippleStrength;
+            }
         }
         
-        // Ripple for blob 2
-        if (uRipple2 > 0.0) {
-            float dist2 = length(uv - pos2);
-            float rippleWave2 = uRipple2 * uRippleSpeed;
-            float rippleFade2 = exp(-uRipple2 * uRippleDecay);
-            
-            // Fade ripples only at very edge
-            float edgeMask2 = smoothstep(radius2 * 0.95, radius2 * 0.5, dist2);
-            
-            // Concentric wave pattern - tighter rings
-            float phase2 = dist2 * 35.0 - rippleWave2;
-            float wave2 = sin(phase2) * 0.6 + sin(phase2 * 1.8 + 0.3) * 0.4;
-            
-            vec2 dir2 = normalize(uv - pos2 + vec2(0.001));
-            
-            rippleOffset += dir2 * wave2 * rippleFade2 * edgeMask2 * uRippleStrength;
-        }
-        
-        // Apply ripple to the offset used for refraction
         vec2 rippleAdjustedOffset = offset + rippleOffset;
         
-        // Chromatic aberration - different distortion per channel
-        // Boost aberration when either blob is being dragged (stressed glass)
-        float dragStress = max(uDrag1, uDrag2);
-        float aberrationBoost = 1.0 + dragStress * 0.5;  // +50% CA when dragged
-        
+        // Chromatic aberration
+        float aberrationBoost = 1.0 + maxDrag * 0.5;
         float baseDistortion = baseMagnification + distortionAmount * distFromCenter;
         
         float redDistortion = baseDistortion * (1.0 - 0.08 * aberrationBoost);
@@ -400,7 +377,6 @@ void main() {
         vec2 greenUV = center + rippleAdjustedOffset * greenDistortion;
         vec2 blueUV = center + rippleAdjustedOffset * blueDistortion;
         
-        // Apply blur with chromatic aberration
         float blur = uBlurStrength * (edgeFactor * 0.5 + 0.5);
         
         vec3 redBlur = efficientBlur(redUV, blur);
@@ -408,48 +384,41 @@ void main() {
         vec3 blueBlur = efficientBlur(blueUV, blur);
         
         vec3 refractedColor = vec3(redBlur.r, greenBlur.g, blueBlur.b);
-        
-        // Glass tint and brightness boost
         refractedColor *= vec3(0.95, 0.98, 1.0);
         refractedColor += vec3(0.15);
         
-        // === FRESNEL ===
+        // Fresnel (simplified for performance with many blobs)
         vec2 eps = vec2(0.01, 0.0);
-        vec2 gradient = vec2(
-            smin(sdSuperellipse(uv + eps.xy - pos1, uRadius, uSuperellipseN).x, 
-                 sdSuperellipse(uv + eps.xy - pos2, uRadius, uSuperellipseN).x, uBlendRadius) -
-            smin(sdSuperellipse(uv - eps.xy - pos1, uRadius, uSuperellipseN).x, 
-                 sdSuperellipse(uv - eps.xy - pos2, uRadius, uSuperellipseN).x, uBlendRadius),
-            smin(sdSuperellipse(uv + eps.yx - pos1, uRadius, uSuperellipseN).x, 
-                 sdSuperellipse(uv + eps.yx - pos2, uRadius, uSuperellipseN).x, uBlendRadius) -
-            smin(sdSuperellipse(uv - eps.yx - pos1, uRadius, uSuperellipseN).x, 
-                 sdSuperellipse(uv - eps.yx - pos2, uRadius, uSuperellipseN).x, uBlendRadius)
-        );
+        float dxp = 1e10, dxn = 1e10, dyp = 1e10, dyn = 1e10;
+        
+        for (int i = 0; i < MAX_BLOBS; i++) {
+            if (i >= blobCount) break;
+            dxp = smin(dxp, sdSuperellipse(uv + eps.xy - blobPositions[i], uRadius, uSuperellipseN).x, uBlendRadius);
+            dxn = smin(dxn, sdSuperellipse(uv - eps.xy - blobPositions[i], uRadius, uSuperellipseN).x, uBlendRadius);
+            dyp = smin(dyp, sdSuperellipse(uv + eps.yx - blobPositions[i], uRadius, uSuperellipseN).x, uBlendRadius);
+            dyn = smin(dyn, sdSuperellipse(uv - eps.yx - blobPositions[i], uRadius, uSuperellipseN).x, uBlendRadius);
+        }
+        
+        vec2 gradient = vec2(dxp - dxn, dyp - dyn);
         vec3 normal = normalize(vec3(gradient, 0.5));
         vec3 viewDir = vec3(0.0, 0.0, -1.0);
         float fresnelAmount = fresnel(viewDir, normal, uIOR);
         
-        // Fresnel reflection - boost on hover for that "lifted" glow
-        float hoverGlow = max(uHover1, uHover2) * 0.3;
+        float hoverGlow = maxHover * 0.3;
         vec3 fresnelColor = vec3(1.0, 0.98, 0.95);
         float fresnelStrength = 0.35 + hoverGlow;
         finalColor = mix(refractedColor, fresnelColor, fresnelAmount * fresnelStrength);
-        
-        // Additional rim glow on hover
         finalColor += vec3(1.0) * hoverGlow * fresnelAmount * 0.2;
     }
     
-    // === EDGE HIGHLIGHT ===
+    // Edge highlight
     float edgeThickness = 0.008;
     float edgeMask = smoothstep(edgeThickness, 0.0, abs(d));
     
     if (edgeMask > 0.0) {
-        // Diagonal highlight pattern
         vec2 normalizedPos = uv * 1.5;
-        
         float diagonal1 = abs(normalizedPos.x + normalizedPos.y);
         float diagonal2 = abs(normalizedPos.x - normalizedPos.y);
-        
         float diagonalFactor = max(
             smoothstep(1.0, 0.1, diagonal1),
             smoothstep(1.0, 0.5, diagonal2)
@@ -458,18 +427,13 @@ void main() {
         
         vec3 edgeWhite = vec3(1.2);
         vec3 internalColor = finalColor * 0.5;
-        
         vec3 edgeColor = mix(internalColor, edgeWhite, diagonalFactor);
         finalColor = mix(finalColor, edgeColor, edgeMask);
     }
     
-    // === POST PROCESSING ===
-    
-    // Subtle vignette
+    // Post processing
     float vig = 1.0 - smoothstep(0.6, 1.4, length(uv / aspect));
     finalColor *= 0.9 + vig * 0.1;
-    
-    // Gamma
     finalColor = pow(finalColor, vec3(0.95));
     
     gl_FragColor = vec4(clamp(finalColor, 0.0, 1.0), 1.0);
