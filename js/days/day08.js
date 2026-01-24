@@ -1956,11 +1956,57 @@ class ForgeStarDemo extends Game {
             this.nextShipSpawnTime = Infinity;  // Will be set when constructors done
             this.annexesBuilt = 0;
 
-            // Speed up camera slightly
-            this.camera.autoRotateSpeed = CONFIG.camera.autoRotateSpeed * 0.6;
+            // ─────────────────────────────────────────────────────────
+            // CINEMATIC CAMERA: Swing behind Capitol for skyline view
+            // ─────────────────────────────────────────────────────────
+            // Disable auto-rotate during the camera swing
+            this.camera.autoRotate = false;
+            
+            // Store starting camera angles
+            this.cameraSwing = {
+              startRotationY: this.camera.rotationY,
+              startRotationX: this.camera.rotationX,
+              // Target rotationX: tilt down slightly to see skyline with star above
+              targetRotationX: 0.2,
+              duration: 3.0,  // 3 second camera move
+              elapsed: 0,
+              complete: false,
+            };
           },
           update: (dt) => {
             this.phaseTime += dt;
+
+            // ─────────────────────────────────────────────────────────
+            // CINEMATIC CAMERA SWING - looks AT the Capitol (skyline view)
+            // ─────────────────────────────────────────────────────────
+            if (this.cameraSwing && !this.cameraSwing.complete) {
+              this.cameraSwing.elapsed += dt;
+              const t = Math.min(1, this.cameraSwing.elapsed / this.cameraSwing.duration);
+              
+              // Smooth easing (ease-in-out cubic)
+              const eased = t < 0.5 
+                ? 4 * t * t * t 
+                : 1 - Math.pow(-2 * t + 2, 3) / 2;
+              
+              // Calculate angle to position camera BEHIND Capitol, looking at star
+              const capitol = this.stations[0];
+              // atan2(x, z) + PI puts us on the opposite side, seeing city with star behind
+              const targetRotationY = Math.atan2(capitol.x, capitol.z) + Math.PI;
+              
+              // Interpolate camera rotation toward the moving target
+              this.camera.rotationY = this.cameraSwing.startRotationY + 
+                (targetRotationY - this.cameraSwing.startRotationY) * eased;
+              this.camera.rotationX = this.cameraSwing.startRotationX + 
+                (this.cameraSwing.targetRotationX - this.cameraSwing.startRotationX) * eased;
+              
+              if (t >= 1) {
+                this.cameraSwing.complete = true;
+                // Re-enable slow auto-rotate after swing completes
+                this.camera.autoRotate = true;
+                this.camera.autoRotateSpeed = CONFIG.camera.autoRotateSpeed * 0.3;
+                console.log('[FORGE STAR] Camera swing complete - skyline view');
+              }
+            }
 
             // Update ship disassembly (pass current time)
             this.rocket.updateDisassembly(this.time);
@@ -2009,11 +2055,36 @@ class ForgeStarDemo extends Game {
             this.empireComplete = false;
             this.starTransitionStartTime = null;
 
-            // Full camera rotation speed
+            // Ensure auto-rotate is enabled (camera swing should be done by now)
+            this.camera.autoRotate = true;
             this.camera.autoRotateSpeed = CONFIG.camera.autoRotateSpeed;
           },
           update: (dt) => {
             this.phaseTime += dt;
+
+            // Continue camera swing if not complete (in case we transitioned early)
+            if (this.cameraSwing && !this.cameraSwing.complete) {
+              this.cameraSwing.elapsed += dt;
+              const t = Math.min(1, this.cameraSwing.elapsed / this.cameraSwing.duration);
+              const eased = t < 0.5 
+                ? 4 * t * t * t 
+                : 1 - Math.pow(-2 * t + 2, 3) / 2;
+              
+              // Calculate angle to position camera BEHIND Capitol, looking at star
+              const capitol = this.stations[0];
+              const targetRotationY = Math.atan2(capitol.x, capitol.z) + Math.PI;
+              
+              this.camera.rotationY = this.cameraSwing.startRotationY + 
+                (targetRotationY - this.cameraSwing.startRotationY) * eased;
+              this.camera.rotationX = this.cameraSwing.startRotationX + 
+                (this.cameraSwing.targetRotationX - this.cameraSwing.startRotationX) * eased;
+              
+              if (t >= 1) {
+                this.cameraSwing.complete = true;
+                this.camera.autoRotate = true;
+                this.camera.autoRotateSpeed = CONFIG.camera.autoRotateSpeed;
+              }
+            }
 
             // Update all station reveals
             for (const station of this.stations) {
