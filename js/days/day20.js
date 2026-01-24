@@ -106,8 +106,15 @@ class Day20Demo extends Game {
 
     this.canvas.addEventListener("touchstart", (e) => {
       e.preventDefault();
+      const touch = e.touches[0];
+      const rect = this.canvas.getBoundingClientRect();
+      this.mouseX = (touch.clientX - rect.left) / rect.width;
+      this.mouseY = (touch.clientY - rect.top) / rect.height;
+      this.targetX = (this.mouseX - 0.5) * 1.4;
+      this.targetY = (this.mouseY - 0.5) * 1.4;
+      
       if (this.isOuroboros) {
-        this.doEat(e.touches[0]);
+        this.doEat(touch);
       }
     });
 
@@ -117,6 +124,9 @@ class Day20Demo extends Game {
       const rect = this.canvas.getBoundingClientRect();
       this.mouseX = (touch.clientX - rect.left) / rect.width;
       this.mouseY = (touch.clientY - rect.top) / rect.height;
+      // Update target for snake to follow (same as mousemove)
+      this.targetX = (this.mouseX - 0.5) * 1.4;
+      this.targetY = (this.mouseY - 0.5) * 1.4;
     });
   }
 
