@@ -1503,15 +1503,34 @@ class Day19Demo extends Game {
     // Draw compact accuracy graph (scaled) - more space below text
     if (this.accuracyHistory.length > 2) {
       const graphW = 150 * this.scale;
-      const graphH = 40 * this.scale;
+      const graphH = 50 * this.scale; // Taller graph
       const graphX = x;
       const graphY = y + lineHeight * 6; // More space between text and graph
+      
+      // Draw background panel for visibility
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+      ctx.fillRect(graphX - 5, graphY - graphH - 5, graphW + 10, graphH + 10);
+      
+      // Draw border
+      ctx.strokeStyle = 'rgba(0, 255, 0, 0.3)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(graphX - 5, graphY - graphH - 5, graphW + 10, graphH + 10);
+      
+      // Draw 50% gridline
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+      ctx.beginPath();
+      ctx.moveTo(graphX, graphY - graphH * 0.5);
+      ctx.lineTo(graphX + graphW, graphY - graphH * 0.5);
+      ctx.stroke();
       
       // Sample history for performance (every Nth point)
       const sampleRate = Math.max(1, Math.floor(this.accuracyHistory.length / 100));
       
+      // Train accuracy line (green) - thicker and with glow
       ctx.strokeStyle = '#0f0';
-      ctx.lineWidth = 1;
+      ctx.lineWidth = 2.5 * this.scale;
+      ctx.shadowColor = '#0f0';
+      ctx.shadowBlur = 4;
       ctx.beginPath();
       let first = true;
       for (let i = 0; i < this.accuracyHistory.length; i += sampleRate) {
@@ -1527,7 +1546,9 @@ class Day19Demo extends Game {
       }
       ctx.stroke();
       
+      // Test accuracy line (cyan) - thicker and with glow
       ctx.strokeStyle = '#0ff';
+      ctx.shadowColor = '#0ff';
       ctx.beginPath();
       first = true;
       for (let i = 0; i < this.accuracyHistory.length; i += sampleRate) {
@@ -1542,6 +1563,14 @@ class Day19Demo extends Game {
         }
       }
       ctx.stroke();
+      ctx.shadowBlur = 0;
+      
+      // Legend below graph
+      ctx.font = `${Math.round(10 * this.scale)}px monospace`;
+      ctx.fillStyle = '#0f0';
+      ctx.fillText('Train', graphX, graphY + 12 * this.scale);
+      ctx.fillStyle = '#0ff';
+      ctx.fillText('Test', graphX + 50 * this.scale, graphY + 12 * this.scale);
     }
     
     ctx.restore();
