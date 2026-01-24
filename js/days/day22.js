@@ -32,6 +32,7 @@ import {
   Rectangle,
   Group,
   HorizontalLayout,
+  Screen,
 } from '@guinetik/gcanvas';
 
 const CONFIG = {
@@ -349,6 +350,9 @@ class DrawingScreen extends GameObject {
     this.isClearing = false;
     this.shakeOffset = 0;
     this.shakeDecay = 0.85;
+    
+    // Touch drawing state
+    this.touchDrawing = false;
 
     // Add initial point
     this.points.push({ x: this.cursorX, y: this.cursorY });
@@ -361,6 +365,84 @@ class DrawingScreen extends GameObject {
       stroke: CONFIG.colors.screenBorder,
       lineWidth: 2,
     });
+    
+    // Set up touch drawing for mobile
+    this.setupTouchDrawing();
+  }
+  
+  /**
+   * Set up direct touch drawing on the screen (mobile-friendly)
+   */
+  setupTouchDrawing() {
+    const canvas = this.game.canvas;
+    
+    canvas.addEventListener('touchstart', (e) => {
+      if (this.game.autoDrawing) return;
+      
+      const touch = e.touches[0];
+      const pos = this.screenPositionFromTouch(touch);
+      
+      if (pos) {
+        e.preventDefault();
+        this.touchDrawing = true;
+        // Move cursor to touch position
+        this.cursorX = pos.x;
+        this.cursorY = pos.y;
+        this.points.push({ x: this.cursorX, y: this.cursorY });
+      }
+    }, { passive: false });
+    
+    canvas.addEventListener('touchmove', (e) => {
+      if (!this.touchDrawing || this.game.autoDrawing) return;
+      
+      const touch = e.touches[0];
+      const pos = this.screenPositionFromTouch(touch);
+      
+      if (pos) {
+        e.preventDefault();
+        // Draw to new position
+        const dx = pos.x - this.cursorX;
+        const dy = pos.y - this.cursorY;
+        this.moveCursor(dx, dy);
+      }
+    }, { passive: false });
+    
+    canvas.addEventListener('touchend', () => {
+      this.touchDrawing = false;
+    });
+  }
+  
+  /**
+   * Convert touch coordinates to screen drawing coordinates
+   * Returns null if touch is outside the screen area
+   */
+  screenPositionFromTouch(touch) {
+    const canvas = this.game.canvas;
+    const rect = canvas.getBoundingClientRect();
+    
+    // Get touch position relative to canvas
+    const canvasX = touch.clientX - rect.left;
+    const canvasY = touch.clientY - rect.top;
+    
+    // Screen is centered in the scene, offset upward
+    const screenCenterX = this.game.width / 2;
+    const screenCenterY = this.game.height / 2 + this.y; // this.y is negative offset
+    
+    // Convert to screen-local coordinates
+    const localX = canvasX - (screenCenterX - this.screenWidth / 2);
+    const localY = canvasY - (screenCenterY - this.screenHeight / 2);
+    
+    // Check if within screen bounds (with padding)
+    const padding = 10;
+    if (localX >= -padding && localX <= this.screenWidth + padding &&
+        localY >= -padding && localY <= this.screenHeight + padding) {
+      return {
+        x: Math.max(5, Math.min(this.screenWidth - 5, localX)),
+        y: Math.max(5, Math.min(this.screenHeight - 5, localY))
+      };
+    }
+    
+    return null;
   }
 
   /**
@@ -625,12 +707,13 @@ class EtchASketchDemo extends Game {
     });
     this.mainScene.add(this.screen);
 
-    // Create knobs
-    const knobRadius = Math.min(this.width, this.height) * CONFIG.frame.knobSize;
+    // Create knobs (smaller on mobile, just decorative)
+    const isMobile = Screen.isMobile || this.width < 500;
+    const knobRadius = Math.min(this.width, this.height) * (isMobile ? 0.05 : CONFIG.frame.knobSize);
 
     this.leftKnob = new Knob(this, {
       x: -this.width * 0.3,
-      y: this.height * 0.34,
+      y: this.height * (isMobile ? 0.28 : 0.34),
       radius: knobRadius,
       label: 'X',
     });
@@ -638,7 +721,7 @@ class EtchASketchDemo extends Game {
 
     this.rightKnob = new Knob(this, {
       x: this.width * 0.3,
-      y: this.height * 0.34,
+      y: this.height * (isMobile ? 0.28 : 0.34),
       radius: knobRadius,
       label: 'Y',
     });
@@ -776,10 +859,12 @@ class EtchASketchDemo extends Game {
   }
 
   createMobileUI() {
-    const btnHeight = 35;
-    const btnWidth = 55;
-    const spacing = 8;
-    const bottomPadding = 40;
+    const isMobile = Screen.isMobile || this.width < 500;
+    const btnHeight = isMobile ? 30 : 35;
+    const btnWidth = isMobile ? 40 : 55;
+    const spacing = isMobile ? 4 : 8;
+    const bottomPadding = isMobile ? 55 : 40;
+    const fontSize = isMobile ? '10px' : '12px';
 
     // Create HorizontalLayout for buttons
     this.buttonLayout = new HorizontalLayout(this, {
@@ -804,7 +889,7 @@ class EtchASketchDemo extends Game {
         width: btnWidth,
         height: btnHeight,
         text: cfg.text,
-        font: '12px "Fira Code", monospace',
+        font: `${fontSize} "Fira Code", monospace`,
         onClick: cfg.action,
         colorDefaultBg: 'rgba(0, 0, 0, 0.8)',
         colorDefaultStroke: 'rgba(0, 255, 0, 0.5)',
@@ -818,30 +903,6 @@ class EtchASketchDemo extends Game {
       });
       this.buttonLayout.add(btn);
     });
-
-    // Add GRID toggle button
-    this.gridButton = new ToggleButton(this, {
-      width: btnWidth,
-      height: btnHeight,
-      text: 'GRID',
-      font: '12px "Fira Code", monospace',
-      onToggle: (isOn) => {
-        this.gridMode = isOn;
-      },
-      colorDefaultBg: 'rgba(0, 0, 0, 0.8)',
-      colorDefaultStroke: 'rgba(0, 255, 0, 0.5)',
-      colorDefaultText: '#0f0',
-      colorHoverBg: '#0f0',
-      colorHoverStroke: '#0f0',
-      colorHoverText: '#000',
-      colorPressedBg: '#0a0',
-      colorPressedStroke: '#0f0',
-      colorPressedText: '#000',
-      colorActiveBg: '#0ff',
-      colorActiveStroke: '#0ff',
-      colorActiveText: '#000',
-    });
-    this.buttonLayout.add(this.gridButton);
   }
 
   loadSVGFile(file) {
@@ -861,10 +922,7 @@ class EtchASketchDemo extends Game {
     const pathData = PRESET_PATTERNS[name];
     if (pathData) {
       // Turn off grid mode when loading a preset
-      if (this.gridMode) {
-        this.gridMode = false;
-        this.gridButton.toggle(false);
-      }
+      this.gridMode = false;
       this.screen.clear();
       setTimeout(() => this.startAutoDraw(pathData, name === 'star' || name === 'spiral' || name === 'house'), 500);
     }
@@ -1207,11 +1265,14 @@ class EtchASketchDemo extends Game {
     ctx.fillText('GENUARY 2026', this.width / 2, 50);
 
     // Instructions
+    const isMobile = Screen.isMobile || this.width < 500;
     ctx.fillStyle = CONFIG.colors.textDim;
-    ctx.font = '10px "Fira Code", monospace';
+    ctx.font = `${isMobile ? '9px' : '10px'} "Fira Code", monospace`;
     if (this.autoDrawing) {
       ctx.fillStyle = CONFIG.colors.text;
-      ctx.fillText('AUTO-DRAWING... [ESC] to stop', this.width / 2, this.height - 15);
+      ctx.fillText(isMobile ? 'AUTO-DRAWING...' : 'AUTO-DRAWING... [ESC] to stop', this.width / 2, this.height - 15);
+    } else if (isMobile) {
+      ctx.fillText('TOUCH SCREEN TO DRAW', this.width / 2, this.height - 15);
     } else {
       ctx.fillText('[A/D] X • [W/S] Y • [C] clear • [G] export • [1-4] presets • drag SVG', this.width / 2, this.height - 15);
     }
@@ -1248,15 +1309,16 @@ class EtchASketchDemo extends Game {
     }
 
     // Update knob positions
-    const knobRadius = Math.min(this.width, this.height) * CONFIG.frame.knobSize;
+    const isMobile = Screen.isMobile || this.width < 500;
+    const knobRadius = Math.min(this.width, this.height) * (isMobile ? 0.05 : CONFIG.frame.knobSize);
     if (this.leftKnob) {
       this.leftKnob.x = -this.width * 0.3;
-      this.leftKnob.y = this.height * 0.34;
+      this.leftKnob.y = this.height * (isMobile ? 0.28 : 0.34);
       this.leftKnob.radius = knobRadius;
     }
     if (this.rightKnob) {
       this.rightKnob.x = this.width * 0.3;
-      this.rightKnob.y = this.height * 0.34;
+      this.rightKnob.y = this.height * (isMobile ? 0.28 : 0.34);
       this.rightKnob.radius = knobRadius;
     }
 
