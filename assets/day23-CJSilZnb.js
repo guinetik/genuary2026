@@ -1,4 +1,4 @@
-import{G as S,W as w}from"./index-ACZeJgrc.js";const x=`precision highp float;\r
+import{G as S,W as w}from"./index-BijcbkZy.js";const x=`precision highp float;\r
 \r
 attribute vec2 aPosition;\r
 attribute vec2 aUv;\r
