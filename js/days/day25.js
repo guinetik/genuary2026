@@ -21,6 +21,7 @@ import {
   GameObject,
   Motion,
   Easing,
+  Screen,
   zoneTemperature,
   thermalBuoyancy,
   heatTransferFalloff,
@@ -550,11 +551,16 @@ class Molecule3D extends GameObject {
     this.y = this.baseY + floatResult.offsetY * 0.3; // Less vertical float
     this.z = this.baseZ + floatResult.offsetY * 0.5; // Use float Y for Z depth
 
-    // Tumble based on temperature (hotter = faster)
-    const tumbleSpeed = 0.5 + this.temperature * 0.5;
-    this.rotX += this.rotSpeedX * tumbleSpeed * dt;
-    this.rotY += this.rotSpeedY * tumbleSpeed * dt;
-    this.rotZ += this.rotSpeedZ * tumbleSpeed * dt;
+    // Tumble based on velocity - rotation coupled to motion
+    // Velocity magnitude affects tumble intensity
+    const speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy + this.vz * this.vz);
+    const tumbleIntensity = 0.02 + speed * 0.008;
+    
+    // Cross-axis rotation: moving in X causes Y/Z rotation, etc.
+    // This creates a "rolling through fluid" effect
+    this.rotX += (this.vy * 0.015 + this.rotSpeedX * 0.3) * tumbleIntensity * dt * 60;
+    this.rotY += (this.vx * 0.015 + this.rotSpeedY * 0.3) * tumbleIntensity * dt * 60;
+    this.rotZ += (this.vz * 0.01 + this.rotSpeedZ * 0.2) * tumbleIntensity * dt * 60;
 
     // Decay cooldown and flash
     if (this.reactionCooldown > 0) this.reactionCooldown -= dt;
@@ -1402,36 +1408,42 @@ class PrimordialSoupDemo extends Game {
     ctx.fillStyle = vignetteGrad;
     ctx.fillRect(0, 0, w, h);
 
-    // UI
-    ctx.font = '11px "Fira Code", monospace';
+    // UI - scale for mobile
+    const isMobile = Screen.isMobile;
+    const fontSize = isMobile ? 9 : 11;
+    const lineHeight = isMobile ? 14 : 18;
+    const maxLogWidth = isMobile ? w - 30 : w * 0.5;
+    
+    ctx.font = `${fontSize}px "Fira Code", monospace`;
     ctx.textAlign = 'left';
 
-    // Reaction log
+    // Reaction log (compact on mobile)
     let y = 25;
     for (const log of this.reactionLog) {
       const alpha = Math.min(1, log.time);
       ctx.fillStyle = `rgba(255, 200, 100, ${alpha * 0.9})`;
-      ctx.fillText(log.text, 15, y);
-      y += 18;
+      
+      // Truncate if too wide for mobile
+      let text = log.text;
+      if (isMobile && ctx.measureText(text).width > maxLogWidth) {
+        // Truncate with ellipsis
+        while (ctx.measureText(text + '…').width > maxLogWidth && text.length > 10) {
+          text = text.slice(0, -1);
+        }
+        text += '…';
+      }
+      ctx.fillText(text, 15, y);
+      y += lineHeight;
     }
 
     // Stats
     ctx.fillStyle = 'rgba(150, 180, 200, 0.6)';
     ctx.textAlign = 'right';
     ctx.fillText(`Molecules: ${this.molecules.length}`, w - 15, 25);
-    ctx.fillText(`Reactions: ${this.stats.reactions}`, w - 15, 43);
+    ctx.fillText(`Reactions: ${this.stats.reactions}`, w - 15, 25 + lineHeight);
 
     const tierNames = ['Primordial', 'Precursors', 'Amino Acids', 'Peptides'];
-    ctx.fillText(`Max tier: ${tierNames[this.stats.maxTier] || '???'}`, w - 15, 61);
-
-    // Instructions
-    ctx.textAlign = 'center';
-    ctx.fillStyle = 'rgba(150, 150, 150, 0.4)';
-    ctx.fillText(
-      'Click to add molecules. Drag to orbit. Watch complexity emerge.',
-      cx,
-      h - 15
-    );
+    ctx.fillText(`Max tier: ${tierNames[this.stats.maxTier] || '???'}`, w - 15, 25 + lineHeight * 2);
   }
 }
 
