@@ -292,6 +292,130 @@ class PoincareDemo extends Game {
       // Cap zoom out only (no limit on zoom in)
       this.targetZoom = Math.min(50, this.targetZoom);
     }, { passive: false });
+    
+    // ─────────────────────────────────────────────────────────────────────────
+    // TOUCH SUPPORT - pinch zoom and drag
+    // ─────────────────────────────────────────────────────────────────────────
+    this._touches = new Map(); // Track active touches
+    this._lastPinchDist = 0;
+    this._touchStartTime = 0;
+    this._touchMoved = false;
+    
+    this.canvas.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      this._touchStartTime = Date.now();
+      this._touchMoved = false;
+      
+      // Track all touches
+      for (const touch of e.changedTouches) {
+        this._touches.set(touch.identifier, {
+          x: touch.clientX,
+          y: touch.clientY,
+        });
+      }
+      
+      // If two fingers, initialize pinch distance
+      if (this._touches.size === 2) {
+        const [t1, t2] = Array.from(this._touches.values());
+        this._lastPinchDist = Math.hypot(t2.x - t1.x, t2.y - t1.y);
+      }
+      
+      // Single touch - start drag
+      if (this._touches.size === 1) {
+        this.isDragging = true;
+        const touch = e.touches[0];
+        const rect = this.canvas.getBoundingClientRect();
+        this.lastMouseX = touch.clientX - rect.left;
+        this.lastMouseY = touch.clientY - rect.top;
+      }
+    }, { passive: false });
+    
+    this.canvas.addEventListener('touchmove', (e) => {
+      e.preventDefault();
+      
+      // Update touch positions
+      for (const touch of e.changedTouches) {
+        if (this._touches.has(touch.identifier)) {
+          this._touches.set(touch.identifier, {
+            x: touch.clientX,
+            y: touch.clientY,
+          });
+        }
+      }
+      
+      // Two-finger pinch zoom
+      if (this._touches.size === 2) {
+        const [t1, t2] = Array.from(this._touches.values());
+        const pinchDist = Math.hypot(t2.x - t1.x, t2.y - t1.y);
+        
+        if (this._lastPinchDist > 0) {
+          const pinchRatio = this._lastPinchDist / pinchDist;
+          this.targetZoom *= pinchRatio;
+          this.targetZoom = Math.min(50, this.targetZoom); // Cap zoom out
+          this._touchMoved = true;
+        }
+        
+        this._lastPinchDist = pinchDist;
+      }
+      // Single finger drag (pan)
+      else if (this._touches.size === 1 && this.isDragging) {
+        const touch = e.touches[0];
+        const rect = this.canvas.getBoundingClientRect();
+        const mx = touch.clientX - rect.left;
+        const my = touch.clientY - rect.top;
+        
+        const moveX = Math.abs(mx - this.lastMouseX);
+        const moveY = Math.abs(my - this.lastMouseY);
+        
+        if (moveX > 5 || moveY > 5) {
+          this._touchMoved = true;
+        }
+        
+        const dx = (mx - this.lastMouseX) / Math.min(this.width, this.height) * this.zoom * 2;
+        const dy = (my - this.lastMouseY) / Math.min(this.width, this.height) * this.zoom * 2;
+        
+        this.targetOffsetX -= dx;
+        this.targetOffsetY += dy;
+        
+        this.lastMouseX = mx;
+        this.lastMouseY = my;
+      }
+    }, { passive: false });
+    
+    this.canvas.addEventListener('touchend', (e) => {
+      e.preventDefault();
+      
+      // Remove ended touches
+      for (const touch of e.changedTouches) {
+        this._touches.delete(touch.identifier);
+      }
+      
+      // Reset pinch distance if no longer two fingers
+      if (this._touches.size < 2) {
+        this._lastPinchDist = 0;
+      }
+      
+      // If all touches released
+      if (this._touches.size === 0) {
+        this.isDragging = false;
+        
+        // Tap to change tiling (quick tap without movement)
+        const now = Date.now();
+        const tapDuration = now - this._touchStartTime;
+        const timeSinceLastChange = now - this._lastTilingChange;
+        
+        if (!this._touchMoved && tapDuration < 300 && timeSinceLastChange > 500) {
+          CONFIG.currentTiling = (CONFIG.currentTiling + 1) % CONFIG.tilings.length;
+          this._lastTilingChange = now;
+        }
+      }
+    }, { passive: false });
+    
+    this.canvas.addEventListener('touchcancel', () => {
+      this._touches.clear();
+      this._lastPinchDist = 0;
+      this.isDragging = false;
+    });
   }
 
   update(dt) {
@@ -362,7 +486,12 @@ class PoincareDemo extends Game {
       ctx.textAlign = 'left';
       ctx.fillText(`{${tiling.n1}, ${tiling.n2}} ${tiling.name.toUpperCase()}`, 15, 25);
       ctx.fillStyle = 'rgba(255,255,255,0.5)';
-      ctx.fillText('CLICK: CHANGE · DRAG: PAN · SCROLL: ZOOM', 15, 45);
+      // Show appropriate controls for touch vs mouse
+      const isTouchDevice = this._touches && this._touches.size > 0 || 'ontouchstart' in window;
+      const controls = isTouchDevice 
+        ? 'TAP: CHANGE · DRAG: PAN · PINCH: ZOOM'
+        : 'CLICK: CHANGE · DRAG: PAN · SCROLL: ZOOM';
+      ctx.fillText(controls, 15, 45);
     } else {
       // Fallback
       ctx.fillStyle = '#000';
