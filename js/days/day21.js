@@ -29,6 +29,7 @@ import {
   SVGShape,
   Tweenetik,
   Easing,
+  Screen,
 } from '@guinetik/gcanvas';
 
 // Farnsworth House SVG path data
@@ -63,12 +64,14 @@ const CONFIG = {
 
   // Composition bounds (normalized 0-1)
   margin: 0.08,
-  houseReserve: 0.25, // Reserve bottom 25% for house
+  houseReserve: 0.25, // Reserve bottom 25% for house (desktop)
+  houseReserveMobile: 0.18, // Less reserve on mobile (portrait)
   textReserve: 0.12, // Reserve bottom 12% for text (within house area)
   maxParallaxOffset: 0.04, // Max parallax movement to account for
   
   // House settings
-  houseWidth: 0.65, // Width as fraction of canvas
+  houseWidth: 0.65, // Width as fraction of canvas (desktop)
+  houseWidthMobile: 0.85, // Wider on mobile to fill screen
   houseOpacity: 1,
 };
 
@@ -195,6 +198,7 @@ class BauhausPosterDemo extends Game {
 
   init() {
     super.init();
+    Screen.init(this);  // Initialize screen detection
     Painter.init(this.ctx);
 
     // Kill any lingering tweens
@@ -267,20 +271,53 @@ class BauhausPosterDemo extends Game {
 
   /**
    * Create the Farnsworth House SVG shape
+   * Ensures house fits within outline border and maintains proportional scaling
    */
   createHouseShape() {
     const margin = Math.min(this.width, this.height) * CONFIG.margin;
-    const textAreaHeight = this.height * CONFIG.textReserve;
+    const isPortrait = this.height > this.width;
     
-    // Calculate scale to fit house width
-    const targetWidth = this.width * CONFIG.houseWidth;
-    // Original SVG is about 209 units wide, 39 units tall
-    const houseScale = targetWidth / 209;
+    // Calculate available dimensions INSIDE the outline border
+    // The outline is drawn at: strokeRect(margin, margin, w - margin*2, h - margin*2)
+    const availableWidth = this.width - (margin * 2);
+    const availableHeight = this.height - (margin * 2);
+    
+    // Use Screen.responsive for house width fraction (mobile vs desktop)
+    // Mobile gets wider house (houseWidthMobile), desktop gets narrower (houseWidth)
+    const houseWidthFraction = Screen.responsive(
+      CONFIG.houseWidthMobile,  // Mobile
+      CONFIG.houseWidthMobile,  // Tablet (use mobile width)
+      CONFIG.houseWidth          // Desktop
+    );
+    
+    // Calculate desired width as fraction of AVAILABLE width (inside outline), not full canvas
+    const desiredWidth = availableWidth * houseWidthFraction;
+    
+    // Original SVG dimensions: 209 units wide, 39 units tall (aspect ratio ~5.36:1)
+    // Calculate scale to achieve desired width
+    const scaleByWidth = desiredWidth / 209;
+    const resultingHeight = 39 * scaleByWidth;
+    
+    // Calculate scale based on height constraint (for very tall/narrow screens)
+    const scaleByHeight = availableHeight / 39;
+    
+    // Use the smaller scale to ensure house fits within BOTH dimensions
+    // This maintains proportional scaling (aspect ratio preserved)
+    const houseScale = Math.min(scaleByWidth, scaleByHeight);
+    
+    // Calculate final dimensions (maintains aspect ratio)
+    const houseWidth = 209 * houseScale;
     const houseHeight = 39 * houseScale;
+    
+    // On portrait/mobile, position house higher to leave more room for text below
+    const textSpace = isPortrait ? this.height * 0.08 : 0;
     
     // Calculate position at bottom center (foundation matches border)
     const houseX = this.width / 2;
-    const houseY = this.height - houseHeight / 2 - margin;
+    const houseY = this.height - houseHeight / 2 - margin - textSpace;
+    
+    // Store house bottom Y for text positioning
+    this.houseBottomY = houseY + houseHeight / 2;
     
     // Create the SVG shape with position
     this.houseShape = new SVGShape(FARNSWORTH_PATH, {
@@ -301,8 +338,15 @@ class BauhausPosterDemo extends Game {
    */
   generateComposition() {
     this.parallaxShapes = [];
-    const { colors, layers, margin, houseReserve, maxParallaxOffset } = CONFIG;
+    const { colors, layers, margin, maxParallaxOffset } = CONFIG;
     const minDim = Math.min(this.width, this.height);
+    const isPortrait = this.height > this.width;
+    
+    // Use less house reserve on portrait (house is positioned higher with text below)
+    // Also account for text space on portrait
+    const houseReserve = isPortrait 
+      ? CONFIG.houseReserveMobile + 0.08 // Add text space  
+      : CONFIG.houseReserve;
 
     // Color palettes for different shape types
     const primaryColors = [colors.red, colors.yellow, colors.blue];
@@ -603,9 +647,18 @@ class BauhausPosterDemo extends Game {
   }
 
   renderBauhausText(ctx, w, h) {
-    const { colors } = CONFIG;
-    const baseTextY = h * 0.95;
-    const letterSize = Math.min(w, h) * 0.022;
+    const { colors, margin } = CONFIG;
+    const isPortrait = h > w;
+    const marginPx = Math.min(w, h) * margin;
+    
+    // On portrait, position text below the house; on landscape, at 95% height
+    // Use stored houseBottomY or fallback to percentage
+    const baseTextY = isPortrait && this.houseBottomY
+      ? this.houseBottomY + (h - this.houseBottomY - marginPx) * 0.4
+      : h * 0.95;
+    
+    // Slightly larger text on mobile for readability
+    const letterSize = Math.min(w, h) * (isPortrait ? 0.028 : 0.022);
     const centerX = w * 0.5;
 
     // Draw "BAUHAUS" main title with slide animation
