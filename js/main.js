@@ -671,27 +671,37 @@ function setupMobileMenu() {
   elements.hamburger = document.getElementById('hamburger');
   elements.sidebar = document.getElementById('sidebar');
   elements.overlay = document.getElementById('nav-overlay');
+  const headerBrand = document.getElementById('header-brand');
 
   elements.hamburger.addEventListener('click', toggleMobileMenu);
   elements.overlay.addEventListener('click', closeMobileMenu);
+  
+  // Logo click closes menu and goes home
+  headerBrand?.addEventListener('click', () => {
+    closeMobileMenu();
+  });
 }
 
 /**
  * Toggle mobile menu open/closed
  */
 function toggleMobileMenu() {
+  const mobileHeader = document.getElementById('mobile-header');
   elements.sidebar.classList.toggle('open');
   elements.overlay.classList.toggle('open');
   elements.hamburger.classList.toggle('active');
+  mobileHeader?.classList.toggle('menu-open');
 }
 
 /**
  * Close mobile menu
  */
 function closeMobileMenu() {
+  const mobileHeader = document.getElementById('mobile-header');
   elements.sidebar.classList.remove('open');
   elements.overlay.classList.remove('open');
   elements.hamburger.classList.remove('active');
+  mobileHeader?.classList.remove('menu-open');
 }
 
 // ============================================

@@ -104,12 +104,16 @@ body {
   padding: 0 16px;
   align-items: center;
   justify-content: space-between;
+  transition: opacity var(--transition-smooth);
 }
 
 .header-brand {
   display: flex;
   align-items: center;
   gap: 12px;
+  cursor: pointer;
+  text-decoration: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .logo-text {
@@ -364,6 +368,12 @@ body {
 .nav-overlay.open {
   opacity: 1;
   pointer-events: auto;
+}
+
+/* Fade out header when menu is open */
+.mobile-header.menu-open {
+  opacity: 0;
+  pointer-events: none;
 }
 
 /* ============================================
@@ -825,6 +835,55 @@ body {
    ============================================ */
 
 @media (max-width: 768px) {
+  /* === MOBILE PERFORMANCE OPTIMIZATIONS === */
+  
+  /* Disable scanline animation (runs every 0.2s - expensive) */
+  .scanline-overlay {
+    animation: none !important;
+    display: none !important;
+  }
+  
+  /* Disable vignette overlay (radial gradient compositing) */
+  .vignette-overlay {
+    display: none !important;
+  }
+  
+  /* Disable grid overlay entirely (SVG with many paths) */
+  .grid-overlay {
+    display: none !important;
+  }
+  
+  /* Disable dots pattern pseudo-element (400vh repeating gradient) */
+  .main-content::before {
+    display: none !important;
+  }
+  
+  /* Disable backdrop-filter (very expensive on mobile GPUs) */
+  .mobile-header {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    background: rgba(5, 5, 5, 0.98) !important;
+  }
+  
+  .mobile-footer {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    background: rgba(5, 5, 5, 0.98) !important;
+  }
+  
+  .mobile-info-overlay {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    background: rgba(0, 0, 0, 0.85) !important;
+  }
+  
+  .nav-overlay {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+  
+  /* === END PERFORMANCE OPTIMIZATIONS === */
+
   /* Fix for mobile viewports */
   .day-section {
     height: 100dvh; /* Use dynamic viewport height */
@@ -884,6 +943,13 @@ body {
 
   .day-canvas-container canvas {
     object-fit: contain; /* Or cover, depending on preference. Contain ensures full art is seen. */
+    /* Prevent touch gestures from scrolling - lets canvas handle drag for interactions */
+    touch-action: none;
+    /* Disable tap highlight (blue outline on Android) */
+    -webkit-tap-highlight-color: transparent;
+    outline: none;
+    user-select: none;
+    -webkit-user-select: none;
   }
 
   /* Hide desktop elements */
@@ -900,19 +966,22 @@ body {
     display: none !important;
   }
 
-  /* Intro Section adjustments */
+  /* Intro Section adjustments - full bleed on mobile like other sections */
   .intro-section {
-    padding: 20px;
+    padding: 0;
     align-items: center;
     justify-content: center;
+    padding-top: var(--header-height);
   }
 
   .intro-container {
-    padding: 24px;
+    padding: 16px;
     border: none;
     background: transparent;
     box-shadow: none;
-    margin-top: 40px;
+    margin: 0;
+    width: 100%;
+    max-width: 100%;
   }
   
   .intro-container::before,
@@ -920,22 +989,65 @@ body {
     display: none;
   }
 
+  .intro-content {
+    gap: 12px;
+  }
+
+  .intro-header {
+    gap: 4px;
+  }
+
+  .intro-logo svg {
+    width: 36px !important;
+    height: 32px !important;
+  }
+
+  .intro-body {
+    gap: 8px !important;
+    width: 100%;
+  }
+
   .intro-title {
-    font-size: 32px;
+    font-size: 18px !important;
+    letter-spacing: 1px !important;
+  }
+
+  .intro-subtitle {
+    font-size: 7px !important;
+    letter-spacing: 1px !important;
+    line-height: 1.2 !important;
+  }
+
+  .intro-avatar-wrapper {
+    width: 48px !important;
+    height: 48px !important;
+    padding: 2px;
   }
 
   .intro-text {
-    font-size: 14px;
+    font-size: 9px !important;
+    line-height: 1.25;
+    width: 100%;
   }
   
   .intro-links {
-    flex-direction: column;
+    flex-direction: row;
+    flex-wrap: wrap;
     width: 100%;
+    gap: 6px;
   }
   
   .intro-link {
-    width: 100%;
+    flex: 1 1 45%;
     justify-content: center;
+    padding: 6px 10px !important;
+    font-size: 10px !important;
+  }
+
+  .intro-start-btn {
+    margin-top: 4px;
+    padding: 8px 20px !important;
+    font-size: 10px !important;
   }
 }
 
@@ -1580,36 +1692,5 @@ body {
   50% { opacity: 0.8; transform: scale(0.95); }
 }
 
-/* Mobile Tweaks */
-@media (max-width: 768px) {
-  .intro-container {
-    padding: 24px;
-    border: none;
-    background: transparent;
-    box-shadow: none;
-  }
-  
-  .intro-container::before,
-  .intro-container::after {
-    display: none;
-  }
-
-  .intro-title {
-    font-size: 32px;
-  }
-
-  .intro-text {
-    font-size: 14px;
-  }
-  
-  .intro-links {
-    flex-direction: column;
-    width: 100%;
-  }
-  
-  .intro-link {
-    width: 100%;
-    justify-content: center;
-  }
-}
+/* Mobile Tweaks - handled in main mobile media query above */
 
