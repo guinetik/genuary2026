@@ -1,4 +1,4 @@
-import{G as g,W as d}from"./index-hWCNwS5W.js";const c=`
+import{G as g,W as d}from"./index-plo7o7PE.js";const c=`
 attribute vec2 aPosition;
 attribute vec2 aUv;
 varying vec2 vUv;
