@@ -12,7 +12,7 @@
  * - Scroll: Manual zoom
  */
 
-import { Game, Camera3D, ParticleSystem, Painter } from "@guinetik/gcanvas";
+import { Game, Camera3D, ParticleSystem, Painter, Gesture } from "@guinetik/gcanvas";
 
 const CONFIG = {
   background: "#000",
@@ -172,16 +172,24 @@ class Day26Demo extends Game {
       this.scatterParticles();
     });
 
-    // Scroll to zoom
-    this.canvas.addEventListener(
-      "wheel",
-      (e) => {
-        e.preventDefault();
-        const delta = e.deltaY > 0 ? 0.9 : 1.1;
-        this.targetZoom = Math.max(0.3, Math.min(15, this.targetZoom * delta));
+    // Gesture handler for zoom (wheel + pinch)
+    this.gesture = new Gesture(this.canvas, {
+      onZoom: (delta) => {
+        const factor = delta > 0 ? 1.1 : 0.9;
+        this.targetZoom = Math.max(0.3, Math.min(15, this.targetZoom * factor));
       },
-      { passive: false }
-    );
+      // Tap to scatter on mobile (since dblclick doesn't work well)
+      onTap: () => {
+        this.scatterParticles();
+      }
+    });
+  }
+
+  stop() {
+    super.stop();
+    if (this.gesture) {
+      this.gesture.destroy();
+    }
   }
 
   generateTargets() {
