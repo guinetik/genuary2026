@@ -71,7 +71,28 @@ const CONFIG = {
 
   // Colors - will be randomized on init
   baseHue: 200,  // Default cyan-ish
+  colorTransitionSpeed: 0.15,  // How fast creature shifts toward food color (0-1)
 };
+
+/**
+ * Interpolate hue value (handles circular nature of hue 0-360)
+ * Returns the shortest path around the color wheel
+ */
+function lerpHue(current, target, t) {
+  // Normalize to 0-360
+  current = ((current % 360) + 360) % 360;
+  target = ((target % 360) + 360) % 360;
+  
+  // Find shortest path around circle
+  let diff = target - current;
+  if (Math.abs(diff) > 180) {
+    diff = diff > 0 ? diff - 360 : diff + 360;
+  }
+  
+  // Interpolate
+  const result = current + diff * t;
+  return ((result % 360) + 360) % 360;
+}
 
 /**
  * 3D vector utilities
@@ -235,6 +256,7 @@ class GaseousSentienceDemo extends Game {
     // Core pulse effect when eating
     this.corePulse = 0;
     this.lastFoodHue = this.hue;
+    this.targetHue = this.hue; // Target hue to gradually shift toward
 
     // Mouse drag for rotation with inertia
     this.isDragging = false;
@@ -242,6 +264,12 @@ class GaseousSentienceDemo extends Game {
     this.lastMouseY = 0;
     this.velocityX = 0;
     this.velocityY = 0.1; // Auto-rotate
+
+    // Touch drag tracking
+    this.touchStartX = 0;
+    this.touchStartY = 0;
+    this.touchStartTime = 0;
+    this.hasMoved = false; // Track if touch moved (to distinguish tap from drag)
 
     this.canvas.addEventListener('mousedown', (e) => {
       this.isDragging = true;
@@ -288,33 +316,101 @@ class GaseousSentienceDemo extends Game {
       const rect = this.canvas.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
-      const cx = this.width / 2;
-      const cy = this.height / 2;
-      const dist = Math.sqrt((x - cx) ** 2 + (y - cy) ** 2);
+      this.handleFeedClick(x, y);
+    });
 
-      // Only spawn food if clicking outside the shield
-      if (dist > this.getShieldRadius()) {
-        // Check if clicking on a nebula
-        let clickedNebula = null;
-        for (const nebula of this.nebulae) {
-          if (nebula.screenX === undefined) continue;
-          const dx = x - nebula.screenX;
-          const dy = y - nebula.screenY;
-          const distToNebula = Math.sqrt(dx * dx + dy * dy);
-          if (distToNebula < nebula.screenSize * 0.8) {
-            clickedNebula = nebula;
-            break;
-          }
-        }
+    // Touch support
+    this.canvas.addEventListener('touchstart', (e) => {
+      e.preventDefault(); // Prevent scrolling
+      const touch = e.touches[0];
+      const rect = this.canvas.getBoundingClientRect();
+      
+      this.touchStartX = touch.clientX;
+      this.touchStartY = touch.clientY;
+      this.touchStartTime = performance.now();
+      this.hasMoved = false;
+      
+      // Update mouse position for membrane effect
+      this.mouseX = touch.clientX - rect.left;
+      this.mouseY = touch.clientY - rect.top;
+      this.mouseActive = true;
+      
+      // Start drag tracking
+      this.isDragging = true;
+      this.lastMouseX = touch.clientX;
+      this.lastMouseY = touch.clientY;
+    }, { passive: false });
 
-        this.spawnFood(x, y, clickedNebula);
+    this.canvas.addEventListener('touchmove', (e) => {
+      e.preventDefault(); // Prevent scrolling
+      const touch = e.touches[0];
+      const rect = this.canvas.getBoundingClientRect();
+      
+      // Update mouse position for membrane effect
+      this.mouseX = touch.clientX - rect.left;
+      this.mouseY = touch.clientY - rect.top;
+      this.mouseActive = true;
+      
+      // Check if touch moved significantly (more than 10px)
+      const dx = touch.clientX - this.touchStartX;
+      const dy = touch.clientY - this.touchStartY;
+      const moveDist = Math.sqrt(dx * dx + dy * dy);
+      if (moveDist > 10) {
+        this.hasMoved = true;
       }
+      
+      // Handle rotation drag
+      if (this.isDragging) {
+        const dragDx = touch.clientX - this.lastMouseX;
+        const dragDy = touch.clientY - this.lastMouseY;
+        // Store as velocity for inertia
+        this.velocityY = dragDx * 0.005;
+        this.velocityX = dragDy * 0.005;
+        this.lastMouseX = touch.clientX;
+        this.lastMouseY = touch.clientY;
+      }
+    }, { passive: false });
+
+    this.canvas.addEventListener('touchend', (e) => {
+      e.preventDefault();
+      
+      // If touch didn't move much and was quick, treat as tap (feed)
+      const touchDuration = performance.now() - this.touchStartTime;
+      if (!this.hasMoved && touchDuration < 300) {
+        // Tap to feed
+        const rect = this.canvas.getBoundingClientRect();
+        // Use last known touch position
+        const x = this.mouseX;
+        const y = this.mouseY;
+        this.handleFeedClick(x, y);
+      }
+      
+      // Reset drag state
+      this.isDragging = false;
+      this.mouseX = this.width / 2;
+      this.mouseY = this.height / 2;
+      this.mouseActive = false;
+    }, { passive: false });
+
+    this.canvas.addEventListener('touchcancel', () => {
+      // Reset drag state
+      this.isDragging = false;
+      this.mouseX = this.width / 2;
+      this.mouseY = this.height / 2;
+      this.mouseActive = false;
     });
   }
 
   update(dt) {
     super.update(dt);
     this.time += dt * CONFIG.timeScale;
+
+    // Gradually shift creature color toward food color
+    if (Math.abs(this.hue - this.targetHue) > 0.1) {
+      this.hue = lerpHue(this.hue, this.targetHue, CONFIG.colorTransitionSpeed * dt);
+    } else {
+      this.hue = this.targetHue; // Snap to target when close
+    }
 
     // Apply rotation from velocity (works both when dragging and for inertia)
     this.rotationX += this.velocityX;
@@ -560,6 +656,8 @@ class GaseousSentienceDemo extends Game {
         // Trigger core pulse with food's color
         this.corePulse = Math.min(this.corePulse + 0.3, 1);
         this.lastFoodHue = p.hue;
+        // Update target hue for gradual color shift
+        this.targetHue = p.hue;
         this.foodParticles.splice(i, 1);
         this.onFoodAbsorbed();
       }
@@ -640,6 +738,33 @@ class GaseousSentienceDemo extends Game {
         targetGrowth: 1,
         growthSpeed: 0.6 + Math.random() * 0.3,
       };
+    }
+  }
+
+  /**
+   * Handle feed click/tap - spawn food from nebulae or empty space
+   */
+  handleFeedClick(x, y) {
+    const cx = this.width / 2;
+    const cy = this.height / 2;
+    const dist = Math.sqrt((x - cx) ** 2 + (y - cy) ** 2);
+
+    // Only spawn food if clicking outside the shield
+    if (dist > this.getShieldRadius()) {
+      // Check if clicking on a nebula
+      let clickedNebula = null;
+      for (const nebula of this.nebulae) {
+        if (nebula.screenX === undefined) continue;
+        const dx = x - nebula.screenX;
+        const dy = y - nebula.screenY;
+        const distToNebula = Math.sqrt(dx * dx + dy * dy);
+        if (distToNebula < nebula.screenSize * 0.8) {
+          clickedNebula = nebula;
+          break;
+        }
+      }
+
+      this.spawnFood(x, y, clickedNebula);
     }
   }
 
