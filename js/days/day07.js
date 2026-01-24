@@ -14,13 +14,13 @@
  * - Mouse: distort the pattern
  */
 
-import { Game, Painter } from "@guinetik/gcanvas";
+import { Game, Painter, Screen } from "@guinetik/gcanvas";
 
 const CONFIG = {
-  // Render settings
+  // Render settings - adjusted dynamically in init() for mobile
   render: {
-    scaleFactor: 2,        // 1 = full res, 2 = half (better perf)
-    dithering: 0.6,
+    scaleFactor: 2,        // Will be overridden: mobile=4, tablet=3, desktop=2
+    dithering: 0.6,        // Will be overridden: mobile=0
   },
 
   // Animation
@@ -177,6 +177,7 @@ class BitwiseFractalsDemo extends Game {
 
   init() {
     super.init();
+    Screen.init(this);  // Initialize screen detection
     Painter.init(this.ctx);
 
     this.container = this.canvas.parentElement;
@@ -196,33 +197,50 @@ class BitwiseFractalsDemo extends Game {
     this.mouseY = -1;
     this.mouseActive = false;
 
+    // Mobile optimizations: higher scale factor = fewer pixels to render
+    // Mobile: 4 (1/16 pixels), Tablet: 3 (1/9), Desktop: 2 (1/4)
+    this.scaleFactor = Screen.responsive(4, 3, 2);
+    // Disable dithering on mobile (Math.random is expensive)
+    this.ditherAmount = Screen.responsive(0, 0.3, 0.6);
+
+    // Auto-rotate formula timer
+    this.formulaTimer = 0;
+    this.formulaInterval = 20; // seconds
+
     // Render buffer
     this.handleResize();
 
-    // Click to change formula
+    // Click/tap to change formula (also resets timer)
     this.canvas.addEventListener("click", () => {
       this.formulaIndex = (this.formulaIndex + 1) % FORMULAS.length;
+      this.formulaTimer = 0; // Reset timer on manual change
     });
 
-    // Mouse tracking
-    this.canvas.addEventListener("mousemove", (e) => {
-      const rect = this.canvas.getBoundingClientRect();
-      this.mouseX = (e.clientX - rect.left) / rect.width;
-      this.mouseY = (e.clientY - rect.top) / rect.height;
-      this.mouseActive = true;
-    });
+    // Mouse tracking (desktop only - skip on touch devices for performance)
+    if (!Screen.isTouchPrimary()) {
+      this.canvas.addEventListener("mousemove", (e) => {
+        const rect = this.canvas.getBoundingClientRect();
+        this.mouseX = (e.clientX - rect.left) / rect.width;
+        this.mouseY = (e.clientY - rect.top) / rect.height;
+        this.mouseActive = true;
+      });
 
-    this.canvas.addEventListener("mouseleave", () => {
-      this.mouseActive = false;
-    });
+      this.canvas.addEventListener("mouseleave", () => {
+        this.mouseActive = false;
+      });
+    }
   }
 
   handleResize() {
     this._lastCanvasW = this.width;
     this._lastCanvasH = this.height;
 
-    this.renderWidth = Math.max(1, Math.floor(this.width / CONFIG.render.scaleFactor));
-    this.renderHeight = Math.max(1, Math.floor(this.height / CONFIG.render.scaleFactor));
+    // Recalculate scale factor on resize (handles orientation changes)
+    this.scaleFactor = Screen.responsive(4, 3, 2);
+    this.ditherAmount = Screen.responsive(0, 0.3, 0.6);
+
+    this.renderWidth = Math.max(1, Math.floor(this.width / this.scaleFactor));
+    this.renderHeight = Math.max(1, Math.floor(this.height / this.scaleFactor));
 
     this.imageData = Painter.img.createImageData(this.renderWidth, this.renderHeight);
   }
@@ -230,6 +248,13 @@ class BitwiseFractalsDemo extends Game {
   update(dt) {
     super.update(dt);
     this.time += dt;
+
+    // Auto-rotate formula every 20 seconds
+    this.formulaTimer += dt;
+    if (this.formulaTimer >= this.formulaInterval) {
+      this.formulaIndex = (this.formulaIndex + 1) % FORMULAS.length;
+      this.formulaTimer = 0;
+    }
 
     // Check for resize
     if (this.width !== this._lastCanvasW || this.height !== this._lastCanvasH) {
@@ -297,7 +322,12 @@ class BitwiseFractalsDemo extends Game {
     const mouseRY = this.mouseY * rh;
     const mouseRadius = Math.min(rw, rh) * CONFIG.mouse.radius;
 
-    const ditherAmount = CONFIG.render.dithering;
+    const ditherAmount = this.ditherAmount;
+    const useDither = ditherAmount > 0;
+
+    // Pre-compute mouse radius squared for faster distance check (avoid sqrt)
+    const mouseRadiusSq = mouseRadius * mouseRadius;
+    const skipMouseWarp = !this.mouseActive || Screen.isTouchPrimary();
 
     for (let py = 0; py < rh; py++) {
       for (let px = 0; px < rw; px++) {
@@ -311,13 +341,14 @@ class BitwiseFractalsDemo extends Game {
         const rx = nx * cos - ny * sin;
         const ry = nx * sin + ny * cos;
 
-        // Mouse warp distortion
-        if (this.mouseActive) {
+        // Mouse warp distortion (skip on touch devices for performance)
+        if (!skipMouseWarp) {
           const mdx = px - mouseRX;
           const mdy = py - mouseRY;
-          const mdist = Math.sqrt(mdx * mdx + mdy * mdy);
+          const mdistSq = mdx * mdx + mdy * mdy;
 
-          if (mdist < mouseRadius && mdist > 0) {
+          if (mdistSq < mouseRadiusSq && mdistSq > 0) {
+            const mdist = Math.sqrt(mdistSq);
             const warpFactor = (1 - mdist / mouseRadius) * CONFIG.mouse.warpStrength;
             nx += (mdx / mdist) * warpFactor / scale;
             ny += (mdy / mdist) * warpFactor / scale;
@@ -343,19 +374,31 @@ class BitwiseFractalsDemo extends Game {
           const hue = (120 + this.hueOffset + depth * 30) % 360;
           const [r, g, b] = this.hslToRgb(hue / 360, 0.9, 0.3 + brightness * 0.4);
 
-          // Add dithering
-          const dither = (Math.random() - 0.5) * ditherAmount;
-          data[idx] = Math.max(0, Math.min(255, r + dither));
-          data[idx + 1] = Math.max(0, Math.min(255, g + dither));
-          data[idx + 2] = Math.max(0, Math.min(255, b + dither));
+          // Add dithering only if enabled (skip Math.random on mobile)
+          if (useDither) {
+            const dither = (Math.random() - 0.5) * ditherAmount;
+            data[idx] = Math.max(0, Math.min(255, r + dither));
+            data[idx + 1] = Math.max(0, Math.min(255, g + dither));
+            data[idx + 2] = Math.max(0, Math.min(255, b + dither));
+          } else {
+            data[idx] = r;
+            data[idx + 1] = g;
+            data[idx + 2] = b;
+          }
         } else {
           // Background - very dark with subtle pattern
           const bgPattern = ((ix + iy) & 0xF) / 15;
           const bgBright = 5 + bgPattern * 10;
-          const dither = (Math.random() - 0.5) * ditherAmount;
-          data[idx] = Math.max(0, Math.min(255, bgBright * 0.2 + dither));
-          data[idx + 1] = Math.max(0, Math.min(255, bgBright * 0.5 + dither));
-          data[idx + 2] = Math.max(0, Math.min(255, bgBright * 0.3 + dither));
+          if (useDither) {
+            const dither = (Math.random() - 0.5) * ditherAmount;
+            data[idx] = Math.max(0, Math.min(255, bgBright * 0.2 + dither));
+            data[idx + 1] = Math.max(0, Math.min(255, bgBright * 0.5 + dither));
+            data[idx + 2] = Math.max(0, Math.min(255, bgBright * 0.3 + dither));
+          } else {
+            data[idx] = bgBright * 0.2;
+            data[idx + 1] = bgBright * 0.5;
+            data[idx + 2] = bgBright * 0.3;
+          }
         }
         data[idx + 3] = 255;
       }
