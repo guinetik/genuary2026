@@ -1,4 +1,4 @@
-import{G as M,W as w}from"./index-DTFuSMoL.js";const y=`
+import{G as M,W as w}from"./index-Bh0GMSTl.js";const y=`
 precision highp float;
 
 attribute vec2 aPosition;

@@ -1,4 +1,4 @@
-import{G as M,P as g}from"./index-DTFuSMoL.js";const o={cell:{w:11,h:18},tick:70,tail:{min:25,max:50},mouse:{radius:180,slowRadius:120},glow:{blur:10,color:"#0f0"}};class C extends M{constructor(t){super(t),this.backgroundColor="#000",this.source="",this.lines=[],this.ready=!1}async init(){super.init(),g.init(this.ctx);try{const s=await fetch(import.meta.url);this.source=await s.text()}catch{this.source=`// Could not fetch source
+import{G as M,P as g}from"./index-Bh0GMSTl.js";const o={cell:{w:11,h:18},tick:70,tail:{min:25,max:50},mouse:{radius:180,slowRadius:120},glow:{blur:10,color:"#0f0"}};class C extends M{constructor(t){super(t),this.backgroundColor="#000",this.source="",this.lines=[],this.ready=!1}async init(){super.init(),g.init(this.ctx);try{const s=await fetch(import.meta.url);this.source=await s.text()}catch{this.source=`// Could not fetch source
 // Run via HTTP server: npm run dev
 import { Game, Painter } from "@guinetik/gcanvas";
 const CONFIG = { cell: { w: 11, h: 18 } };
