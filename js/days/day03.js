@@ -113,6 +113,22 @@ class GoldenVortexDemo extends Game {
       this.mouseX = 0;
       this.mouseY = 0;
     });
+
+    // Touch support for mobile
+    this.canvas.addEventListener("touchmove", (e) => {
+      e.preventDefault();
+      const rect = this.canvas.getBoundingClientRect();
+      const touch = e.touches[0];
+      this.mouseX = touch.clientX - rect.left - this.width / 2;
+      this.mouseY = touch.clientY - rect.top - this.height / 2;
+    }, { passive: false });
+
+    this.canvas.addEventListener("touchend", (e) => {
+      this.explode();
+      // Reset mouse position after touch
+      this.mouseX = 0;
+      this.mouseY = 0;
+    });
   }
 
   /**
