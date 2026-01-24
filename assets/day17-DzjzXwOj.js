@@ -1,4 +1,4 @@
-import{G as g,W as u}from"./gcanvas.es-CkPclmv-.js";const n=`
+import{G as g,W as u}from"./index-DzXchqqB.js";const n=`
 attribute vec2 aPosition;
 attribute vec2 aUv;
 varying vec2 vUv;
