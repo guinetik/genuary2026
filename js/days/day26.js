@@ -478,7 +478,7 @@ class Day26Demo extends Game {
     ctx.fillText(
       `Zoom: ${this.zoom.toFixed(1)}x | Dbl-click to scatter`,
       this.width - 10,
-      this.height - 10
+      20
     );
   }
 
