@@ -3,9 +3,10 @@
  * Prompt: "Transparency"
  * Credit: PaoloCurtoni
  *
- * LIQUID GLASS
- * Interactive glass lens shader with proper fresnel and refraction physics.
- * Click anywhere to spawn blobs. Drag them around. Release for ripples.
+ * LIQUID! AT THE DISCO
+ * Interactive glass lens shader with proper fresnel and refraction physics,
+ * floating over an audio-reactive spectrum analyzer background.
+ * Click to spawn blobs. Drag them around. Release for ripples. [R] to restart.
  *
  * Features:
  * - Unlimited spawnable blobs (up to MAX_BLOBS)
@@ -25,6 +26,9 @@ import FRAGMENT_SHADER from '../../glsl/liquidg.frag?raw';
 
 /** Maximum number of blobs (must match shader #define MAX_BLOBS) */
 const MAX_BLOBS = 6;
+
+/** Number of spectrum bands (must match shader #define SPECTRUM_BANDS) */
+const SPECTRUM_BANDS = 32;
 
 const CONFIG = {
   // Animation
@@ -145,6 +149,16 @@ class LiquidGlassDemo extends Game {
     this.blobs = [];
     this.startDelay = 0;
     this.initialBlobSpawned = false;
+    
+    // ==========================================================================
+    // AUDIO SPECTRUM ANALYZER
+    // ==========================================================================
+    this.audioEnabled = false;
+    this.audioContext = null;
+    this.analyser = null;
+    this.frequencyData = null;
+    this.spectrum = new Float32Array(SPECTRUM_BANDS);  // Normalized 0-1 values
+    this.spectrumSmooth = new Float32Array(SPECTRUM_BANDS);  // Smoothed for visual
 
     // Mouse events
     this.canvas.addEventListener('mousemove', (e) => {
@@ -204,6 +218,24 @@ class LiquidGlassDemo extends Game {
     this.canvas.addEventListener('touchend', () => {
       this.handleRelease();
     });
+    
+    // Keyboard: R to restart simulation
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'r' || e.key === 'R') {
+        this.restartSimulation();
+      }
+    });
+  }
+  
+  /**
+   * Restart the simulation - clear all blobs and spawn fresh
+   */
+  restartSimulation() {
+    this.blobs = [];
+    this.startDelay = 0;
+    this.initialBlobSpawned = false;
+    this.dragging = -1;
+    this.hoveredBlob = -1;
   }
   
   /**
@@ -212,6 +244,11 @@ class LiquidGlassDemo extends Game {
    * @param {number} clickY - Click Y in normalized coords
    */
   handleClick(clickX, clickY) {
+    // Initialize audio on first click (requires user gesture)
+    if (!this.audioEnabled) {
+      this.initAudio();
+    }
+    
     const aspect = this.width / this.height;
     const clickXAspect = clickX * aspect;
     
@@ -362,10 +399,95 @@ class LiquidGlassDemo extends Game {
     const p = 0.4;
     return Math.pow(2, -10 * t) * Math.sin((t - p / 4) * (2 * Math.PI) / p) + 1;
   }
+  
+  /**
+   * Initialize audio spectrum analyzer from microphone
+   * Must be called from user gesture (click)
+   */
+  async initAudio() {
+    if (this.audioEnabled) return;
+    
+    try {
+      // Request microphone access
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+        }
+      });
+      
+      // Create audio context and analyser
+      this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      this.analyser = this.audioContext.createAnalyser();
+      this.analyser.fftSize = 256;  // 128 frequency bins
+      this.analyser.smoothingTimeConstant = 0.6;  // Slightly more responsive
+      this.analyser.minDecibels = -90;  // More sensitive to quiet sounds
+      this.analyser.maxDecibels = -10;
+      
+      // Connect microphone to analyser
+      const source = this.audioContext.createMediaStreamSource(stream);
+      source.connect(this.analyser);
+      
+      // Create buffer for frequency data
+      this.frequencyData = new Uint8Array(this.analyser.frequencyBinCount);
+      
+      this.audioEnabled = true;
+      console.log('🎤 Audio spectrum analyzer enabled!');
+    } catch (err) {
+      console.warn('Could not access microphone:', err.message);
+    }
+  }
+  
+  /**
+   * Update spectrum data from audio analyser
+   */
+  updateSpectrum() {
+    if (!this.audioEnabled || !this.analyser) return;
+    
+    // Get frequency data
+    this.analyser.getByteFrequencyData(this.frequencyData);
+    
+    // Map frequency bins to our spectrum bands
+    const binCount = this.frequencyData.length;
+    const binsPerBand = Math.floor(binCount / SPECTRUM_BANDS);
+    
+    for (let i = 0; i < SPECTRUM_BANDS; i++) {
+      // Average bins for this band
+      let sum = 0;
+      const startBin = Math.floor(i * binCount / SPECTRUM_BANDS);
+      const endBin = Math.floor((i + 1) * binCount / SPECTRUM_BANDS);
+      
+      for (let j = startBin; j < endBin; j++) {
+        sum += this.frequencyData[j];
+      }
+      
+      // Normalize to 0-1
+      let avg = sum / (endBin - startBin) / 255;
+      
+      // Frequency compensation: boost higher frequencies aggressively (mics lose high end)
+      const t = i / SPECTRUM_BANDS;
+      const freqBoost = 1.0 + t * t * 8.0;  // Exponential: 1x at low, 9x at high
+      avg *= freqBoost;
+      
+      // Overall sensitivity boost
+      avg *= 2.0;
+      
+      // Clamp to 0-1
+      this.spectrum[i] = Math.min(avg, 1.0);
+      
+      // Smooth for visual (decay slower than attack)
+      const smoothFactor = avg > this.spectrumSmooth[i] ? 0.4 : 0.1;
+      this.spectrumSmooth[i] += (avg - this.spectrumSmooth[i]) * smoothFactor;
+    }
+  }
 
   update(dt) {
     super.update(dt);
     this.time += dt * CONFIG.speed;
+    
+    // Update audio spectrum
+    this.updateSpectrum();
     
     // Spawn initial blob at center after 1 second delay
     this.startDelay += dt;
@@ -537,6 +659,11 @@ class LiquidGlassDemo extends Game {
       uniforms[`uBlobDrag[${i}]`] = blob ? blob.drag : 0;
       uniforms[`uBlobRipple[${i}]`] = blob ? blob.ripple : 0;
       uniforms[`uBlobWobble[${i}]`] = blob ? blob.wobble : 0;
+    }
+    
+    // Set spectrum data for audio visualization
+    for (let i = 0; i < SPECTRUM_BANDS; i++) {
+      uniforms[`uSpectrum[${i}]`] = this.spectrumSmooth[i];
     }
 
     // Set shader uniforms
