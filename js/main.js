@@ -9,6 +9,7 @@
  */
 
 import { PROMPTS, TOTAL_DAYS, getPrompt, getInterpretation } from './prompts.js';
+import { Screen } from '@guinetik/gcanvas';
 
 // ============================================
 // Configuration
@@ -109,6 +110,11 @@ async function mountDay(day) {
     state.games.set(day, game);
     state.mounting.delete(day);
 
+    // Request wake lock on mobile to prevent screen sleep during gameplay
+    if (Screen.isTouchPrimary() && Screen.wakeLockSupported) {
+      Screen.requestWakeLock();
+    }
+
     console.log(`[Genuary] Mounted Day ${day} (only game running)`);
   } catch (err) {
     console.warn(`[Genuary] Day ${day} not implemented:`, err.message);
@@ -131,6 +137,11 @@ function unmountDay(day) {
   // Stop the game loop
   game.stop();
   state.games.delete(day);
+
+  // Release wake lock when no games are running
+  if (state.games.size === 0) {
+    Screen.releaseWakeLock();
+  }
 
   // Clear the canvas to avoid showing stale content
   const canvas = document.getElementById(`canvas-${day}`);
@@ -474,44 +485,83 @@ function updateMobileInfoContent(day) {
  */
 function handleNavClick(e, day) {
   e.preventDefault();
+  
+  // Prevent rapid clicks during transition
+  if (state.isProgrammaticScroll) return;
+  
   scrollToDay(day);
   closeMobileMenu();
 }
 
 /**
- * Scroll to a specific day
- * @param {number} day
+ * Navigate to a specific day
+ * Simple approach: instant scroll with brief fade
+ * @param {number} day - Target day number
  */
 function scrollToDay(day) {
-  const section = state.sections[day]; // Index matches day (since Intro is at 0, but sections array includes intro at 0... wait)
-  // Logic check:
-  // state.sections[0] is Intro (day 0)
-  // state.sections[1] is Day 1
-  // So yes, state.sections[day] is correct.
+  const section = state.sections[day];
+  if (!section) return;
   
-  if (section) {
-    // Mark as programmatic scroll to prevent IntersectionObserver interference
-    state.isProgrammaticScroll = true;
+  const oldDay = state.currentDay;
+  
+  // Same day? No-op
+  if (day === oldDay) return;
+  
+  // Mark as transitioning to prevent observer interference
+  state.isProgrammaticScroll = true;
+  
+  // Unmount current game immediately
+  unmountDay(oldDay);
+  
+  // Update state
+  state.currentDay = day;
+  updateActiveNav(day);
+  
+  // Simple fade: briefly show overlay, scroll, then fade out
+  let overlay = document.getElementById('nav-transition-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'nav-transition-overlay';
+    overlay.style.cssText = `
+      position: fixed;
+      inset: 0;
+      background: #000;
+      opacity: 0;
+      pointer-events: none;
+      z-index: 100;
+      transition: opacity 0.15s ease;
+    `;
+    document.body.appendChild(overlay);
+  }
+  
+  // Fade in
+  overlay.style.opacity = '1';
+  
+  // After fade in, scroll and fade out
+  setTimeout(() => {
+    section.scrollIntoView({ behavior: 'instant' });
     
-    // Unmount current day immediately to free resources during scroll
-    unmountDay(state.currentDay);
-    state.currentDay = day;
-    updateActiveNav(day);
+    // Update active states
+    state.sections.forEach(s => s.classList.remove('active'));
+    section.classList.add('active');
     
-    section.scrollIntoView({ behavior: 'smooth' });
-    
-    // Mount new day and reset flag after scroll animation completes
-    clearTimeout(state.programmaticScrollTimeout);
-    state.programmaticScrollTimeout = setTimeout(() => {
+    // Fade out
+    setTimeout(() => {
+      overlay.style.opacity = '0';
+      
+      // Mount new game
       mountDay(day);
+      
+      // Update URL
       if (day > 0) {
         history.replaceState(null, '', `#day-${day}`);
       } else {
         history.replaceState(null, '', ' ');
       }
+      
       state.isProgrammaticScroll = false;
-    }, 700);
-  }
+    }, 50);
+  }, 150);
 }
 
 /**
@@ -542,7 +592,7 @@ function updateActiveNav(day) {
  * Navigate to previous day
  */
 function navigatePrev() {
-  if (state.currentDay > 0) {
+  if (state.currentDay > 0 && !state.isProgrammaticScroll) {
     scrollToDay(state.currentDay - 1);
   }
 }
@@ -551,7 +601,7 @@ function navigatePrev() {
  * Navigate to next day
  */
 function navigateNext() {
-  if (state.currentDay < TOTAL_DAYS) {
+  if (state.currentDay < TOTAL_DAYS && !state.isProgrammaticScroll) {
     scrollToDay(state.currentDay + 1);
   }
 }
@@ -562,6 +612,7 @@ function navigateNext() {
 
 /**
  * Setup scroll snap detection using IntersectionObserver for reliability
+ * This handles MANUAL scrolls (swipes). Nav clicks use scrollToDay() instead.
  */
 function setupScrollHandling() {
   let scrollTimeout;
@@ -574,18 +625,41 @@ function setupScrollHandling() {
   };
 
   const observer = new IntersectionObserver((entries) => {
-    // Skip during initialization, programmatic scroll, or fullscreen transition
+    // Skip during initialization, programmatic scroll/transition, or fullscreen
     if (state.isInitializing || state.isProgrammaticScroll || state.isFullscreenTransition) return;
     
     for (const entry of entries) {
       if (entry.isIntersecting && entry.intersectionRatio >= 0.6) {
         const day = parseInt(entry.target.dataset.day);
         if (!isNaN(day) && day !== state.currentDay) {
-          // Debounce to avoid rapid transitions
-          clearTimeout(scrollTimeout);
-          scrollTimeout = setTimeout(() => {
-            transitionToDay(day);
-          }, 50);
+          // For manual scroll, only allow adjacent day transitions
+          // This prevents weird jumps if someone scrolls fast
+          const isAdjacent = Math.abs(day - state.currentDay) <= 1;
+          
+          if (isAdjacent) {
+            // Debounce to avoid rapid transitions
+            clearTimeout(scrollTimeout);
+            scrollTimeout = setTimeout(() => {
+              transitionToDay(day);
+            }, 50);
+          } else {
+            // Non-adjacent scroll detected - snap to target cleanly
+            clearTimeout(scrollTimeout);
+            scrollTimeout = setTimeout(() => {
+              // Just update state and mount, section is already visible
+              const oldDay = state.currentDay;
+              state.currentDay = day;
+              unmountDay(oldDay);
+              mountDay(day);
+              updateActiveNav(day);
+              
+              if (day > 0) {
+                history.replaceState(null, '', `#day-${day}`);
+              } else {
+                history.replaceState(null, '', ' ');
+              }
+            }, 100);
+          }
         }
       }
     }
@@ -805,7 +879,7 @@ function handleFullscreenChange() {
     
     // When exiting fullscreen, scroll back to the current day (instant, no animation)
     if (!isFullscreen) {
-      const section = state.sections[day - 1];
+      const section = state.sections[day];
       if (section) {
         section.scrollIntoView({ behavior: 'instant' });
       }
@@ -890,6 +964,7 @@ function setupResizeHandler() {
 
 /**
  * Handle initial URL hash on page load
+ * Uses instant scroll (no animation) for direct page load
  */
 function handleInitialHash() {
   const hash = window.location.hash;
@@ -900,14 +975,23 @@ function handleInitialHash() {
     if (day >= 1 && day <= TOTAL_DAYS) {
       // Set current day immediately to prevent observer interference
       state.currentDay = day;
+      state.isProgrammaticScroll = true;
       
+      // Instant scroll on page load (no animation needed)
+      const section = state.sections[day];
+      if (section) {
+        section.scrollIntoView({ behavior: 'instant' });
+        section.classList.add('active');
+        updateActiveNav(day);
+      }
+      
+      // Mount game and clear flags after DOM settles
       setTimeout(() => {
-        scrollToDay(day);
-        // Clear initialization flag after scroll settles
-        setTimeout(() => {
-          state.isInitializing = false;
-        }, 1000);
+        mountDay(day);
+        state.isProgrammaticScroll = false;
+        state.isInitializing = false;
       }, 100);
+      
       return true; // Signal that we handled a hash
     }
   }
