@@ -14,7 +14,7 @@
  * Black and white. Grainy. Obsessive. Hand-drawn.
  */
 
-import { Game, Painter, Camera3D } from '@guinetik/gcanvas';
+import { Game, Painter, Camera3D, Gesture } from '@guinetik/gcanvas';
 
 const CONFIG = {
   // Circle radii (the two rotating circles)
@@ -153,27 +153,50 @@ class PerfectionistNightmare extends Game {
       this.canvas.addEventListener('dblclick', this._dblClickHandler);
     }
 
-    // Mouse wheel to zoom - pauses auto-zoom, resumes after 2s of inactivity
-    if (!this._wheelHandler) {
-      this._wheelHandler = (e) => {
-        e.preventDefault();
-        this.userZoomed = true;  // Pause auto-zoom
-        
-        // Clear existing timer
-        if (this.zoomResumeTimer) {
-          clearTimeout(this.zoomResumeTimer);
-        }
-        
-        // Resume auto-zoom after 2 seconds of no scrolling
-        this.zoomResumeTimer = setTimeout(() => {
-          this.userZoomed = false;
-        }, 2000);
-        
-        const delta = e.deltaY > 0 ? -CONFIG.wheelZoomSpeed : CONFIG.wheelZoomSpeed;
-        // No limits - zoom as far as you want
-        this.targetZoom = Math.max(0.05, this.targetZoom + delta);
-      };
-      this.canvas.addEventListener('wheel', this._wheelHandler, { passive: false });
+    // Gesture handler for zoom (wheel + pinch) - pauses auto-zoom
+    if (!this._gesture) {
+      this._gesture = new Gesture(this.canvas, {
+        onZoom: (delta) => {
+          this.userZoomed = true;  // Pause auto-zoom
+          
+          // Clear existing timer
+          if (this.zoomResumeTimer) {
+            clearTimeout(this.zoomResumeTimer);
+          }
+          
+          // Resume auto-zoom after 2 seconds of no zooming
+          this.zoomResumeTimer = setTimeout(() => {
+            this.userZoomed = false;
+          }, 2000);
+          
+          // Convert delta to zoom change
+          const zoomDelta = delta * CONFIG.wheelZoomSpeed * 2;
+          this.targetZoom = Math.max(0.05, this.targetZoom + zoomDelta);
+        },
+        // Double-tap to toggle mode on mobile
+        onTap: () => {
+          // Debounce taps
+          const now = Date.now();
+          if (this._lastTapTime && now - this._lastTapTime < 400) {
+            // Double tap detected - toggle mode
+            this.isRational = !this.isRational;
+            this.trail = [];
+            this.theta = 0;
+            this.zoom = CONFIG.initialZoom;
+            this.targetZoom = CONFIG.initialZoom;
+            this.userZoomed = false;
+            if (this.zoomResumeTimer) {
+              clearTimeout(this.zoomResumeTimer);
+              this.zoomResumeTimer = null;
+            }
+            this._lastTapTime = 0;
+          } else {
+            this._lastTapTime = now;
+          }
+        },
+        wheelZoomFactor: CONFIG.wheelZoomSpeed,
+        pinchZoomFactor: 2
+      });
     }
 
     // Space to pause
@@ -624,7 +647,17 @@ class PerfectionistNightmare extends Game {
     
     // Hint
     ctx.fillStyle = `rgba(100, 100, 100, ${0.3 * flicker})`;
-    ctx.fillText('drag to orbit • scroll to zoom • double-click to toggle π', 20, this.height - 20);
+    ctx.fillText('drag to orbit • scroll/pinch to zoom • double-tap to toggle π', 20, this.height - 20);
+  }
+
+  stop() {
+    super.stop();
+    if (this._gesture) {
+      this._gesture.destroy();
+    }
+    if (this.zoomResumeTimer) {
+      clearTimeout(this.zoomResumeTimer);
+    }
   }
 }
 
