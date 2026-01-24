@@ -12,7 +12,7 @@
  * - Greek letter naming for variants (Alpha, Beta, Delta, Omicron...)
  * - Each variant has different transmissibility and vaccine resistance
  */
-import { Game, Painter, ToggleButton, Tweenetik, Easing } from "@guinetik/gcanvas";
+import { Game, Painter, ToggleButton, Tweenetik, Easing, Screen } from "@guinetik/gcanvas";
 
 /**
  * Greek letter names for variants (COVID-style naming)
@@ -34,9 +34,9 @@ const VARIANT_COLORS = [
   "#ff0080",  // Epsilon - pink
   "#aa00ff",  // Zeta - purple
   "#6020ff",  // Eta - indigo
-  "#00aaff",  // Theta - cyan
-  "#00ffaa",  // Iota - teal
-  "#80ff00",  // Kappa - lime
+  "#ff4080",  // Theta - rose/coral (was cyan - conflicts with vaccinated)
+  "#ff8000",  // Iota - amber/orange-red (was teal - conflicts with healthy agent)
+  "#ff0040",  // Kappa - deep rose (was lime - conflicts with healthy agent green)
 ];
 
 const CONFIG = {
@@ -59,12 +59,14 @@ const CONFIG = {
   // Transmission settings
   transmissionRate: 0.15,                   // base probability per contact per tick
   roomTransmissionBonus: 2.0,              // multiplier when both agents in same room
-  vaccineEfficacy: 0.8,                    // 80% reduction in susceptibility for vaccinated
+  vaccineEfficacy: 0.95,                   // 95% reduction in susceptibility for vaccinated (stronger protection)
 
   // Mutation settings
   mutationChanceOnVaccinated: 0.005,       // 0.5% chance to mutate when blocked by vaccine
-  mutationTransmissionBoost: 1.2,          // each mutation increases transmissibility by 20%
-  mutationVaccineResistanceBoost: 0.15,    // each mutation reduces vaccine efficacy by 15%
+  mutationTransmissionBoost: 1.4,          // each mutation increases transmissibility by 40% (more dramatic differences)
+  mutationTransmissionRandomness: 0.15,    // ±15% random variation in transmission boost
+  mutationVaccineResistanceBoost: 0.2,     // each mutation reduces vaccine efficacy by 20% (more dramatic)
+  mutationResistanceRandomness: 0.1,       // ±10% random variation in resistance boost
   maxVariants: 10,                         // cap on total number of variants
 
   // Spawning settings (click to infect/spawn)
@@ -298,10 +300,17 @@ class Variant {
     this.parent = parent;
     this.generation = parent ? parent.generation + 1 : 0;
     
-    // Calculate cumulative bonuses from mutation chain
+    // Calculate cumulative bonuses from mutation chain with randomness for uniqueness
     if (parent) {
-      this.transmissionMultiplier = parent.transmissionMultiplier * CONFIG.mutationTransmissionBoost;
-      this.vaccineResistance = Math.min(0.95, parent.vaccineResistance + CONFIG.mutationVaccineResistanceBoost);
+      // Add randomness to transmission boost (±15%)
+      const transmissionBoost = CONFIG.mutationTransmissionBoost * 
+        (1 + (Math.random() - 0.5) * CONFIG.mutationTransmissionRandomness * 2);
+      this.transmissionMultiplier = parent.transmissionMultiplier * transmissionBoost;
+      
+      // Add randomness to resistance boost (±10%)
+      const resistanceBoost = CONFIG.mutationVaccineResistanceBoost * 
+        (1 + (Math.random() - 0.5) * CONFIG.mutationResistanceRandomness * 2);
+      this.vaccineResistance = Math.min(0.95, parent.vaccineResistance + resistanceBoost);
     } else {
       this.transmissionMultiplier = 1.0;
       this.vaccineResistance = 0; // Original strain has no vaccine resistance
@@ -955,6 +964,7 @@ class Day29Demo extends Game {
 
   init() {
     super.init();
+    Screen.init(this);  // Initialize screen detection
     Painter.init(this.ctx);
 
     // Generate dungeon
@@ -1073,9 +1083,9 @@ class Day29Demo extends Game {
       }
     }
     
-    // Convert to grid coordinates
-    const gridX = Math.floor(clickX / this.cellW);
-    const gridY = Math.floor(clickY / this.cellH);
+    // Convert to grid coordinates (account for grid offset)
+    const gridX = Math.floor((clickX - this.gridOffsetX) / this.cellW);
+    const gridY = Math.floor((clickY - this.gridOffsetY) / this.cellH);
     
     // Find closest agent within click tolerance (easier to click!)
     const clickTolerance = Math.max(this.cellW, this.cellH) * 1.5; // 1.5 cells radius
@@ -1085,9 +1095,9 @@ class Day29Demo extends Game {
     for (const agent of this.agents) {
       if (agent.healthState === "dead") continue;
       
-      // Calculate pixel distance from click to agent center
-      const agentPx = agent.x * this.cellW + this.cellW / 2;
-      const agentPy = agent.y * this.cellH + this.cellH / 2;
+      // Calculate pixel distance from click to agent center (account for grid offset)
+      const agentPx = this.gridOffsetX + agent.x * this.cellW + this.cellW / 2;
+      const agentPy = this.gridOffsetY + agent.y * this.cellH + this.cellH / 2;
       const dist = Math.sqrt((clickX - agentPx) ** 2 + (clickY - agentPy) ** 2);
       
       if (dist < closestDist) {
@@ -1140,8 +1150,30 @@ class Day29Demo extends Game {
   }
 
   calculateGrid() {
-    this.cellW = this.width / this.gridWidth;
-    this.cellH = this.height / this.gridHeight;
+    // Calculate cell size to maintain square cells (prevent stretching on mobile)
+    // Use the smaller dimension to ensure cells stay square
+    const minDim = Math.min(this.width, this.height);
+    const cellSize = Math.min(
+      this.width / this.gridWidth,
+      this.height / this.gridHeight
+    );
+    
+    // On mobile/portrait, use square cells based on width to prevent vertical stretching
+    // On desktop/landscape, use square cells based on height to prevent horizontal stretching
+    const isPortrait = this.height > this.width;
+    const baseSize = isPortrait 
+      ? this.width / this.gridWidth  // Portrait: base on width
+      : this.height / this.gridHeight; // Landscape: base on height
+    
+    // Use square cells (same width and height)
+    this.cellW = baseSize;
+    this.cellH = baseSize;
+    
+    // Calculate offsets to center the grid
+    const gridPixelWidth = this.gridWidth * this.cellW;
+    const gridPixelHeight = this.gridHeight * this.cellH;
+    this.gridOffsetX = (this.width - gridPixelWidth) / 2;
+    this.gridOffsetY = (this.height - gridPixelHeight) / 2;
   }
 
   update(dt) {
@@ -1346,14 +1378,20 @@ class Day29Demo extends Game {
 
             // Both in same room = indoor transmission bonus
             const targetRoom = this.getAgentRoom(target);
-            if (infectedRoom && targetRoom && infectedRoom === targetRoom) {
-              prob *= CONFIG.roomTransmissionBonus;
+            const isVaccinated = target.healthState === "vaccinated";
+            const inSameRoom = infectedRoom && targetRoom && infectedRoom === targetRoom;
+            
+            if (inSameRoom) {
+              // Vaccinated get reduced room bonus (indoor transmission less effective for them)
+              const roomBonus = isVaccinated 
+                ? CONFIG.roomTransmissionBonus * 0.6  // 60% of room bonus for vaccinated
+                : CONFIG.roomTransmissionBonus;
+              prob *= roomBonus;
             }
 
             // Vaccinated have reduced susceptibility (reduced by variant's vaccine resistance)
-            const isVaccinated = target.healthState === "vaccinated";
             if (isVaccinated) {
-              const effectiveVaccineEfficacy = Math.max(0, CONFIG.vaccineEfficacy - variant.vaccineResistance);
+              const effectiveVaccineEfficacy = Math.max(0.5, CONFIG.vaccineEfficacy - variant.vaccineResistance); // Minimum 50% protection even against resistant variants
               prob *= (1 - effectiveVaccineEfficacy);
             }
 
@@ -1413,28 +1451,28 @@ class Day29Demo extends Game {
       this.stats[agent.healthState]++;
     }
 
-    // Draw subtle grid pattern
+    // Draw subtle grid pattern (account for grid offset)
     ctx.strokeStyle = "rgba(255, 255, 255, 0.03)";
     ctx.lineWidth = 1;
     for (let x = 0; x <= this.gridWidth; x++) {
       ctx.beginPath();
-      ctx.moveTo(x * this.cellW, 0);
-      ctx.lineTo(x * this.cellW, this.height);
+      ctx.moveTo(this.gridOffsetX + x * this.cellW, this.gridOffsetY);
+      ctx.lineTo(this.gridOffsetX + x * this.cellW, this.gridOffsetY + this.gridHeight * this.cellH);
       ctx.stroke();
     }
     for (let y = 0; y <= this.gridHeight; y++) {
       ctx.beginPath();
-      ctx.moveTo(0, y * this.cellH);
-      ctx.lineTo(this.width, y * this.cellH);
+      ctx.moveTo(this.gridOffsetX, this.gridOffsetY + y * this.cellH);
+      ctx.lineTo(this.gridOffsetX + this.gridWidth * this.cellW, this.gridOffsetY + y * this.cellH);
       ctx.stroke();
     }
 
-    // Draw walls with subtle glow
+    // Draw walls with subtle glow (account for grid offset)
     for (let y = 0; y < this.gridHeight; y++) {
       for (let x = 0; x < this.gridWidth; x++) {
         const cell = this.grid[y][x];
-        const px = x * this.cellW;
-        const py = y * this.cellH;
+        const px = this.gridOffsetX + x * this.cellW;
+        const py = this.gridOffsetY + y * this.cellH;
 
         if (cell.type === "wall" || cell.type === "room_wall") {
           ctx.fillStyle = CONFIG.colors.wall;
@@ -1450,12 +1488,12 @@ class Day29Demo extends Game {
       }
     }
 
-    // Draw medical cross in hospital center
+    // Draw medical cross in hospital center (account for grid offset)
     if (this.hospital) {
       const h = this.hospital;
       // Use pixel-based center for proper alignment
-      const centerPxX = (h.x + h.width / 2) * this.cellW + 6;
-      const centerPxY = (h.y + h.height / 2) * this.cellH + 6;
+      const centerPxX = this.gridOffsetX + (h.x + h.width / 2) * this.cellW + this.cellW / 2;
+      const centerPxY = this.gridOffsetY + (h.y + h.height / 2) * this.cellH + this.cellH / 2;
       
       ctx.fillStyle = CONFIG.colors.hospitalWall;
       ctx.shadowColor = CONFIG.colors.hospitalWall;
@@ -1475,10 +1513,10 @@ class Day29Demo extends Game {
       ctx.shadowBlur = 0;
     }
 
-    // Draw agents as glowing circles
+    // Draw agents as glowing circles (account for grid offset)
     for (const agent of this.agents) {
-      const px = agent.x * this.cellW + this.cellW / 2;
-      const py = agent.y * this.cellH + this.cellH / 2;
+      const px = this.gridOffsetX + agent.x * this.cellW + this.cellW / 2;
+      const py = this.gridOffsetY + agent.y * this.cellH + this.cellH / 2;
       const baseRadius = Math.min(this.cellW, this.cellH) * 0.4;
       
       let color, glowColor, alpha = 1.0, pulse = 0;
@@ -1617,9 +1655,9 @@ class Day29Demo extends Game {
         alpha = 1.0 - fadeProgress;
       }
       
-      // Convert grid position to screen position
-      const px = variant.emergeX * this.cellW + this.cellW / 2;
-      const py = variant.emergeY * this.cellH - 20; // Above the agent
+      // Convert grid position to screen position (account for grid offset)
+      const px = this.gridOffsetX + variant.emergeX * this.cellW + this.cellW / 2;
+      const py = this.gridOffsetY + variant.emergeY * this.cellH - 20; // Above the agent
       
       // Draw variant name with glow
       ctx.save();
@@ -1836,12 +1874,18 @@ class Day29Demo extends Game {
       maxTrans = Math.max(maxTrans, v.transmissionMultiplier);
     }
     
+    // Ensure minimum scale shows differences (if all variants are close, expand scale)
+    const minTrans = Math.min(...this.variants.map(v => v.transmissionMultiplier));
+    const transRange = Math.max(maxTrans - minTrans, 0.5); // At least 0.5 range for visibility
+    
     for (let i = 0; i < this.variants.length; i++) {
       const variant = this.variants[i];
       const bx = x + spacing + i * (barWidth + spacing);
       
-      // Transmission bar (left half)
-      const transHeight = (variant.transmissionMultiplier / maxTrans) * (h - 30);
+      // Transmission bar (left half) - scale to show differences more dramatically
+      // Use range-based scaling so differences are more visible
+      const normalizedTrans = (variant.transmissionMultiplier - minTrans) / transRange;
+      const transHeight = normalizedTrans * (h - 30);
       ctx.fillStyle = variant.color;
       ctx.fillRect(bx, y + h - 20 - transHeight, barWidth / 2 - 2, transHeight);
       
@@ -1850,11 +1894,18 @@ class Day29Demo extends Game {
       ctx.fillStyle = variant.color + "80";
       ctx.fillRect(bx + barWidth / 2 + 2, y + h - 20 - resistHeight, barWidth / 2 - 2, resistHeight);
       
-      // Label
-      ctx.font = '10px "Fira Code", monospace';
+      // Label with transmission value for clarity
+      ctx.font = '9px "Fira Code", monospace';
       ctx.fillStyle = variant.color;
       ctx.textAlign = "center";
       ctx.fillText(variant.name, bx + barWidth / 2, y + h - 5);
+      
+      // Show transmission multiplier as small text above bar
+      if (transHeight > 15) { // Only show if bar is tall enough
+        ctx.font = '7px "Fira Code", monospace';
+        ctx.fillStyle = "#aaa";
+        ctx.fillText(`${variant.transmissionMultiplier.toFixed(1)}x`, bx + barWidth / 2, y + h - 22 - transHeight);
+      }
     }
     
     // Legend
