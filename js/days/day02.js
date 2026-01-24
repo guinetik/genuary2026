@@ -25,7 +25,8 @@ import { Game, Painter, Easing, Tweenetik } from '@guinetik/gcanvas';
 
 const CONFIG = {
   // Flock
-  birdDensity: 0.00008,  // Birds per square pixel (reduced for 4K)
+  birdDensity: 0.00012,  // Birds per square pixel
+  minBirds: 60,          // Minimum birds (ensures mobile has enough)
   
   // Boids physics
   maxSpeed: 180,
@@ -300,9 +301,9 @@ class OrigamiMurmurationDemo extends Game {
     // Bird size proportional to canvas
     this.birdSize = Math.min(this.width, this.height) * CONFIG.birdSizeRatio;
 
-    // Bird count proportional to canvas area
+    // Bird count proportional to canvas area, with minimum for mobile
     const canvasArea = this.width * this.height;
-    const birdCount = Math.floor(canvasArea * CONFIG.birdDensity);
+    const birdCount = Math.max(CONFIG.minBirds, Math.floor(canvasArea * CONFIG.birdDensity));
 
     // Create flock
     this.birds = [];
