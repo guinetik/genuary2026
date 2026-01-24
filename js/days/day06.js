@@ -18,11 +18,13 @@ import {
   thermalBuoyancy,
   thermalGravity,
   heatTransfer,
+  Screen,
 } from "@guinetik/gcanvas";
 
 const CONFIG = {
   render: {
-    scaleFactor: 3,        // 1 = full resolution, 3 = third (good performance)
+    // Scale factor is set dynamically in init() using Screen.responsive()
+    scaleFactor: 3, // Default, will be overridden
     blendMode: "screen",
     dithering: 1.2,        // Noise amount to reduce color banding
   },
@@ -176,6 +178,7 @@ class Day06DigitalLightsDemo extends Game {
 
   init() {
     super.init();
+    Screen.init(this);  // Initialize screen detection
     Painter.init(this.ctx);
 
     this.container = this.canvas.parentElement;
@@ -296,13 +299,17 @@ class Day06DigitalLightsDemo extends Game {
     this._lastCanvasW = this.width;
     this._lastCanvasH = this.height;
 
+    // Use Screen.responsive for device-appropriate scale factor
+    // Mobile: 1.5 (higher quality), Tablet: 2, Desktop: 3 (lower res for perf)
+    const scaleFactor = Screen.responsive(1.5, 2, 3);
+
     this.renderWidth = Math.max(
       1,
-      Math.floor(this.width / CONFIG.render.scaleFactor),
+      Math.floor(this.width / scaleFactor),
     );
     this.renderHeight = Math.max(
       1,
-      Math.floor(this.height / CONFIG.render.scaleFactor),
+      Math.floor(this.height / scaleFactor),
     );
 
     this.imageData = Painter.img.createImageData(
