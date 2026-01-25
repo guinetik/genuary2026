@@ -37,6 +37,7 @@ class Neuron {
     this.isSelected = false; // For highlighting (e.g., predicted output)
     this.isTarget = false; // For highlighting (e.g., target output)
     this.isError = false; // For error state (red)
+    this.isCorrect = false; // For correct state (green)
     this.spawnScale = 1; // Scale for spawn animation (0 = hidden, 1 = full)
   }
   
@@ -95,8 +96,9 @@ class Neuron {
     // Use neuronScale for size-based activation (not opacity)
     const spawnMult = this.spawnScale;
     const sizeMultiplier = neuronScale;
-    // Bigger base size to match original (was 4, now 6)
-    const baseSize = 6 * scale * spawnMult * sizeMultiplier;
+    // Use configured base size
+    const neuronBaseSize = CONFIG.neuron?.baseSize || 8;
+    const baseSize = neuronBaseSize * scale * spawnMult * sizeMultiplier;
     const minDotSize = 2 * scale * spawnMult;
 
     // Calculate rainbow hue based on grid position (like day23)
@@ -108,14 +110,14 @@ class Neuron {
     // Small inactive neurons (scale-based, not opacity)
     const isActivated = neuronScale > 0.4;
     if (!isActivated) {
-      // Small greenish-yellow dot (like original)
-      const inactiveSize = Math.max(2, minDotSize * (0.5 + sizeMultiplier));
+      // Dim green dot (original style)
+      const inactiveSize = Math.max(2, minDotSize);
       if (grokMode > 0.5) {
         const dimBrightness = 0.4;
         ctx.fillStyle = `rgb(${Math.floor(rainbowR * dimBrightness)}, ${Math.floor(rainbowG * dimBrightness)}, ${Math.floor(rainbowB * dimBrightness)})`;
       } else {
-        // Yellow-green for inactive (matches original screenshot)
-        ctx.fillStyle = 'rgba(180, 220, 0, 0.6)';
+        // Original: dim green
+        ctx.fillStyle = 'rgba(0, 255, 0, 0.1)';
       }
       ctx.beginPath();
       ctx.arc(this.x, this.y, inactiveSize, 0, Math.PI * 2);
@@ -194,28 +196,37 @@ class Neuron {
     this.currentScale += (targetScale - this.currentScale) * Math.min(1, speed * 0.016);
 
     const sizeMultiplier = this.currentScale;
-    const baseSize = 4 * scale * spawnMult * sizeMultiplier;
-    const minDotSize = 2 * scale * spawnMult;
+    // Use same base size as grid neurons
+    const neuronBaseSize = CONFIG.neuron?.baseSize || 8;
+    const baseSize = neuronBaseSize * scale * spawnMult * sizeMultiplier;
+    const minDotSize = 3 * scale * spawnMult;
 
     // In grok mode, override error state
     const showError = this.isError && grokMode < 0.5;
 
-    // Inactive: small white dot (always visible)
+    // Inactive: small white dot (visible against dark background)
     if (sizeMultiplier < 0.4) {
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+      const dimAlpha = (this.isTarget || this.isSelected) ? 0.4 : 0.2;
+      ctx.fillStyle = `rgba(255, 255, 255, ${dimAlpha})`;
       ctx.beginPath();
       ctx.arc(this.x, this.y, Math.max(2, minDotSize), 0, Math.PI * 2);
       ctx.fill();
       return;
     }
 
-    // Active: scaled white neuron (or red for error)
+    // Active: colored based on state (green=correct, red=error, white=neutral)
     let coreColor, glowColor;
 
     if (showError) {
+      // Red for wrong prediction
       coreColor = '#f44';
       glowColor = 'rgba(255, 50, 50, 0.3)';
+    } else if (this.isCorrect) {
+      // Green for correct (either correct prediction or target when wrong)
+      coreColor = '#0f0';
+      glowColor = 'rgba(0, 255, 0, 0.3)';
     } else {
+      // White for neutral
       coreColor = '#fff';
       glowColor = 'rgba(255, 255, 255, 0.2)';
     }
@@ -387,7 +398,10 @@ const CONFIG = {
   network: {
     nTokens: 67,         // Modulus (number of possible outputs)
     embedSize: 500,      // Embedding dimension (Google used 500)
-    hiddenSize: 64,      // Hidden layer size (8×8 = 64 neurons)
+    // NOTE: We use 64 neurons (not 256) to induce grokking faster.
+    // More capacity = longer memorization phase before generalization.
+    // 64 neurons are mapped to the 16×16 grid as 2×2 blocks for visualization.
+    hiddenSize: 64,
     learningRate: 1e-2,  // Standard AdamW LR
     weightDecay: 1.0,    // HIGH weight decay - THE key to grokking!
     beta1: 0.9,          // AdamW beta1
@@ -415,10 +429,11 @@ const CONFIG = {
   },
   // Test case animation - fast, continuous flow
   testAnimation: {
-    testDuration: 1.0,       // Total seconds per test (bam bam bam)
-    inputToHidden: 0.35,     // Time for synapse to reach hidden layer
-    hiddenToOutput: 0.35,    // Time for synapse to reach output
-    holdResult: 0.3,         // Brief pause showing result before reset
+    testDuration: 0.8,       // Total seconds per test (fast bam bam bam)
+    inputToHidden: 0.2,      // Time for synapse to reach hidden layer
+    hiddenToOutput: 0.2,     // Time for synapse to reach output
+    holdAtPeak: 0.15,        // Hold at full size before shrinking
+    holdResult: 0.25,        // Brief pause showing result before reset
     maxActiveNeurons: 8,     // Only show top N most active neurons
   },
   // Tron-style synapse visuals
@@ -432,9 +447,10 @@ const CONFIG = {
   // Neuron activation animation
   neuron: {
     minScale: 0.15,          // Scale when inactive (tiny dot)
-    maxScale: 1.0,           // Scale when fully activated (normal size)
-    growSpeed: 10,           // How fast neurons grow (easing factor)
-    shrinkSpeed: 5,          // How fast neurons shrink
+    maxScale: 1.2,           // Scale when fully activated (slightly larger)
+    growSpeed: 25,           // How fast neurons grow (much faster to reach full size)
+    shrinkSpeed: 8,          // How fast neurons shrink
+    baseSize: 8,             // Bigger base size for neurons
   },
   // Colors
   colors: {
@@ -1044,11 +1060,13 @@ class Day19Demo extends Game {
     }
 
     // Build grid cells list for active neurons
+    // Pick random cell from each neuron's 2x2 block for visual variety
     this.activeGridCells = [];
     for (const neuronIdx of this.activeHiddenNeurons) {
       const cells = this.neuronMapper.getGridCells(neuronIdx);
       if (cells.length > 0) {
-        this.activeGridCells.push(cells[0]); // One cell per neuron
+        const randomCell = cells[Math.floor(Math.random() * cells.length)];
+        this.activeGridCells.push(randomCell);
       }
     }
 
@@ -1247,12 +1265,13 @@ class Day19Demo extends Game {
     const t = this.testTime || 0;
     const inputDone = timing.inputToHidden;
     const outputDone = inputDone + timing.hiddenToOutput;
-    const totalDone = timing.testDuration;
+    const holdAtPeak = timing.holdAtPeak || 0;
+    const shrinkStart = outputDone + holdAtPeak;  // Hold at full size before shrinking
 
     // Input phase progress
     const inputProgress = Math.min(1, t / inputDone);
-    // Shrink phase (during hold/result)
-    const shrinkProgress = t > outputDone ? (t - outputDone) / timing.holdResult : 0;
+    // Shrink phase (only after hold period)
+    const shrinkProgress = t > shrinkStart ? (t - shrinkStart) / timing.holdResult : 0;
 
     // Update and render cached neurons
     for (let row = 0; row < rows; row++) {
@@ -1330,7 +1349,7 @@ class Day19Demo extends Game {
     const gridWidth = CONFIG.grid.cols * this.gridSpacing;
 
     // Position output column to the right of grid
-    const outputX = gridCenterX + gridWidth / 2 + 30 * this.scale;
+    const outputX = gridCenterX + gridWidth / 2 + 50 * this.scale;
     const output = this.cachedOutput || this.currentOutputActivations;
     const prediction = this.cachedPrediction ?? this.currentPrediction;
 
@@ -1404,6 +1423,13 @@ class Day19Demo extends Game {
     const inputDone = timing.inputToHidden;
     const outputProgress = t > inputDone ? Math.min(1, (t - inputDone) / timing.hiddenToOutput) : 0;
 
+    // Use cachedPrediction (from worker with current weights) for accurate coloring
+    const currentPrediction = this.cachedPrediction ?? this.currentPrediction;
+    const actualPredictionRow = currentPrediction !== null && currentPrediction !== undefined
+      ? this.neuronMapper.getOutputRow(currentPrediction)
+      : -1;
+    const actualTargetRow = this.targetRow;
+
     // Render each output neuron
     for (let i = 0; i < displayRows; i++) {
       const neuron = this.outputNeurons[i];
@@ -1412,8 +1438,8 @@ class Day19Demo extends Game {
       let flashIntensity = 0;
 
       if (this.testRunning && outputProgress > 0) {
-        const isPrediction = (i === this.predictionRow);
-        const isTarget = (i === this.targetRow);
+        const isPrediction = (i === actualPredictionRow);
+        const isTarget = (i === actualTargetRow);
 
         if (isPrediction || isTarget) {
           // Stagger based on which output row
@@ -1427,9 +1453,29 @@ class Day19Demo extends Game {
 
       neuron.activation = flashIntensity;
 
-      // Error state: prediction row lit but doesn't match target
-      const isCorrect = this.predictionRow === this.targetRow;
-      neuron.isError = !isCorrect && flashIntensity > 0.1 && (i === this.predictionRow);
+      // Determine correct/error state for coloring
+      const predictionMatchesTarget = actualPredictionRow === actualTargetRow;
+      const isPrediction = (i === actualPredictionRow);
+      const isTarget = (i === actualTargetRow);
+
+      // Reset states
+      neuron.isError = false;
+      neuron.isCorrect = false;
+
+      if (flashIntensity > 0.1) {
+        if (predictionMatchesTarget && isPrediction) {
+          // Correct prediction - show green
+          neuron.isCorrect = true;
+        } else if (!predictionMatchesTarget) {
+          if (isPrediction) {
+            // Wrong prediction - show red
+            neuron.isError = true;
+          } else if (isTarget) {
+            // This was the correct answer - show green
+            neuron.isCorrect = true;
+          }
+        }
+      }
 
       neuron.renderOutput(ctx, CONFIG.colors, flashIntensity, this.scale, this.grokMode);
     }
@@ -1563,7 +1609,7 @@ class Day19Demo extends Game {
     const inputBY = gridCenterY + 40 * this.scale;
 
     // Output position
-    const outputX = gridCenterX + gridWidth / 2 + 30 * this.scale;
+    const outputX = gridCenterX + gridWidth / 2 + 50 * this.scale;
     const outputSpacing = this.gridSpacing;
     const displayRows = 16;
     const outputStartY = this.gridOffsetY; // Align with grid top
@@ -1592,7 +1638,11 @@ class Day19Demo extends Game {
 
     // === DRAW HIDDEN → OUTPUT SYNAPSES ===
     if (outputProgress > 0 && this.activeGridCells.length > 0) {
-      const predRow = this.predictionRow;
+      // Use cachedPrediction for accurate targeting (worker has current weights)
+      const currentPred = this.cachedPrediction ?? this.currentPrediction;
+      const predRow = currentPred !== null && currentPred !== undefined
+        ? this.neuronMapper.getOutputRow(currentPred)
+        : -1;
       const targRow = this.targetRow;
 
       for (let i = 0; i < this.activeGridCells.length; i++) {
@@ -1653,7 +1703,7 @@ class Day19Demo extends Game {
     
     // All positions and sizes scaled
     const leftX = gridCenterX - gridWidth / 2 - 100 * this.scale;
-    const rightX = gridCenterX + gridWidth / 2 + 100 * this.scale;
+    const rightX = gridCenterX + gridWidth / 2 + 150 * this.scale;
     const dotSize = 4 * this.scale;
     const dotSpacing = 18 * this.scale;
     const dotsPerRow = 10;
