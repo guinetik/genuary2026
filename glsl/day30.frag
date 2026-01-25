@@ -1,716 +1,1500 @@
+/**
+ * ============================================================================
+ * SYNESTHESIA SHADER - Genuary 2026 Day 30
+ * ============================================================================
+ *
+ * "It's not a bug, it's a feature"
+ *
+ * A bidirectional audio-visual feedback system inspired by 2001: A Space
+ * Odyssey's Stargate sequence. Audio distorts video. Video influences audio.
+ * The boundary between senses dissolves.
+ *
+ * TECHNIQUE OVERVIEW:
+ * -------------------
+ * 1. Domain Warping    - FBM-based UV distortion for organic movement
+ * 2. Chromatic Split   - RGB channel separation for psychedelic color bleeding
+ * 3. Kaleidoscope      - Iterative polar folding with video texture sampling
+ * 4. Raymarched Tunnel - 3D tunnel with video-textured walls
+ * 5. Perlin Ripples    - 3D noise creating liquid surface effects
+ * 6. Mouse Ripples     - Interactive water-like displacement
+ * 7. Glitch Effects    - Controlled chaos through noise-based displacement
+ *
+ * AUDIO REACTIVITY:
+ * -----------------
+ * - Bass (20-200Hz)   → Zoom pulse, barrel distortion, blur
+ * - Mids (200-2kHz)   → Hue rotation speed, wave frequency
+ * - Highs (2k-20kHz)  → Edge detection, chromatic aberration
+ * - Amplitude         → Overall intensity, saturation boost
+ * - Silence           → Solarization effect
+ *
+ * VISUAL FEEDBACK:
+ * ----------------
+ * - Brightness        → Bass frequency boost (via JS audio filters)
+ * - Color Saturation  → Mid frequency boost
+ * - Motion Detection  → High frequency boost
+ * - Dominant Color    → Tints the entire output
+ *
+ * @author guinetik
+ * @license Public Domain
+ * @see https://genuary.art
+ * @see https://gcanvas.guinetik.com
+ */
+
 precision highp float;
 
-varying vec2 vUv;
-uniform sampler2D uVideoTexture;
-uniform vec2 uResolution;
-uniform float uTime;
+// ============================================================================
+// VERTEX SHADER INTERFACE
+// ============================================================================
+varying vec2 vUv;  // Normalized UV coordinates from vertex shader (0-1)
 
-// Audio → Visual effects
-uniform float uBassLevel;      // Bass → blur/zoom pulse
-uniform float uMidLevel;        // Mids → hue rotation
-uniform float uHighLevel;       // Highs → edge detection
-uniform float uAmplitude;       // Amplitude → saturation
-uniform float uSilence;         // Silence → solarization
+// ============================================================================
+// UNIFORMS: VIDEO INPUT
+// ============================================================================
+uniform sampler2D uVideoTexture;  // Live video feed (webcam or file)
+uniform vec2 uResolution;         // Canvas dimensions in pixels
+uniform float uTime;              // Time in seconds since start
 
-// Visual → Audio feedback
-uniform vec3 uDominantColor;    // Dominant color tint
-uniform float uMotionAmount;    // Motion particles
-uniform float uBrightness;      // Brightness reverb
+// ============================================================================
+// UNIFORMS: AUDIO ANALYSIS
+// Audio data is analyzed in JavaScript and passed as normalized 0-1 values.
+// These drive the visual effects creating audio→visual synesthesia.
+// ============================================================================
+uniform float uBassLevel;    // Low frequencies (20-200Hz), normalized 0-1
+uniform float uMidLevel;     // Mid frequencies (200-2kHz), normalized 0-1
+uniform float uHighLevel;    // High frequencies (2k-20kHz), normalized 0-1
+uniform float uAmplitude;    // Overall volume level, normalized 0-1
+uniform float uSilence;      // 1.0 when audio is silent, 0.0 otherwise
 
-// Spectrum analyzer
-uniform float uSpectrumBars;      // Number of bars (float to avoid WebGL uniform type mismatch)
-uniform float uAudioFrequencies[64];  // Audio frequency data (normalized 0-1) - must match spectrumBars
-uniform float uVideoFrequencies[64]; // Video frequency data (normalized 0-1) - must match spectrumBars
+// ============================================================================
+// UNIFORMS: VIDEO ANALYSIS (Visual→Audio feedback)
+// These values are computed from the video frame in JavaScript.
+// ============================================================================
+uniform vec3 uDominantColor;   // Average RGB color of frame (0-255 range)
+uniform float uMotionAmount;   // Frame-to-frame pixel difference, 0-1
+uniform float uBrightness;     // Average luminance of frame, 0-1
 
-// Mouse ripple effect
-uniform vec2 uMouse;            // Mouse position (normalized 0-1)
-uniform float uMouseDown;        // Mouse button down (1.0 or 0.0)
-uniform float uRippleTime;      // Time since last ripple
+// ============================================================================
+// UNIFORMS: SPECTRUM ANALYZER
+// Per-band frequency data for equalizer-style visualization.
+// Currently disabled due to WebGL array uniform limitations.
+// ============================================================================
+uniform float uSpectrumBars;           // Number of frequency bands (as float)
+uniform float uAudioFrequencies[64];   // Audio spectrum data per band
+uniform float uVideoFrequencies[64];   // Video-derived "frequencies" per band
 
-// Hash function for noise
-float hash(vec2 p) {
-  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+// ============================================================================
+// UNIFORMS: MOUSE INTERACTION
+// Enables interactive water ripple effects on click/drag.
+// ============================================================================
+uniform vec2 uMouse;        // Mouse position, normalized 0-1
+uniform float uMouseDown;   // 1.0 if mouse button pressed, 0.0 otherwise
+uniform float uRippleTime;  // Seconds since last mouse click
+
+// ============================================================================
+// CONSTANTS: MATHEMATICAL
+// ============================================================================
+#define PI 3.14159265359
+#define TAU 6.28318530718
+#define SQRT2 1.41421356237
+
+// ============================================================================
+// CONSTANTS: EFFECT TUNING
+// All magic numbers centralized for easy adjustment and documentation.
+// ============================================================================
+
+// Domain Warping - FBM-based organic UV distortion
+#define WARP_BASS_INFLUENCE 0.6      // How much bass affects warp intensity
+#define WARP_AMPLITUDE_INFLUENCE 0.4 // How much overall volume affects warp
+#define WARP_HIGH_INFLUENCE 0.25     // How much highs affect warp
+#define WARP_UV_SCALE 0.05           // Maximum UV displacement from warping
+
+// Smooth Wave Distortion - Dali-inspired flowing waves
+#define WAVE_BASE_SPEED 1.5          // Base wave animation speed
+#define WAVE_MID_SPEED_BOOST 2.0     // Additional speed from mid frequencies
+#define WAVE_BASS_STRENGTH 0.015     // Wave amplitude from bass
+#define WAVE_AMPLITUDE_STRENGTH 0.012 // Wave amplitude from overall volume
+
+// Mouse Ripples - Interactive water-like displacement
+#define RIPPLE_SPEED 2.0             // How fast ripples expand
+#define RIPPLE_FREQUENCY 20.0        // Wave density in ripple
+#define RIPPLE_DAMPING 0.8           // How quickly ripples fade
+#define RIPPLE_STRENGTH 0.04         // Maximum displacement from ripple
+#define RIPPLE_RADIUS 0.3            // How far ripples extend
+#define RIPPLE_RINGS 3               // Number of concentric rings
+
+// Chromatic Aberration - Trippy RGB channel separation
+#define CHROMA_HIGH_SCALE 0.08       // RGB split from high frequencies
+#define CHROMA_AMPLITUDE_SCALE 0.05  // RGB split from amplitude
+#define CHROMA_BASS_SCALE 0.03       // RGB split from bass
+#define CHROMA_THRESHOLD 0.003       // Minimum level to apply effect
+
+// State Machine Timing (seconds)
+#define STATE_NO_EFFECT_DURATION 4.0
+#define STATE_PERLIN_DURATION 3.0
+#define STATE_STARGATE_DURATION 8.0
+#define STATE_FADE_TIME 0.8
+
+// Kaleidoscope
+#define KALEIDO_ITERATIONS 10        // Number of folding iterations
+#define KALEIDO_AMPLITUDE_TRIGGER 0.6 // Volume threshold to trigger
+#define KALEIDO_BASS_TRIGGER 0.65    // Bass threshold to trigger
+#define KALEIDO_BLINK_PERIOD 0.5     // Seconds between blinks
+#define KALEIDO_BLINK_DURATION 0.15  // How long each blink lasts
+
+// Post-Processing
+#define VIGNETTE_START 0.9           // Distance from center where vignette starts
+#define VIGNETTE_END 1.6             // Distance where vignette is full
+#define VIGNETTE_STRENGTH 0.4        // How dark the vignette gets
+
+// UV Safety (prevents sampling outside texture bounds)
+#define UV_PADDING 0.001             // Tiny margin to stay within texture
+#define UV_MIN UV_PADDING            // Minimum safe UV value
+#define UV_MAX (1.0 - UV_PADDING)    // Maximum safe UV value
+
+// ============================================================================
+// SECTION 1: PSEUDO-RANDOM NUMBER GENERATION
+// ============================================================================
+// Hash functions convert continuous inputs into pseudo-random outputs.
+// They're the foundation of procedural noise - deterministic chaos.
+//
+// The classic sin-based hash exploits floating-point precision loss
+// in high-frequency sin waves to generate unpredictable values.
+// ============================================================================
+
+/**
+ * 2D → 1D hash function
+ *
+ * Takes a 2D coordinate and returns a pseudo-random value in [0,1].
+ * Uses the dot product with irrational-ish numbers to spread the input,
+ * then sin() to create non-linear mixing, and fract() to wrap to [0,1].
+ *
+ * @param p  Input 2D coordinate
+ * @return   Pseudo-random value in [0,1]
+ */
+float hash21(vec2 p) {
+    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
 }
 
-// 2D Noise
-float noise(vec2 p) {
-  vec2 i = floor(p);
-  vec2 f = fract(p);
-  f = f * f * (3.0 - 2.0 * f);
-  
-  float a = hash(i);
-  float b = hash(i + vec2(1.0, 0.0));
-  float c = hash(i + vec2(0.0, 1.0));
-  float d = hash(i + vec2(1.0, 1.0));
-  
-  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
-}
-
-// FBM (Fractal Brownian Motion)
-float fbm(vec2 p) {
-  float v = 0.0;
-  float a = 0.5;
-  for (int i = 0; i < 4; i++) {
-    v += a * noise(p);
-    p *= 2.0;
-    a *= 0.5;
-  }
-  return v;
-}
-
-// Rotate 2D
-vec2 rotate(vec2 p, float angle) {
-  float c = cos(angle);
-  float s = sin(angle);
-  return vec2(p.x * c - p.y * s, p.x * s + p.y * c);
-}
-
-// Rotation matrix (like Shadertoy rot function)
-mat2 rot(float a) {
-  float c = cos(a + 3.14159265359 * 0.25);
-  float s = sin(a + 3.14159265359 * 0.25);
-  return mat2(c, -s, s, c);
-}
-
-// HSV to RGB conversion
-vec3 hsv2rgb(vec3 c) {
-  vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0);
-  vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
-  return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
-}
-
-// RGB to HSV conversion
-vec3 rgb2hsv(vec3 c) {
-  vec4 K = vec4(0.0, -1.0/3.0, 2.0/3.0, -1.0);
-  vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
-  vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
-  float d = q.x - min(q.w, q.y);
-  float e = 1.0e-10;
-  return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
-}
-
-// === 3D PERLIN NOISE FUNCTIONS (from Shadertoy) ===
-// Created by inigo quilez - iq/2013
-// License Creative Commons Attribution-NonCommercial-ShareAlike 3.0 Unported License.
-
+/**
+ * 3D → 3D hash function
+ *
+ * Returns a pseudo-random 3D vector in [-1,1] for each input point.
+ * Used for gradient noise where we need random directions.
+ *
+ * @param p  Input 3D coordinate
+ * @return   Pseudo-random 3D vector in [-1,1]
+ */
 vec3 hash3(vec3 p) {
-  // rand in [-1,1]
-  p = vec3(
-    dot(p, vec3(127.1, 311.7, 213.6)),
-    dot(p, vec3(327.1, 211.7, 113.6)),
-    dot(p, vec3(269.5, 183.3, 351.1))
-  );
-  return -1.0 + 2.0 * fract(sin(p) * 43758.5453123);
+    p = vec3(
+        dot(p, vec3(127.1, 311.7, 213.6)),
+        dot(p, vec3(327.1, 211.7, 113.6)),
+        dot(p, vec3(269.5, 183.3, 351.1))
+    );
+    return -1.0 + 2.0 * fract(sin(p) * 43758.5453123);
 }
 
-float noise3(in vec3 p) {
-  vec3 i = floor(p);
-  vec3 f = fract(p);
-  vec3 u = f * f * (3.0 - 2.0 * f);
-  
-  return mix(
-    mix(
-      mix(dot(hash3(i + vec3(0.0, 0.0, 0.0)), f - vec3(0.0, 0.0, 0.0)),
-         dot(hash3(i + vec3(1.0, 0.0, 0.0)), f - vec3(1.0, 0.0, 0.0)), u.x),
-      mix(dot(hash3(i + vec3(0.0, 1.0, 0.0)), f - vec3(0.0, 1.0, 0.0)),
-         dot(hash3(i + vec3(1.0, 1.0, 0.0)), f - vec3(1.0, 1.0, 0.0)), u.x), u.y),
-    mix(
-      mix(dot(hash3(i + vec3(0.0, 0.0, 1.0)), f - vec3(0.0, 0.0, 1.0)),
-         dot(hash3(i + vec3(1.0, 0.0, 1.0)), f - vec3(1.0, 0.0, 1.0)), u.x),
-      mix(dot(hash3(i + vec3(0.0, 1.0, 1.0)), f - vec3(0.0, 1.0, 1.0)),
-         dot(hash3(i + vec3(1.0, 1.0, 1.0)), f - vec3(1.0, 1.0, 1.0)), u.x), u.y),
-    u.z
-  );
+/**
+ * Alternative 2D hash for tunnel effect
+ *
+ * Different constants create a different "random" sequence.
+ * Returns values in [-1,1] for signed displacement effects.
+ *
+ * @param p  Input 2D coordinate
+ * @return   Pseudo-random value in [-1,1]
+ */
+float hashSigned(vec2 p) {
+    p = 50.0 * fract(p * 0.3183099 + vec2(0.71, 0.113));
+    return -1.0 + 2.0 * fract(p.x * p.y * (p.x + p.y));
 }
 
-// Perlin ripple effect using 3D noise
-vec3 perlinRippleEffect(vec2 uv, float time, sampler2D videoTex, vec2 videoUV, float aspect) {
-  // Scale screenspace to something that looks good (similar to Shadertoy)
-  // Convert normalized UV (0-1) to centered coordinates (-1 to 1)
-  vec2 centeredUV = (uv - 0.5) * 2.0;
-  centeredUV.x *= aspect; // Account for aspect ratio
-  
-  // Scale to match Shadertoy's scaling
-  vec2 scaledUV = centeredUV * 20.0;
-  
-  // Position vector uses (normalized):
-  // (1,1,1) for time
-  // (-2,1,1) for X
-  // (0,1,-1) for Y
-  vec3 pos = vec3(time);
-  pos += scaledUV.x * vec3(-0.816496581, 0.40824829, 0.40824829);
-  pos += scaledUV.y * vec3(0.0, 0.707106781, -0.707106781);
-  
-  // Taking sine of noise gives us those nice ripples
-  float n = smoothstep(-0.5, 0.5, sin(20.0 * noise3(pos)) - length(scaledUV) * 0.07);
-  
-  // Tonemap to give it some color
-  vec3 tm = pow(vec3(n), vec3(0.861500049, 0.119706701, 0.002050083));
-  
-  // Sample video texture and blend with ripple pattern
-  vec3 videoColor = texture2D(videoTex, videoUV).rgb;
-  
-  // Blend ripple pattern with video (ripple acts as overlay/mask)
-  return mix(videoColor, tm, n * 0.6);
+// ============================================================================
+// SECTION 2: NOISE FUNCTIONS
+// ============================================================================
+// Noise functions create smooth, continuous randomness from discrete hashes.
+//
+// VALUE NOISE: Interpolate between random values at grid points
+// GRADIENT NOISE (Perlin): Interpolate between random gradients (smoother)
+// FBM: Layer multiple noise octaves for natural-looking complexity
+// ============================================================================
+
+/**
+ * 2D Value Noise
+ *
+ * Interpolates between hash values at integer grid corners.
+ * Uses smoothstep (Hermite interpolation) for C1 continuity -
+ * meaning the noise and its first derivative are continuous.
+ *
+ * @param p  Input 2D coordinate
+ * @return   Smooth noise value in [0,1]
+ */
+float noise2D(vec2 p) {
+    vec2 i = floor(p);   // Integer part - grid cell
+    vec2 f = fract(p);   // Fractional part - position within cell
+
+    // Smoothstep creates smooth interpolation weights
+    // f * f * (3 - 2f) is the Hermite basis function
+    f = f * f * (3.0 - 2.0 * f);
+
+    // Sample hash at four corners of the cell
+    float a = hash21(i);
+    float b = hash21(i + vec2(1.0, 0.0));
+    float c = hash21(i + vec2(0.0, 1.0));
+    float d = hash21(i + vec2(1.0, 1.0));
+
+    // Bilinear interpolation with smooth weights
+    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
 }
 
-// === RAYMARCHED TUNNEL EFFECT FUNCTIONS ===
+/**
+ * 3D Gradient Noise (Perlin-style)
+ *
+ * More sophisticated than value noise: instead of interpolating values,
+ * we interpolate gradients (directions). This produces smoother results
+ * with fewer grid artifacts.
+ *
+ * At each grid point, we have a random gradient vector. The noise value
+ * is computed by dotting the gradient with the vector from the grid point
+ * to our sample point, then interpolating these dot products.
+ *
+ * @param p  Input 3D coordinate
+ * @return   Smooth noise value, roughly in [-1,1]
+ */
+float noise3D(vec3 p) {
+    vec3 i = floor(p);   // Grid cell
+    vec3 f = fract(p);   // Position within cell
+    vec3 u = f * f * (3.0 - 2.0 * f);  // Smooth interpolation weights
 
-// Alternative hash function for tunnel noise
-float hashTunnel(vec2 p) {
-  p = 50.0 * fract(p * 0.3183099 + vec2(0.71, 0.113));
-  return -1.0 + 2.0 * fract(p.x * p.y * (p.x + p.y));
+    // Trilinear interpolation of 8 corner gradient dot products
+    return mix(
+        mix(
+            mix(dot(hash3(i + vec3(0,0,0)), f - vec3(0,0,0)),
+                dot(hash3(i + vec3(1,0,0)), f - vec3(1,0,0)), u.x),
+            mix(dot(hash3(i + vec3(0,1,0)), f - vec3(0,1,0)),
+                dot(hash3(i + vec3(1,1,0)), f - vec3(1,1,0)), u.x),
+            u.y),
+        mix(
+            mix(dot(hash3(i + vec3(0,0,1)), f - vec3(0,0,1)),
+                dot(hash3(i + vec3(1,0,1)), f - vec3(1,0,1)), u.x),
+            mix(dot(hash3(i + vec3(0,1,1)), f - vec3(0,1,1)),
+                dot(hash3(i + vec3(1,1,1)), f - vec3(1,1,1)), u.x),
+            u.y),
+        u.z);
 }
 
-// Alternative noise function for tunnel
-float noiseTunnel(vec2 p) {
-  vec2 i = floor(p);
-  vec2 f = fract(p);
-  
-  vec2 u = f * f * (3.0 - 2.0 * f);
-  
-  return mix(
-    mix(hashTunnel(i + vec2(0.0, 0.0)), hashTunnel(i + vec2(1.0, 0.0)), u.x),
-    mix(hashTunnel(i + vec2(0.0, 1.0)), hashTunnel(i + vec2(1.0, 1.0)), u.x),
-    u.y
-  );
+/**
+ * 2D Signed Noise (for tunnel)
+ *
+ * Similar to noise2D but uses hashSigned for [-1,1] output range.
+ *
+ * @param p  Input 2D coordinate
+ * @return   Smooth noise value in [-1,1]
+ */
+float noise2DSigned(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    vec2 u = f * f * (3.0 - 2.0 * f);
+
+    return mix(
+        mix(hashSigned(i + vec2(0,0)), hashSigned(i + vec2(1,0)), u.x),
+        mix(hashSigned(i + vec2(0,1)), hashSigned(i + vec2(1,1)), u.x),
+        u.y);
 }
 
-// Rotate function for tunnel
-vec2 rotateTunnel(vec2 uv, float r) {
-  float s = sin(r);
-  float c = cos(r);
-  return uv * mat2(c, -s, s, c);
-}
+/**
+ * Fractal Brownian Motion (FBM)
+ *
+ * Layers multiple octaves of noise at increasing frequencies and
+ * decreasing amplitudes. This mimics natural phenomena like clouds,
+ * terrain, and turbulence.
+ *
+ * Each octave: frequency doubles (lacunarity=2), amplitude halves (gain=0.5)
+ *
+ * Mathematical foundation: Self-similar fractals have detail at all scales.
+ * FBM approximates this with a finite sum of scaled noise.
+ *
+ * @param p  Input 2D coordinate
+ * @return   Layered noise value in [0,1]
+ */
+float fbm(vec2 p) {
+    float value = 0.0;
+    float amplitude = 0.5;
 
-// Raymarch tunnel and sample video texture
-vec3 raymarchTunnel(vec2 uv, float time, sampler2D videoTex, vec2 videoUV, float isVertical) {
-  const float PI = 3.14159265359;
-  float fovzoom = 0.4;
-  
-  // Create rotation based on time
-  float rot = smoothstep(-0.005, 0.005, sin(0.1 * time + 4.0)) * PI * 0.5;
-  uv = rotateTunnel(uv, rot);
-  
-  // Calculate render parameters
-  float pOscillation = 0.1 * sin(time * 1.137) * (1.0 + 0.1 * cos(time * 0.37));
-  vec3 camPos = vec3(pOscillation, sin(time * 17.39) * abs(pOscillation * pOscillation), -1.0);
-  vec3 f = normalize(mix(-camPos, vec3(0.0, 0.0, 1.0), 0.6));
-  vec3 u = vec3(0.0, 1.0, 0.0);
-  vec3 r = cross(f, u);
-  vec3 sCenter = camPos + f * fovzoom;
-  vec3 screenPoint = sCenter + uv.x * r + uv.y * u;
-  vec3 rayDir = normalize(screenPoint - camPos);
-  
-  // Raymarch - check horizontal or vertical walls based on orientation
-  vec3 ray;
-  float rayL = 0.0;
-  float rayStep = 0.0;
-  for (int i = 0; i < 250; i++) {
-    ray = camPos + rayDir * rayL;
-    // Vertical tunnel: check Y walls, Horizontal: check X walls
-    float verticalStep = min(abs(ray.y - 1.0), abs(ray.y + 1.0));
-    float horizontalStep = min(abs(ray.x - 1.0), abs(ray.x + 1.0));
-    rayStep = mix(horizontalStep, verticalStep, isVertical);
-    if (rayStep < 0.001) break;
-    rayL += rayStep;
-  }
-  
-  // Calculate wall UVs and sample from video texture
-  vec3 col = vec3(0.7) + 0.5 * cos(time + uv.xyx + vec3(0.0, 2.0, 4.0));
-  vec2 oUV = vec2(0.0);
-  
-  if (rayStep < 0.001) {
-    // Ray hit wall - sample from video texture
-    // Use mix to select vertical or horizontal mapping
-    vec2 oUV_horizontal = vec2(ray.z, ray.y + step(ray.x, 0.0) * 33.1 + (time * 0.097));
-    vec2 oUV_vertical = vec2(ray.z, ray.x + step(ray.y, 0.0) * 33.1 + (time * 0.097));
-    oUV = mix(oUV_horizontal, oUV_vertical, isVertical);
-    oUV.x += time * 7.0;
-    
-    // Map tunnel UVs to video texture coordinates
-    vec2 videoSampleUV = fract(oUV * 0.1) * 0.5 + 0.25;
-    videoSampleUV = clamp(videoSampleUV, 0.0, 1.0);
-    
-    // Sample video texture for wall color
-    vec3 wallCol = texture2D(videoTex, videoSampleUV).rgb;
-    
-    // Add noise-based pattern from video
-    float noiseVal = noiseTunnel(oUV * 2.2);
-    vec3 noiseCol = texture2D(videoTex, fract(videoSampleUV + noiseVal * 0.1)).rgb;
-    
-    // Mix wall color with noise pattern
-    float mixFactor = 0.6 + 0.35 * sin(0.253 * time);
-    wallCol = mix(noiseCol, wallCol, mixFactor);
-    
-    // Apply perspective fade (horizontal or vertical based on orientation)
-    float fadeX = min(7.0 * abs(uv.x), 1.0);
-    float fadeY = min(7.0 * abs(uv.y), 1.0);
-    float fade = mix(fadeX, fadeY, isVertical);
-    wallCol *= fade;
-    
-    col = mix(col, wallCol, fade);
-  }
-  
-  return col;
-}
-
-void main() {
-  // Flip UV vertically (video textures are often upside down in WebGL)
-  vec2 uv = vec2(vUv.x, 1.0 - vUv.y);
-  
-  // Centered coordinates for distortion
-  vec2 p = (uv - 0.5) * 2.0;
-  float aspect = uResolution.x / uResolution.y;
-  p.x *= aspect;
-  
-  // === DOMAIN WARPING ===
-  // Audio-reactive warping intensity (increased)
-  float warpIntensity = uBassLevel * 0.8 + uAmplitude * 0.5 + uHighLevel * 0.3;
-  float t = uTime * 0.5;
-  
-  // Rotating domain warp (like finale.frag)
-  vec2 pp = rotate(p, t * 0.1);
-  
-  // Layer 1: FBM noise for warping
-  vec2 q = vec2(
-    fbm(pp * 2.0 + t * 0.3),
-    fbm(pp * 2.0 + vec2(5.2, 1.3) + t * 0.35)
-  );
-  
-  // Layer 2: More complex warping
-  vec2 r = vec2(
-    fbm(pp + q * 2.5 + vec2(1.7, 9.2) + t * 0.4),
-    fbm(pp + q * 2.5 + vec2(8.3, 2.8) + t * 0.38)
-  );
-  
-  // Apply warping to UV coordinates
-  vec2 warpedUV = uv + (q + r) * warpIntensity * 0.1;
-  
-  // Barrel/pincushion distortion (bass reactive)
-  float dist = length(p);
-  float barrelDistortion = 1.0 + uBassLevel * dist * dist * 0.2;
-  vec2 distortedUV = (p * barrelDistortion) / vec2(aspect, 1.0) * 0.5 + 0.5;
-  
-  // Combine warping and barrel distortion
-  vec2 finalUV = mix(warpedUV, distortedUV, uBassLevel * 0.4);
-  
-  // === AUDIO-REACTIVE WAVE DISTORTION ===
-  // Waves pulse with the rhythm - frequency and amplitude react to audio (tuned down)
-  // Use amplitude for overall rhythm, bass for pulse strength, mids for wave frequency
-  float rhythmPulse = uAmplitude; // Overall rhythm intensity
-  float waveSpeed = 1.5 + uMidLevel * 2.0; // Wave speed reacts to mids (reduced)
-  float waveStrength = uBassLevel * 0.02 + uAmplitude * 0.015; // Wave strength reduced (was 0.05/0.03)
-  
-  // Wave distortion that pulses with the music rhythm (less intense)
-  float waveX = sin(finalUV.y * 10.0 + t * waveSpeed) * waveStrength * rhythmPulse * 0.6; // Additional 0.6 multiplier
-  float waveY = cos(finalUV.x * 10.0 + t * waveSpeed * 1.2) * waveStrength * rhythmPulse * 0.6;
-  finalUV += vec2(waveX, waveY);
-  
-  // === MOUSE RIPPLE EFFECT ===
-  // Create water ripple effect from mouse position
-  vec2 mousePos = uMouse;
-  vec2 toPixel = finalUV - mousePos;
-  float distToMouse = length(toPixel);
-  
-  // Ripple parameters
-  const float RIPPLE_SPEED = 2.0;
-  const float RIPPLE_FREQUENCY = 20.0;
-  const float RIPPLE_DAMPING = 0.8;
-  const float RIPPLE_STRENGTH = 0.15;
-  const float RIPPLE_RADIUS = 0.3;
-  
-  // Calculate ripple wave
-  float rippleAge = uRippleTime * RIPPLE_SPEED;
-  float rippleDist = distToMouse - rippleAge;
-  
-  // Create multiple ripple rings
-  float ripple = 0.0;
-  for (int i = 0; i < 3; i++) {
-    float ringDist = rippleDist + float(i) * 0.15;
-    float ringAge = rippleAge - float(i) * 0.15;
-    
-    if (ringAge > 0.0 && ringDist < RIPPLE_RADIUS && ringDist > -RIPPLE_RADIUS) {
-      // Wave function with damping
-      float wave = sin(ringDist * RIPPLE_FREQUENCY) * exp(-ringAge * RIPPLE_DAMPING);
-      wave *= smoothstep(RIPPLE_RADIUS, 0.0, abs(ringDist));
-      ripple += wave * RIPPLE_STRENGTH * (1.0 - float(i) * 0.3);
+    // 4 octaves provides good detail without excessive computation
+    for (int i = 0; i < 4; i++) {
+        value += amplitude * noise2D(p);
+        p *= 2.0;           // Lacunarity: increase frequency
+        amplitude *= 0.5;   // Gain: decrease amplitude
     }
-  }
-  
-  // Apply ripple displacement (radial outward)
-  if (uMouseDown > 0.5 && distToMouse > 0.001) {
+
+    return value;
+}
+
+// ============================================================================
+// SECTION 3: GEOMETRIC UTILITIES
+// ============================================================================
+// Transform functions for rotating, scaling, and manipulating coordinates.
+// These are the building blocks for all spatial effects.
+// ============================================================================
+
+/**
+ * 2D Rotation (returns new coordinates)
+ *
+ * Rotates a 2D point around the origin by the given angle.
+ * Uses the standard rotation matrix:
+ * | cos(a)  -sin(a) |
+ * | sin(a)   cos(a) |
+ *
+ * @param p      Point to rotate
+ * @param angle  Rotation angle in radians
+ * @return       Rotated point
+ */
+vec2 rotate2D(vec2 p, float angle) {
+    float c = cos(angle);
+    float s = sin(angle);
+    return vec2(p.x * c - p.y * s, p.x * s + p.y * c);
+}
+
+/**
+ * 2D Rotation Matrix
+ *
+ * Returns a mat2 for efficient repeated rotations.
+ * Useful when rotating many points by the same angle.
+ *
+ * Note: Offset by PI/4 for aesthetic rotation in kaleidoscope.
+ *
+ * @param a  Rotation angle in radians
+ * @return   2x2 rotation matrix
+ */
+mat2 rotationMatrix(float a) {
+    float c = cos(a + PI * 0.25);
+    float s = sin(a + PI * 0.25);
+    return mat2(c, -s, s, c);
+}
+
+/**
+ * Safe UV Clamping
+ *
+ * Clamps UV coordinates to a safe range to avoid sampling
+ * black edges that may exist from video letterboxing.
+ *
+ * This is critical for effects that push UVs outside [0,1]
+ * like domain warping, ripples, and barrel distortion.
+ *
+ * @param uv  Input UV coordinates (may be outside [0,1])
+ * @return    Clamped UV coordinates in [UV_MIN, UV_MAX]
+ */
+vec2 safeUV(vec2 uv) {
+    return clamp(uv, vec2(UV_MIN), vec2(UV_MAX));
+}
+
+// ============================================================================
+// SECTION 4: COLOR SPACE CONVERSION
+// ============================================================================
+// HSV (Hue, Saturation, Value) is intuitive for artistic color manipulation.
+// Hue rotation, saturation boost, and brightness adjustments are natural in HSV.
+// ============================================================================
+
+/**
+ * HSV to RGB Conversion
+ *
+ * Converts Hue-Saturation-Value to Red-Green-Blue color space.
+ *
+ * H: 0-1 maps to 0-360 degrees on the color wheel
+ * S: 0 = grayscale, 1 = fully saturated
+ * V: 0 = black, 1 = full brightness
+ *
+ * The algorithm uses a clever trick with modular arithmetic to compute
+ * the piecewise-linear RGB curves from hue angle.
+ *
+ * @param c  HSV color (h, s, v all in [0,1])
+ * @return   RGB color
+ */
+vec3 hsv2rgb(vec3 c) {
+    // K encodes the phase offsets for R, G, B channels
+    vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0);
+
+    // Create sawtooth waves offset by K.xyz, scaled to [0,6], shifted by 3
+    vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+
+    // Clamp to [0,1] and interpolate between white and colored based on saturation
+    return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+}
+
+/**
+ * RGB to HSV Conversion
+ *
+ * Converts Red-Green-Blue to Hue-Saturation-Value color space.
+ *
+ * This is the inverse of hsv2rgb, computing:
+ * - Hue from the dominant channel and its neighbors
+ * - Saturation from the range between min and max channels
+ * - Value from the maximum channel
+ *
+ * @param c  RGB color
+ * @return   HSV color (h, s, v all in [0,1])
+ */
+vec3 rgb2hsv(vec3 c) {
+    vec4 K = vec4(0.0, -1.0/3.0, 2.0/3.0, -1.0);
+
+    // Sort channels to find min/max efficiently
+    vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
+    vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
+
+    float d = q.x - min(q.w, q.y);    // Chroma (range)
+    float e = 1.0e-10;                 // Epsilon to prevent division by zero
+
+    return vec3(
+        abs(q.z + (q.w - q.y) / (6.0 * d + e)),  // Hue
+        d / (q.x + e),                            // Saturation
+        q.x                                       // Value
+    );
+}
+
+// ============================================================================
+// SECTION 4B: BLEND MODES
+// ============================================================================
+// Shader equivalents of Photoshop/compositor blend modes.
+// These determine how effect layers combine with the base video.
+//
+// Key insight: mix() replaces colors (darkens when effect is dark).
+// Screen/overlay ENHANCE colors - the video stays visible underneath.
+// ============================================================================
+
+/**
+ * Screen Blend Mode
+ *
+ * Brightens by inverting, multiplying, and inverting again.
+ * Result is always >= both inputs. Never darkens.
+ * Formula: 1 - (1-a) * (1-b)
+ *
+ * Perfect for: Glow effects, light overlays, adding energy
+ */
+vec3 blendScreen(vec3 base, vec3 blend) {
+    return 1.0 - (1.0 - base) * (1.0 - blend);
+}
+
+/**
+ * Overlay Blend Mode
+ *
+ * Combines multiply and screen based on base luminance.
+ * Dark areas get darker, light areas get lighter (contrast boost).
+ * Formula: base < 0.5 ? 2*base*blend : 1-2*(1-base)*(1-blend)
+ *
+ * Perfect for: Adding texture while preserving shadows/highlights
+ */
+vec3 blendOverlay(vec3 base, vec3 blend) {
+    return mix(
+        2.0 * base * blend,
+        1.0 - 2.0 * (1.0 - base) * (1.0 - blend),
+        step(0.5, base)
+    );
+}
+
+/**
+ * Soft Light Blend Mode
+ *
+ * Gentler version of overlay. Dodges/burns based on blend color.
+ * Less harsh contrast than overlay.
+ *
+ * Perfect for: Subtle color grading, gentle effects
+ */
+vec3 blendSoftLight(vec3 base, vec3 blend) {
+    return mix(
+        2.0 * base * blend + base * base * (1.0 - 2.0 * blend),
+        sqrt(base) * (2.0 * blend - 1.0) + 2.0 * base * (1.0 - blend),
+        step(0.5, blend)
+    );
+}
+
+/**
+ * Additive Blend (Linear Dodge)
+ *
+ * Simply adds colors together (clamped to 1.0).
+ * Very bright, energetic result.
+ *
+ * Perfect for: Light flares, fire, energy effects
+ */
+vec3 blendAdd(vec3 base, vec3 blend, float intensity) {
+    return min(base + blend * intensity, vec3(1.0));
+}
+
+// ============================================================================
+// SECTION 5: DOMAIN WARPING
+// ============================================================================
+// Domain warping distorts the coordinate space before sampling.
+// Instead of sampling texture(uv), we sample texture(warp(uv)).
+//
+// The warp function itself uses noise, creating organic, flowing distortions.
+// Layering multiple warps creates complex, unpredictable motion.
+// ============================================================================
+
+/**
+ * Compute Audio-Reactive Domain Warp
+ *
+ * Creates organic UV distortion that pulses with the music.
+ * Uses two layers of FBM noise for complex, swirling motion.
+ *
+ * Layer 1 (q): Base warp from position
+ * Layer 2 (r): Warp the warp - creates turbulent flow
+ *
+ * @param uv       Original UV coordinates
+ * @param p        Centered coordinates (for rotation)
+ * @param t        Time for animation
+ * @return         Warped UV coordinates
+ */
+vec2 computeDomainWarp(vec2 uv, vec2 p, float t) {
+    // Audio-reactive warp intensity (clamped to prevent overflow)
+    float warpIntensity = uBassLevel * WARP_BASS_INFLUENCE
+                        + uAmplitude * WARP_AMPLITUDE_INFLUENCE
+                        + uHighLevel * WARP_HIGH_INFLUENCE;
+    warpIntensity = min(warpIntensity, 1.0);
+
+    // Slowly rotating coordinate space for evolving patterns
+    vec2 pp = rotate2D(p, t * 0.1);
+
+    // First layer: basic FBM displacement
+    vec2 q = vec2(
+        fbm(pp * 2.0 + t * 0.3),
+        fbm(pp * 2.0 + vec2(5.2, 1.3) + t * 0.35)
+    );
+
+    // Second layer: warp the warp for more complexity
+    vec2 r = vec2(
+        fbm(pp + q * 2.5 + vec2(1.7, 9.2) + t * 0.4),
+        fbm(pp + q * 2.5 + vec2(8.3, 2.8) + t * 0.38)
+    );
+
+    // Apply warp with audio-reactive intensity
+    vec2 displaced = uv + (q + r) * warpIntensity * WARP_UV_SCALE;
+
+    // Clamp to safe range
+    return clamp(displaced, vec2(UV_MIN), vec2(UV_MAX));
+}
+
+/**
+ * Apply Barrel Distortion
+ *
+ * Barrel distortion bends straight lines outward from center.
+ * Creates a "fisheye" effect that pulses with bass.
+ *
+ * The distortion is proportional to distance^2 from center,
+ * creating the characteristic barrel curve.
+ *
+ * @param p       Centered coordinates
+ * @param aspect  Aspect ratio for correction
+ * @return        Barrel-distorted UV coordinates (clamped to safe range)
+ */
+vec2 applyBarrelDistortion(vec2 p, float aspect) {
+    float dist = length(p);
+    // Distortion strength increases quadratically from center (barrel curve)
+    float distortion = 1.0 + uBassLevel * dist * dist * 0.08;
+    vec2 result = (p * distortion) / vec2(aspect, 1.0) * 0.5 + 0.5;
+    return clamp(result, vec2(UV_MIN), vec2(UV_MAX));
+}
+
+// ============================================================================
+// SECTION 6: MOUSE RIPPLE EFFECT
+// ============================================================================
+// Interactive water ripple simulation triggered by mouse clicks.
+// Creates expanding concentric rings that displace the image radially.
+// ============================================================================
+
+/**
+ * Compute Mouse Ripple Displacement
+ *
+ * Simulates water ripples emanating from mouse click position.
+ * Multiple rings expand outward, each with decreasing intensity.
+ *
+ * Physics: Ripples follow wave equation solutions with damping.
+ * Displacement is radial (pushes pixels away from center).
+ *
+ * @param uv        Current UV coordinates
+ * @param mousePos  Mouse position (normalized 0-1)
+ * @return          Displacement vector to add to UV
+ */
+vec2 computeMouseRipple(vec2 uv, vec2 mousePos) {
+    vec2 toPixel = uv - mousePos;
+    float distToMouse = length(toPixel);
+
+    // Skip if too far or mouse not pressed
+    if (uMouseDown < 0.5 || distToMouse < 0.001) {
+        return vec2(0.0);
+    }
+
     vec2 rippleDir = normalize(toPixel);
-    finalUV += rippleDir * ripple;
-  }
-  
-  // Continuous ripple while mouse is down (for dragging effect)
-  if (uMouseDown > 0.5) {
-    float continuousRipple = sin(distToMouse * RIPPLE_FREQUENCY - uTime * RIPPLE_SPEED * 2.0);
-    continuousRipple *= exp(-distToMouse * 2.0) * RIPPLE_STRENGTH * 0.3;
-    if (distToMouse > 0.001 && distToMouse < RIPPLE_RADIUS) {
-      vec2 rippleDir = normalize(toPixel);
-      finalUV += rippleDir * continuousRipple;
+    float ripple = 0.0;
+
+    // Create multiple expanding rings
+    float rippleAge = uRippleTime * RIPPLE_SPEED;
+    float rippleDist = distToMouse - rippleAge;
+
+    for (int i = 0; i < RIPPLE_RINGS; i++) {
+        float ringOffset = float(i) * 0.15;
+        float ringDist = rippleDist + ringOffset;
+        float ringAge = rippleAge - ringOffset;
+
+        // Only compute if ring is active and in range
+        if (ringAge > 0.0 && abs(ringDist) < RIPPLE_RADIUS) {
+            // Damped sinusoidal wave
+            float wave = sin(ringDist * RIPPLE_FREQUENCY)
+                       * exp(-ringAge * RIPPLE_DAMPING);
+
+            // Smooth falloff at ripple edges
+            wave *= smoothstep(RIPPLE_RADIUS, 0.0, abs(ringDist));
+
+            // Each successive ring is weaker
+            ripple += wave * RIPPLE_STRENGTH * (1.0 - float(i) * 0.3);
+        }
     }
-  }
-  
-  // === SPECTRUM ANALYZER DISTORTION ===
-  // Use spectrum bars to distort the image (bars push/pull the image)
-  if (uSpectrumBars > 0.0) {
-    // Calculate which bar affects this pixel
-    float barIndex = floor(finalUV.x * float(uSpectrumBars));
-    float barWidth = 1.0 / float(uSpectrumBars);
-    float barCenter = (barIndex + 0.5) * barWidth;
-    float barDist = abs(finalUV.x - barCenter) / barWidth;
-    
-    // Get frequency values for this bar
-    float audioFreq = 0.0;
-    float videoFreq = 0.0;
-    int targetBar = int(clamp(barIndex, 0.0, float(uSpectrumBars) - 1.0));
-    
-    // Loop through bars to find the matching one (constant index access)
-    int numBars = int(uSpectrumBars);
-    for (int i = 0; i < 64; i++) {
-      if (i >= numBars) break;
-      if (i == targetBar) {
-        audioFreq = uAudioFrequencies[i];
-        videoFreq = uVideoFrequencies[i];
-        break;
-      }
+
+    // Continuous ripple while dragging
+    if (distToMouse < RIPPLE_RADIUS) {
+        float continuousWave = sin(distToMouse * RIPPLE_FREQUENCY - uTime * RIPPLE_SPEED * 2.0);
+        continuousWave *= exp(-distToMouse * 2.0) * RIPPLE_STRENGTH * 0.3;
+        ripple += continuousWave;
     }
-    
-    // Combine audio and video frequencies
-    float combinedFreq = audioFreq * 0.7 + videoFreq * 0.3;
-    
-    // Wave speed pulses with overall rhythm (amplitude) - reduced
-    float waveSpeed = 2.0 + uAmplitude * 1.5; // Reduced from 3.0 + 2.0
-    
-    // Distort Y coordinate based on frequency (bars push image up/down)
-    // Wave strength pulses with rhythm - tuned down
-    float distortionAmount = combinedFreq * 0.08 * uAmplitude; // Reduced from 0.15
-    float distortionWave = sin(finalUV.y * 20.0 + t * waveSpeed) * distortionAmount;
-    finalUV.y += distortionWave;
-    
-    // Distort X coordinate based on bar position (bars create vertical waves)
-    // Also pulses with rhythm - tuned down
-    float xDistortion = sin(finalUV.y * 15.0 + barIndex * 0.5 + t * waveSpeed * 0.8) * combinedFreq * 0.04 * uAmplitude; // Reduced from 0.08
-    finalUV.x += xDistortion;
-  }
-  
-  // Sample video with distorted UV (before special effects)
-  vec4 baseColor = texture2D(uVideoTexture, finalUV);
-  
-  // === EFFECT STATE MACHINE ===
-  // States: 0 = No effect, 1 = Kaleidoscope, 2 = Tunnel/Stargate, 3 = Perlin
-  // Cycle: No effect (6s) -> Perlin (6s) -> Stargate (4s) -> No effect (6s) -> repeat
-  // Audio overrides: Very loud = Kaleidoscope, Quiet = Stargate
-  
-  const float STATE_NO_EFFECT = 0.0;
-  const float STATE_KALEIDO = 1.0;
-  const float STATE_STARGATE = 2.0;
-  const float STATE_PERLIN = 3.0;
-  
-  // State durations (seconds)
-  const float DURATION_NO_EFFECT = 6.0;
-  const float DURATION_STARGATE = 4.0; // Shorter - show less often
-  const float DURATION_PERLIN = 6.0;
-  
-  // Calculate total cycle duration
-  const float CYCLE_DURATION = DURATION_NO_EFFECT + DURATION_PERLIN + DURATION_STARGATE + DURATION_NO_EFFECT;
-  
-  // Determine which state we're in based on time
-  float cycleTime = mod(uTime, CYCLE_DURATION);
-  float currentState = STATE_NO_EFFECT;
-  
-  if (cycleTime < DURATION_NO_EFFECT) {
-    currentState = STATE_NO_EFFECT;
-  } else if (cycleTime < DURATION_NO_EFFECT + DURATION_PERLIN) {
-    currentState = STATE_PERLIN;
-  } else if (cycleTime < DURATION_NO_EFFECT + DURATION_PERLIN + DURATION_STARGATE) {
-    currentState = STATE_STARGATE;
-  } else {
-    currentState = STATE_NO_EFFECT; // Second no-effect period
-  }
-  
-  // Audio-based overrides
-  // Kaleidoscope: Brief blink/flash effect - only show for ~0.3 seconds when triggered
-  // Use a fast pulse pattern so it blinks instead of staying on
-  float kaleidoTrigger = step(0.6, uAmplitude) * step(0.65, uBassLevel);
-  
-  // Create a brief pulse: fast on/off cycle (blink effect)
-  // Pulse every 0.5 seconds, on for 0.15 seconds
-  float kaleidoPulse = mod(uTime, 0.5);
-  float kaleidoBlink = step(kaleidoPulse, 0.15); // On for first 0.15s of each 0.5s cycle
-  
-  // Only show kaleidoscope if audio triggers AND we're in the blink window
-  if (kaleidoTrigger > 0.5 && kaleidoBlink > 0.5) {
-    currentState = STATE_KALEIDO;
-  }
-  // Stargate: When quiet OR already in stargate period
-  else if (uAmplitude < 0.2 && uBassLevel < 0.25) {
-    currentState = STATE_STARGATE;
-  }
-  
-  // Transition: Simple fade at state boundaries
-  float transition = 1.0;
-  const float FADE_TIME = 0.8; // Fade duration in seconds
-  
-  // Calculate fade based on position in cycle
-  float cycleProgress = mod(cycleTime, CYCLE_DURATION) / CYCLE_DURATION;
-  // Fade in/out at cycle boundaries
-  float fadeIn = smoothstep(0.0, FADE_TIME / CYCLE_DURATION, cycleProgress);
-  float fadeOut = smoothstep(1.0, 1.0 - FADE_TIME / CYCLE_DURATION, cycleProgress);
-  transition = fadeIn * fadeOut;
-  transition = max(transition, 0.95); // Keep effects visible
-  
-  vec4 color = baseColor;
-  
-  // Apply selected effect based on state
-  if (currentState < 0.5) {
-    // STATE_NO_EFFECT: Just base color (no effect applied)
-    // color stays as baseColor
-    
-  } else if (currentState < 1.5) {
-    // STATE_KALEIDO: Kaleidoscope (only when loud)
-    // KALEIDOSCOPIC EFFECT - Always visible when selected
-    vec2 kaleidoUV = (uv - 0.5) * 2.0;
+
+    return rippleDir * ripple;
+}
+
+// ============================================================================
+// SECTION 7: AUDIO-REACTIVE WAVE DISTORTION
+// ============================================================================
+// Waves that pulse and flow with the music rhythm.
+// Frequency affects wave speed, amplitude affects wave height.
+// ============================================================================
+
+/**
+ * Smooth Wave Distortion (Dali-inspired)
+ *
+ * Creates smooth, flowing waves across the image that pulse with audio.
+ * Inspired by Salvador Dali's melting clocks - continuous sine waves
+ * layered at different frequencies create a liquid, dreamy quality.
+ *
+ * Three wave layers respond to different frequency bands:
+ * - Bass (20-200Hz):  Large, slow diagonal waves (breathing effect)
+ * - Mids (200-2kHz):  Medium flowing waves (melody response)
+ * - Highs (2k-20kHz): Small, fast ripples (percussion/detail)
+ *
+ * The diagonal wave pattern (sin(x*4 + y*6 + t)) creates organic motion
+ * that feels natural rather than mechanical.
+ *
+ * @param uv  Current UV coordinates
+ * @param t   Time for animation
+ * @return    Wave-distorted UV coordinates (clamped to safe range)
+ */
+vec2 applySmoothWaves(vec2 uv, float t) {
+    // Audio-reactive intensity
+    // Bass creates slower, larger waves; highs create faster, smaller ones
+    float bassWave = uBassLevel * uAmplitude;
+    float midWave = uMidLevel * uAmplitude;
+    float highWave = uHighLevel * uAmplitude;
+
+    // Wave speed tied to audio intensity
+    float waveSpeed = 1.5 + uAmplitude * 2.0;
+
+    // === LAYER 1: Bass waves (large, slow, diagonal) ===
+    // Creates the "breathing" effect - image expands/contracts with bass hits
+    float wave1 = sin(uv.x * 4.0 + uv.y * 6.0 + t * waveSpeed) * bassWave * 0.035;
+    float wave2 = sin(uv.x * 5.0 - uv.y * 4.0 + t * waveSpeed * 0.8) * bassWave * 0.025;
+
+    // === LAYER 2: Mid waves (medium, flowing) ===
+    // Responds to melody and harmonic content
+    float wave3 = sin(uv.y * 10.0 + t * waveSpeed * 1.2) * midWave * 0.02;
+    float wave4 = cos(uv.x * 8.0 + uv.y * 3.0 + t * waveSpeed * 1.5) * midWave * 0.015;
+
+    // === LAYER 3: High waves (small, fast ripples) ===
+    // Responds to percussion, hi-hats, vocal sibilance
+    float wave5 = sin(uv.x * 15.0 + uv.y * 12.0 + t * waveSpeed * 2.0) * highWave * 0.012;
+
+    // Combine waves for organic motion
+    // Y displacement: vertical "breathing" effect
+    float yDisplace = wave1 + wave3 + wave5;
+
+    // X displacement: horizontal flowing effect
+    float xDisplace = wave2 + wave4;
+
+    // Apply distortion
+    vec2 displaced = uv + vec2(xDisplace, yDisplace);
+
+    // Clamp to safe UV range
+    return clamp(displaced, vec2(UV_MIN), vec2(UV_MAX));
+}
+
+/**
+ * Compute Audio-Reactive Wave Displacement
+ *
+ * Adds rhythmic wave distortion that syncs with music.
+ * - Mids control wave speed (faster during melodic sections)
+ * - Bass and amplitude control wave intensity
+ *
+ * IMPORTANT: Wave strength is kept very subtle to work WITH
+ * spectrum distortion without causing combined overflow.
+ *
+ * @param uv  Current UV coordinates
+ * @param t   Time for animation
+ * @return    Wave-distorted UV coordinates (clamped to safe range)
+ */
+vec2 applyAudioWaves(vec2 uv, float t) {
+    float rhythmPulse = uAmplitude;
+    float waveSpeed = WAVE_BASE_SPEED + uMidLevel * WAVE_MID_SPEED_BOOST;
+    float waveStrength = uBassLevel * WAVE_BASS_STRENGTH
+                       + uAmplitude * WAVE_AMPLITUDE_STRENGTH;
+
+    // Perpendicular waves create organic, non-uniform motion
+    // X and Y displace independently for complex flow patterns
+    float waveX = sin(uv.y * 10.0 + t * waveSpeed) * waveStrength * rhythmPulse * 0.35;
+    float waveY = cos(uv.x * 10.0 + t * waveSpeed * 1.2) * waveStrength * rhythmPulse * 0.35;
+
+    vec2 displaced = uv + vec2(waveX, waveY);
+
+    // Clamp to safe range
+    return clamp(displaced, vec2(UV_MIN), vec2(UV_MAX));
+}
+
+// ============================================================================
+// SECTION 8: PERLIN RIPPLE EFFECT (Stargate-Inspired)
+// ============================================================================
+// 3D Perlin noise creates a liquid metal surface effect.
+// Inspired by the Stargate sequence in 2001: A Space Odyssey.
+// ============================================================================
+
+/**
+ * Perlin Ripple Effect
+ *
+ * Creates flowing, liquid-like patterns using 3D noise.
+ * The third dimension (time) makes the pattern animate smoothly.
+ *
+ * Taking sin() of noise creates distinct ripple rings from
+ * the smooth noise gradients - like interference patterns.
+ *
+ * @param uv        Screen UV coordinates
+ * @param time      Animation time
+ * @param videoTex  Video texture to sample
+ * @param videoUV   Distorted UV for video sampling
+ * @param aspect    Screen aspect ratio
+ * @return          Blended color with ripple effect
+ */
+vec3 perlinRippleEffect(vec2 uv, float time, sampler2D videoTex, vec2 videoUV, float aspect) {
+    // Use UV directly for full-screen coverage
+    vec2 scaledUV = uv * 8.0;  // Scale for nice pattern density
+    scaledUV.x *= aspect;      // Correct for aspect ratio
+
+    // Create 3D position from 2D UV + time
+    // The direction vectors create diagonal motion through noise space
+    vec3 pos = vec3(time * 0.5);  // Slower time for smoother animation
+    pos += scaledUV.x * vec3(-0.816496581, 0.40824829, 0.40824829);
+    pos += scaledUV.y * vec3(0.0, 0.707106781, -0.707106781);
+
+    // sin(noise) creates ripple rings across the WHOLE screen
+    // No center falloff - full coverage
+    float n = smoothstep(-0.4, 0.6, sin(15.0 * noise3D(pos)));
+
+    // Tonemapping for ethereal color
+    vec3 rippleColor = pow(vec3(n), vec3(0.5, 0.3, 0.8));
+
+    // Get base video
+    vec3 videoColor = texture2D(videoTex, safeUV(videoUV)).rgb;
+
+    // Use SCREEN blend mode - adds light without darkening video
+    // Subtle ripple overlay
+    vec3 blended = blendScreen(videoColor, rippleColor * 0.4);
+
+    // Gentle mix so video stays visible
+    return mix(videoColor, blended, n * 0.35);
+}
+
+// ============================================================================
+// SECTION 9: RAYMARCHED TUNNEL EFFECT
+// ============================================================================
+// A 3D tunnel rendered via raymarching (sphere tracing).
+// The tunnel walls sample from the video texture for psychedelic visuals.
+//
+// Raymarching: March along ray in steps, checking distance to geometry.
+// When close enough to surface, we've found an intersection.
+// ============================================================================
+
+/**
+ * Raymarch a Tunnel and Sample Video Texture
+ *
+ * Creates an infinite tunnel effect by raymarching through a corridor.
+ * The walls are textured with the video feed, creating a kaleidoscopic
+ * tunnel-of-video effect.
+ *
+ * @param uv           Centered screen coordinates
+ * @param time         Animation time
+ * @param videoTex     Video texture for wall sampling
+ * @param videoUV      Base video UV for fallback
+ * @param isVertical   0.0 = horizontal tunnel, 1.0 = vertical tunnel
+ * @return             Rendered tunnel color
+ */
+vec3 raymarchTunnel(vec2 uv, float time, sampler2D videoTex, vec2 videoUV, float isVertical) {
+    const float FOV_ZOOM = 0.4;
+
+    // Camera oscillation for motion feel
+    float oscillation = 0.1 * sin(time * 1.137) * (1.0 + 0.1 * cos(time * 0.37));
+
+    // Camera rotation based on time
+    float rot = smoothstep(-0.005, 0.005, sin(0.1 * time + 4.0)) * PI * 0.5;
+    float c = cos(rot), s = sin(rot);
+    uv = uv * mat2(c, -s, s, c);
+
+    // Camera setup
+    vec3 camPos = vec3(oscillation, sin(time * 17.39) * oscillation * oscillation, -1.0);
+    vec3 forward = normalize(mix(-camPos, vec3(0.0, 0.0, 1.0), 0.6));
+    vec3 up = vec3(0.0, 1.0, 0.0);
+    vec3 right = cross(forward, up);
+
+    // Ray direction
+    vec3 screenPoint = camPos + forward * FOV_ZOOM + uv.x * right + uv.y * up;
+    vec3 rayDir = normalize(screenPoint - camPos);
+
+    // Raymarch loop
+    vec3 rayPos;
+    float rayLength = 0.0;
+    float stepDist = 0.0;
+
+    for (int i = 0; i < 250; i++) {
+        rayPos = camPos + rayDir * rayLength;
+
+        // Distance to walls (horizontal or vertical corridor)
+        float vertStep = min(abs(rayPos.y - 1.0), abs(rayPos.y + 1.0));
+        float horizStep = min(abs(rayPos.x - 1.0), abs(rayPos.x + 1.0));
+        stepDist = mix(horizStep, vertStep, isVertical);
+
+        if (stepDist < 0.001) break;
+        rayLength += stepDist;
+    }
+
+    // Base color (will be replaced if we hit a wall)
+    vec3 col = vec3(0.7) + 0.5 * cos(time + uv.xyx + vec3(0.0, 2.0, 4.0));
+
+    // If we hit a wall, sample video texture
+    if (stepDist < 0.001) {
+        // Compute wall UVs based on orientation
+        vec2 wallUV_horiz = vec2(rayPos.z, rayPos.y + step(rayPos.x, 0.0) * 33.1 + time * 0.097);
+        vec2 wallUV_vert = vec2(rayPos.z, rayPos.x + step(rayPos.y, 0.0) * 33.1 + time * 0.097);
+        vec2 wallUV = mix(wallUV_horiz, wallUV_vert, isVertical);
+        wallUV.x += time * 7.0;
+
+        // Map to video texture coordinates (use safe UV)
+        vec2 sampleUV = clamp(fract(wallUV * 0.1) * 0.5 + 0.25, UV_MIN, UV_MAX);
+        vec3 wallColor = texture2D(videoTex, sampleUV).rgb;
+
+        // Add noise variation (use safe UV)
+        float noiseVal = noise2DSigned(wallUV * 2.2);
+        vec3 noiseColor = texture2D(videoTex, safeUV(fract(sampleUV + noiseVal * 0.1))).rgb;
+
+        // Animated mix between noise and clean
+        float mixFactor = 0.6 + 0.35 * sin(0.253 * time);
+        wallColor = mix(noiseColor, wallColor, mixFactor);
+
+        // Perspective fade
+        float fade = mix(
+            min(7.0 * abs(uv.x), 1.0),
+            min(7.0 * abs(uv.y), 1.0),
+            isVertical
+        );
+        wallColor *= fade;
+
+        col = mix(col, wallColor, fade);
+    }
+
+    return col;
+}
+
+// ============================================================================
+// SECTION 10: KALEIDOSCOPE EFFECT
+// ============================================================================
+// Creates symmetrical, mandala-like patterns through iterative folding.
+// Each iteration: rotate, fold around axes, translate, sample video.
+// The accumulated samples create complex interference patterns.
+// ============================================================================
+
+/**
+ * Render Kaleidoscope Effect
+ *
+ * Iterative polar folding creates the classic kaleidoscope look.
+ * At each iteration:
+ * 1. Rotate the coordinate space
+ * 2. Fold into a 60-degree wedge (mirror symmetry)
+ * 3. Add time-based translation
+ * 4. Sample video and accumulate color
+ *
+ * @param uv        Centered screen coordinates
+ * @param aspect    Screen aspect ratio
+ * @param t         Animation time
+ * @param videoTex  Video texture to sample
+ * @return          Kaleidoscope color
+ */
+vec3 renderKaleidoscope(vec2 uv, float aspect, float t, sampler2D videoTex, vec3 baseVideo) {
+    // Setup: center and scale
+    vec2 kaleidoUV = uv;
     kaleidoUV.x *= aspect;
-    kaleidoUV *= (cos(t * 0.5) + 1.5) * 1.2;
-    
-    vec3 kaleidoColor = vec3(0.0);
-    const float PI = 3.14159265359;
-    float scale = PI / 3.0;
-    float m = 0.5;
-    
-    vec2 iterUV = kaleidoUV;
-    for (int i = 0; i < 10; i++) {
-      float scaleFactor = float(i) + (sin(t * 0.05) + 1.5);
-      iterUV *= rot(t * scaleFactor * 0.01);
-      
-      float theta = atan(iterUV.x, iterUV.y) + PI;
-      theta = (floor(theta / scale) + 0.5) * scale;
-      vec2 dir = vec2(sin(theta), cos(theta));
-      vec2 codir = dir.yx * vec2(-1.0, 1.0);
-      iterUV = vec2(dot(dir, iterUV), dot(codir, iterUV));
-      
-      iterUV.xy += vec2(sin(t), cos(t * 1.1)) * scaleFactor * 0.035;
-      iterUV = abs(fract(iterUV + 0.5) * 2.0 - 1.0) * 0.7;
-      
-      vec2 sampleUV = iterUV / vec2(aspect, 1.0) * 0.5 + 0.5;
-      sampleUV = clamp(sampleUV, 0.0, 1.0);
-      vec4 sampleColor = texture2D(uVideoTexture, sampleUV);
-      
-      vec3 p = vec3(1.0, 5.0, 9.0);
-      float pattern = exp(-min(iterUV.x, iterUV.y) * 16.0);
-      vec3 colorMod = (cos(p * float(i) + t * 0.5) * 0.5 + 0.5) * m;
-      kaleidoColor += sampleColor.rgb * pattern * colorMod;
-      
-      m *= 0.9;
+    kaleidoUV *= (cos(t * 0.5) + 1.5) * 1.2;  // Breathing scale
+
+    vec3 color = vec3(0.0);
+    float scale = PI / 3.0;  // 60 degrees for hexagonal symmetry
+    float intensity = 0.65;  // Starting intensity (decays per iteration)
+
+    for (int i = 0; i < KALEIDO_ITERATIONS; i++) {
+        float iterF = float(i);
+        float scaleFactor = iterF + (sin(t * 0.05) + 1.5);
+
+        // Rotate coordinate space
+        kaleidoUV *= rotationMatrix(t * scaleFactor * 0.01);
+
+        // Fold into 60-degree wedge
+        float theta = atan(kaleidoUV.x, kaleidoUV.y) + PI;
+        theta = (floor(theta / scale) + 0.5) * scale;
+        vec2 dir = vec2(sin(theta), cos(theta));
+        vec2 codir = dir.yx * vec2(-1.0, 1.0);
+        kaleidoUV = vec2(dot(dir, kaleidoUV), dot(codir, kaleidoUV));
+
+        // Animated translation
+        kaleidoUV.xy += vec2(sin(t), cos(t * 1.1)) * scaleFactor * 0.035;
+
+        // Fold and scale
+        kaleidoUV = abs(fract(kaleidoUV + 0.5) * 2.0 - 1.0) * 0.7;
+
+        // Sample video at folded coordinates (use safe UV)
+        vec2 sampleUV = clamp(kaleidoUV / vec2(aspect, 1.0) * 0.5 + 0.5, UV_MIN, UV_MAX);
+        vec4 sampleColor = texture2D(videoTex, sampleUV);
+
+        // Color cycling: each iteration shifts RGB phase for rainbow effect
+        vec3 colorMod = (cos(vec3(1.0, 5.0, 9.0) * iterF + t * 0.5) * 0.5 + 0.5) * intensity;
+        // Edge pattern fades toward fold boundaries
+        float pattern = exp(-min(kaleidoUV.x, kaleidoUV.y) * 12.0);
+        color += sampleColor.rgb * pattern * colorMod;
+
+        intensity *= 0.9;  // Each iteration contributes less (depth fade)
     }
-    
-    kaleidoColor *= 1.1;
-    
-    // Fast blink pulse: creates brief flash/blink effect
-    // Pulse every 0.2 seconds, visible for only 0.05 seconds (quick blink)
-    float blinkCycle = mod(uTime, 0.2);
-    float blinkPulse = smoothstep(0.0, 0.02, blinkCycle) * smoothstep(0.2, 0.05, blinkCycle);
-    blinkPulse = clamp(blinkPulse, 0.0, 1.0);
-    
-    // Apply blink pulse - makes kaleidoscope flash briefly like a blink
-    // Only show during the pulse window (very brief)
-    float kaleidoIntensity = transition * 0.9 * blinkPulse;
-    color.rgb = mix(baseColor.rgb, kaleidoColor, kaleidoIntensity);
-    
-  } else if (currentState < 2.5) {
-    // STATE_STARGATE: Tunnel/Stargate (show more often)
-    // Alternate between horizontal and vertical every 4 seconds
-    float tunnelOrientation = mod(floor(uTime / 4.0), 2.0); // 0 = horizontal, 1 = vertical
-    vec2 tunnelUV = (uv - 0.5) * 2.0;
-    tunnelUV.x *= aspect;
-    vec3 tunnelColor = raymarchTunnel(tunnelUV, uTime, uVideoTexture, finalUV, tunnelOrientation);
-    color.rgb = mix(baseColor.rgb, tunnelColor, transition * 0.95);
-    
-  } else {
-    // STATE_PERLIN: Perlin ripple effect
-    vec3 rippleColor = perlinRippleEffect(uv, uTime, uVideoTexture, finalUV, aspect);
-    color.rgb = mix(color.rgb, rippleColor, transition * 0.85);
-  }
-  
-  // === CHROMATIC ABERRATION ===
-  // RGB channel separation - audio-reactive (subtle, preserve effects)
-  // Only apply when audio is significant - calmer when quiet
-  float chromaAmount = uHighLevel * 0.03 + uAmplitude * 0.015 + uBassLevel * 0.008; // Reduced
-  if (chromaAmount > 0.005) { // Higher threshold - only when audio is noticeable
-    vec2 chromaOffsetX = vec2(chromaAmount * 2.5, 0.0); // Reduced from 3.0
-    vec2 chromaOffsetY = vec2(0.0, chromaAmount * 0.4); // Reduced from 0.5
-    
-    // Sample video texture with offsets for RGB separation
-    vec4 colorR = texture2D(uVideoTexture, finalUV - chromaOffsetX - chromaOffsetY);
-    vec4 colorG = texture2D(uVideoTexture, finalUV);
-    vec4 colorB = texture2D(uVideoTexture, finalUV + chromaOffsetX + chromaOffsetY);
-    
-    // Blend scaled with audio level (less intense when quiet)
-    vec3 chromaColor = vec3(colorR.r, colorG.g, colorB.b);
-    color.rgb = mix(color.rgb, chromaColor, chromaAmount * 1.2); // Reduced from 1.5
-  }
-  
-  // Bass → Blur/zoom pulse (enhanced) - blend with effect color
-  if (uBassLevel > 0.2) {
-    float blur = uBassLevel * 0.3; // Reduced to preserve effects
+
+    // Soft light preserves video while adding kaleidoscope pattern
+    vec3 blended = blendSoftLight(baseVideo, color);
+
+    // Screen blend adds luminosity from kaleidoscope colors
+    blended = blendScreen(blended, color * 0.35);
+
+    return blended;
+}
+
+// ============================================================================
+// SECTION 11: CHROMATIC ABERRATION
+// ============================================================================
+// Simulates lens imperfection where different wavelengths focus differently.
+// Creates the characteristic RGB fringing seen in cheap lenses and VHS.
+// ============================================================================
+
+/**
+ * Apply Chromatic Aberration
+ *
+ * Samples R, G, B channels at slightly offset positions.
+ * The offset amount is driven by audio levels.
+ *
+ * @param color     Current pixel color
+ * @param uv        UV coordinates for sampling
+ * @param videoTex  Video texture
+ * @return          Color with chromatic aberration applied
+ */
+vec3 applyChromaticAberration(vec3 color, vec2 uv, sampler2D videoTex) {
+    float amount = uHighLevel * CHROMA_HIGH_SCALE
+                 + uAmplitude * CHROMA_AMPLITUDE_SCALE
+                 + uBassLevel * CHROMA_BASS_SCALE;
+
+    // Only apply if above threshold
+    if (amount < CHROMA_THRESHOLD) {
+        return color;
+    }
+
+    vec2 offsetX = vec2(amount * 2.5, 0.0);
+    vec2 offsetY = vec2(0.0, amount * 0.4);
+
+    // Sample each channel at offset positions (use safe UV)
+    float r = texture2D(videoTex, safeUV(uv - offsetX - offsetY)).r;
+    float g = texture2D(videoTex, safeUV(uv)).g;
+    float b = texture2D(videoTex, safeUV(uv + offsetX + offsetY)).b;
+
+    vec3 chromaColor = vec3(r, g, b);
+    return mix(color, chromaColor, amount * 1.2);
+}
+
+// ============================================================================
+// SECTION 12: POST-PROCESSING EFFECTS
+// ============================================================================
+// Final pass effects that shape the overall look:
+// - Bass blur: Soft focus pulse with bass hits
+// - Hue rotation: Colors shift with mid frequencies
+// - Edge detection: Highs reveal edges
+// - Saturation: Amplitude boosts color intensity
+// - Glitch: Random displacement artifacts
+// - Scanlines: CRT-style horizontal lines
+// ============================================================================
+
+/**
+ * Apply Bass-Reactive Blur
+ *
+ * Simple box blur that pulses with bass frequencies.
+ * Creates a dreamy, pulsing focus effect.
+ */
+vec3 applyBassBlur(vec3 color, vec2 uv, sampler2D videoTex) {
+    if (uBassLevel <= 0.2) return color;
+
+    float blur = uBassLevel * 0.3;
     vec2 texelSize = 1.0 / uResolution;
     vec2 offset = vec2(blur * texelSize.x * 2.0, 0.0);
+
+    // 4-tap box blur (use safe UV)
     vec4 blurred = (
-      texture2D(uVideoTexture, finalUV + offset) +
-      texture2D(uVideoTexture, finalUV - offset) +
-      texture2D(uVideoTexture, finalUV + offset.yx) +
-      texture2D(uVideoTexture, finalUV - offset.yx)
+        texture2D(videoTex, safeUV(uv + offset)) +
+        texture2D(videoTex, safeUV(uv - offset)) +
+        texture2D(videoTex, safeUV(uv + offset.yx)) +
+        texture2D(videoTex, safeUV(uv - offset.yx))
     ) * 0.25;
-    color = mix(color, blurred, blur * 0.5); // Blend, don't replace
-  }
-  
-  // Mids → Hue rotation (with spatial variation, smoother) - works on effect color
-  // Scale intensity with audio level - calmer when quiet
-  if (uMidLevel > 0.15) {
-    vec3 hsv = rgb2hsv(color.rgb);
-    // Scale rotation speed with audio level (slower when quiet)
-    float rotationSpeed = uMidLevel * 0.5; // Reduced from 1.0
-    float hueShift = rotationSpeed * uTime * 0.8;
-    // Scale spatial variation with audio level
-    hueShift += fbm(finalUV * 3.0 + t * 0.5) * uMidLevel * 0.2; // Reduced from 0.3
+
+    return mix(color, blurred.rgb, blur * 0.5);
+}
+
+/**
+ * Apply Mid-Frequency Hue Rotation
+ *
+ * Shifts hues based on mid-frequency levels.
+ * Creates a color-cycling effect tied to melody.
+ */
+vec3 applyHueRotation(vec3 color, vec2 uv, float t) {
+    if (uMidLevel <= 0.1) return color;
+
+    vec3 hsv = rgb2hsv(color);
+
+    // Rotation speed scales with mid level - creates rainbow cycling
+    float rotSpeed = uMidLevel * 1.2;
+    float hueShift = rotSpeed * t * 1.5;
+
+    // Spatial variation creates psychedelic color banding
+    hueShift += fbm(uv * 3.0 + t * 0.5) * uMidLevel * 0.5;
+
     hsv.x = mod(hsv.x + hueShift, 1.0);
-    // Blend hue rotation based on audio level (less intense when quiet)
-    vec3 rotatedColor = hsv2rgb(hsv);
-    color.rgb = mix(color.rgb, rotatedColor, uMidLevel * 0.6); // Blend based on level
-  }
-  
-  // Highs → Edge detection/sharpening (enhanced with noise) - blend with effect color
-  // Scale intensity with audio level
-  if (uHighLevel > 0.25) {
+
+    vec3 rotated = hsv2rgb(hsv);
+    return mix(color, rotated, uMidLevel * 0.9);
+}
+
+/**
+ * Apply High-Frequency Edge Detection
+ *
+ * Enhances edges when high frequencies are present.
+ * Creates a sharpening/outline effect.
+ */
+vec3 applyEdgeDetection(vec3 color, vec2 uv, sampler2D videoTex, float t) {
+    if (uHighLevel <= 0.2) return color;
+
     vec2 texelSize = 1.0 / uResolution;
-    vec4 top = texture2D(uVideoTexture, finalUV + vec2(0.0, texelSize.y));
-    vec4 bottom = texture2D(uVideoTexture, finalUV - vec2(0.0, texelSize.y));
-    vec4 left = texture2D(uVideoTexture, finalUV - vec2(texelSize.x, 0.0));
-    vec4 right = texture2D(uVideoTexture, finalUV + vec2(texelSize.x, 0.0));
-    
-    vec4 edge = abs(color - top) + abs(color - bottom) + abs(color - left) + abs(color - right);
-    float edgeStrength = length(edge.rgb) * uHighLevel * 0.5; // Reduced from 0.8
-    
-    // Add noise-based edge enhancement (scaled with audio level)
-    float noiseEdge = fbm(finalUV * 20.0 + t) * uHighLevel * 0.2; // Reduced from 0.3
-    edgeStrength += noiseEdge;
-    
-    // Blend based on audio level (less intense when quiet)
-    color.rgb = mix(color.rgb, color.rgb * (1.0 + edgeStrength), uHighLevel * 0.4); // Reduced from 0.6
-  }
-  
-  // Amplitude → Saturation boost (scaled - only boost when loud)
-  // Only apply significant saturation boost when amplitude is high
-  if (uAmplitude > 0.3) {
-    float satBoost = 1.0 + (uAmplitude * 0.8); // Reduced from 1.5, and only when loud
-    vec3 hsv = rgb2hsv(color.rgb);
+
+    // Sample 4 neighbors for Sobel-like edge detection
+    vec4 top = texture2D(videoTex, safeUV(uv + vec2(0.0, texelSize.y)));
+    vec4 bottom = texture2D(videoTex, safeUV(uv - vec2(0.0, texelSize.y)));
+    vec4 left = texture2D(videoTex, safeUV(uv - vec2(texelSize.x, 0.0)));
+    vec4 right = texture2D(videoTex, safeUV(uv + vec2(texelSize.x, 0.0)));
+
+    // Edge magnitude from difference with neighbors
+    vec4 edge = abs(vec4(color, 1.0) - top) + abs(vec4(color, 1.0) - bottom)
+              + abs(vec4(color, 1.0) - left) + abs(vec4(color, 1.0) - right);
+    float edgeStrength = length(edge.rgb) * uHighLevel * 0.8;
+
+    // Noise adds organic variation to edge glow
+    edgeStrength += fbm(uv * 20.0 + t) * uHighLevel * 0.3;
+
+    return mix(color, color * (1.0 + edgeStrength), uHighLevel * 0.6);
+}
+
+/**
+ * Apply Amplitude-Based Saturation Boost
+ *
+ * Louder audio = more vivid, saturated colors.
+ * Creates that "turned up to 11" visual intensity.
+ */
+vec3 applySaturationBoost(vec3 color) {
+    if (uAmplitude <= 0.2) return color;
+
+    // Saturation multiplier scales with volume
+    float satBoost = 1.0 + (uAmplitude * 1.5);
+    vec3 hsv = rgb2hsv(color);
     hsv.y = min(1.0, hsv.y * satBoost);
-    color.rgb = hsv2rgb(hsv);
-  }
-  
-  // Silence → Solarization
-  if (uSilence > 0.5) {
-    float solar = uSilence * 0.8;
-    color.rgb = mix(
-      color.rgb,
-      vec3(1.0) - abs(color.rgb - vec3(0.5)) * 2.0,
-      solar
-    );
-  }
-  
-  // Visual → Audio: Dominant color tint
-  color.rgb = mix(
-    color.rgb,
-    color.rgb * (uDominantColor / 255.0),
-    0.3
-  );
-  
-  // Motion particles (visual → audio feedback) - enhanced with noise
-  if (uMotionAmount > 0.1) {
-    float particle = step(0.98, fract(sin(dot(finalUV, vec2(12.9898, 78.233)) + t) * 43758.5453));
-    // Add noise-based particles
-    float noiseParticle = step(0.95, fbm(finalUV * 30.0 + t * 2.0)) * uMotionAmount;
+    return hsv2rgb(hsv);
+}
+
+/**
+ * Apply Silence Solarization
+ *
+ * When audio is silent, apply a solarization effect.
+ * Solarization inverts mid-tones while preserving highlights and shadows.
+ */
+vec3 applySolarization(vec3 color) {
+    if (uSilence < 0.5) return color;
+
+    float intensity = uSilence * 0.8;
+    vec3 solarized = vec3(1.0) - abs(color - vec3(0.5)) * 2.0;
+    return mix(color, solarized, intensity);
+}
+
+/**
+ * Apply Motion-Reactive Particles
+ *
+ * Spawn green particles where motion is detected.
+ */
+vec3 applyMotionParticles(vec3 color, vec2 uv, float t) {
+    if (uMotionAmount <= 0.1) return color;
+
+    // Hash-based particle spawning
+    float particle = step(0.98, fract(sin(dot(uv, vec2(12.9898, 78.233)) + t) * 43758.5453));
+
+    // Noise-based particles
+    float noiseParticle = step(0.95, fbm(uv * 30.0 + t * 2.0)) * uMotionAmount;
     particle = max(particle, noiseParticle);
-    color.rgb += vec3(0.0, 1.0, 0.0) * particle * uMotionAmount * 0.3;
-  }
-  
-  // === ADDITIONAL DISTORTION EFFECTS ===
-  
-  // Glitch effect (amplitude reactive)
-  if (uAmplitude > 0.7) {
-    float glitch = step(0.98, fbm(finalUV * vec2(100.0, 1.0) + t * 10.0));
-    vec2 glitchUV = finalUV + vec2(glitch * 0.05, 0.0);
-    vec4 glitchColor = texture2D(uVideoTexture, glitchUV);
-    color = mix(color, glitchColor, glitch * uAmplitude * 0.5);
-  }
-  
-  // Scanlines (highs reactive)
-  if (uHighLevel > 0.4) {
-    float scanline = sin(finalUV.y * uResolution.y * 0.5) * 0.5 + 0.5;
+
+    return color + vec3(0.0, 1.0, 0.0) * particle * uMotionAmount * 0.3;
+}
+
+/**
+ * Apply Amplitude-Triggered Glitch
+ */
+vec3 applyGlitch(vec3 color, vec2 uv, sampler2D videoTex, float t) {
+    if (uAmplitude <= 0.7) return color;
+
+    float glitch = step(0.98, fbm(uv * vec2(100.0, 1.0) + t * 10.0));
+    vec2 glitchUV = uv + vec2(glitch * 0.05, 0.0);
+    vec3 glitchColor = texture2D(videoTex, safeUV(glitchUV)).rgb;
+
+    return mix(color, glitchColor, glitch * uAmplitude * 0.5);
+}
+
+/**
+ * Apply Scanlines
+ */
+vec3 applyScanlines(vec3 color, vec2 uv) {
+    if (uHighLevel <= 0.4) return color;
+
+    float scanline = sin(uv.y * uResolution.y * 0.5) * 0.5 + 0.5;
     scanline = pow(scanline, 10.0);
-    color.rgb *= 1.0 - scanline * uHighLevel * 0.1;
-  }
-  
-  // === TV STATIC EFFECT (Perlin noise-based) ===
-  // Generate TV static using FBM noise
-  float staticNoise = fbm(finalUV * vec2(200.0, 150.0) + uTime * 5.0);
-  staticNoise = fract(staticNoise * 1000.0); // High frequency noise
-  
-  // TV static appears randomly and during transitions
-  float staticChance = sin(uTime * 0.5) * 0.5 + 0.5;
-  staticChance = smoothstep(0.7, 1.0, staticChance); // Sharp transitions
-  
-  // Static intensity - stronger during glitches and transitions
-  float staticIntensity = staticChance * 0.3;
-  staticIntensity += step(0.95, fbm(finalUV * vec2(50.0, 1.0) + uTime * 2.0)) * 0.5; // Random bursts
-  
-  // Apply TV static (black and white noise)
-  vec3 staticColor = vec3(staticNoise);
-  color.rgb = mix(color.rgb, staticColor, staticIntensity);
-  
-  // === TV-STYLE GLITCH TRANSITIONS ===
-  // Periodic glitch transitions that happen from time to time
-  float glitchTime = mod(uTime, 8.0); // Every 8 seconds
-  float glitchPhase = smoothstep(0.0, 0.1, glitchTime) * smoothstep(0.3, 0.2, glitchTime); // Quick burst
-  
-  if (glitchPhase > 0.01) {
-    // Horizontal scanline glitch
-    float scanlineGlitch = step(0.98, fbm(finalUV * vec2(1.0, 200.0) + uTime * 10.0));
-    if (scanlineGlitch > 0.5) {
-      vec2 glitchUV = finalUV + vec2(0.0, sin(finalUV.y * 50.0 + uTime * 20.0) * 0.02);
-      vec4 glitchColor = texture2D(uVideoTexture, glitchUV);
-      color = mix(color, glitchColor, glitchPhase * 0.8);
+    return color * (1.0 - scanline * uHighLevel * 0.1);
+}
+
+/**
+ * Apply TV Static Effect
+ */
+vec3 applyTVStatic(vec3 color, vec2 uv, float t) {
+    // Generate high-frequency noise
+    float staticNoise = fbm(uv * vec2(200.0, 150.0) + t * 5.0);
+    staticNoise = fract(staticNoise * 1000.0);
+
+    // Periodic static bursts
+    float staticChance = smoothstep(0.7, 1.0, sin(t * 0.5) * 0.5 + 0.5);
+    float staticIntensity = staticChance * 0.3;
+
+    // Random burst overlay
+    staticIntensity += step(0.95, fbm(uv * vec2(50.0, 1.0) + t * 2.0)) * 0.5;
+
+    return mix(color, vec3(staticNoise), staticIntensity);
+}
+
+/**
+ * Apply TV-Style Glitch Transition
+ */
+vec3 applyGlitchTransition(vec3 color, vec2 uv, sampler2D videoTex, float t) {
+    float glitchTime = mod(t, 8.0);
+    float glitchPhase = smoothstep(0.0, 0.1, glitchTime) * smoothstep(0.3, 0.2, glitchTime);
+
+    if (glitchPhase < 0.01) return color;
+
+    // Horizontal scanline glitch (use safe UV)
+    float scanGlitch = step(0.98, fbm(uv * vec2(1.0, 200.0) + t * 10.0));
+    if (scanGlitch > 0.5) {
+        vec2 glitchUV = uv + vec2(0.0, sin(uv.y * 50.0 + t * 20.0) * 0.02);
+        color = mix(color, texture2D(videoTex, safeUV(glitchUV)).rgb, glitchPhase * 0.8);
     }
-    
-    // RGB channel separation (chromatic aberration glitch)
+
+    // Chromatic separation (use safe UV)
     float chromaGlitch = glitchPhase * 0.05;
-    vec4 colorR = texture2D(uVideoTexture, finalUV + vec2(chromaGlitch, 0.0));
-    vec4 colorB = texture2D(uVideoTexture, finalUV - vec2(chromaGlitch, 0.0));
-    color.r = mix(color.r, colorR.r, glitchPhase);
-    color.b = mix(color.b, colorB.b, glitchPhase);
-    
-    // Vertical slice displacement
-    float sliceGlitch = step(0.95, fbm(finalUV * vec2(200.0, 1.0) + uTime * 15.0));
+    color.r = mix(color.r, texture2D(videoTex, safeUV(uv + vec2(chromaGlitch, 0.0))).r, glitchPhase);
+    color.b = mix(color.b, texture2D(videoTex, safeUV(uv - vec2(chromaGlitch, 0.0))).b, glitchPhase);
+
+    // Vertical slice displacement (use safe UV)
+    float sliceGlitch = step(0.95, fbm(uv * vec2(200.0, 1.0) + t * 15.0));
     if (sliceGlitch > 0.5) {
-      vec2 sliceUV = finalUV + vec2(sin(finalUV.x * 100.0 + uTime * 30.0) * 0.03, 0.0);
-      vec4 sliceColor = texture2D(uVideoTexture, sliceUV);
-      color = mix(color, sliceColor, glitchPhase * sliceGlitch * 0.6);
+        vec2 sliceUV = uv + vec2(sin(uv.x * 100.0 + t * 30.0) * 0.03, 0.0);
+        color = mix(color, texture2D(videoTex, safeUV(sliceUV)).rgb, glitchPhase * 0.6);
     }
-  }
-  
-  // Vignette with audio-reactive intensity (more feathered, shows more video)
-  float vigDist = length(p);
-  // Start vignette further out (0.9 instead of 0.7) and make it more gradual
-  float vignette = 1.0 - smoothstep(0.9, 1.6, vigDist);
-  // Reduce audio-reactive boost
-  vignette += uAmplitude * 0.1;
-  // Make vignette more subtle (less darkening)
-  vignette = mix(1.0, vignette, 0.4); // Only apply 40% of vignette darkness
-  color.rgb *= vignette;
-  
-  gl_FragColor = color;
+
+    return color;
+}
+
+/**
+ * Apply Vignette
+ *
+ * Darkens edges of the frame for a cinematic look.
+ * Uses elliptical distance to handle wide aspect ratios properly -
+ * without this, 16:9 screens would have much darker corners than 4:3.
+ *
+ * @param color   Input color
+ * @param p       Aspect-corrected centered coordinates
+ * @param aspect  Screen aspect ratio (width/height)
+ * @return        Color with vignette applied
+ */
+vec3 applyVignette(vec3 color, vec2 p, float aspect) {
+    // Normalize distance so edges are equidistant from center regardless of aspect
+    // This creates an elliptical vignette that matches the screen shape
+    vec2 normalizedP = p / vec2(max(aspect, 1.0), max(1.0 / aspect, 1.0));
+    float dist = length(normalizedP);
+
+    float vignette = 1.0 - smoothstep(VIGNETTE_START, VIGNETTE_END, dist);
+    vignette += uAmplitude * 0.1;  // Audio-reactive brightness
+    vignette = mix(1.0, vignette, VIGNETTE_STRENGTH);
+    return color * vignette;
+}
+
+/**
+ * Apply Dominant Color Tint
+ *
+ * Tints the output based on the video's dominant color.
+ * Part of the visual→audio feedback loop visualization.
+ */
+vec3 applyDominantColorTint(vec3 color) {
+    return mix(color, color * (uDominantColor / 255.0), 0.3);
+}
+
+// ============================================================================
+// SECTION 13: EFFECT STATE MACHINE
+// ============================================================================
+// Cycles through different visual effects over time.
+// Audio levels can override the state for reactive transitions.
+//
+// States:
+// 0 = No Effect (base video with distortion)
+// 1 = Kaleidoscope (triggered by loud bass)
+// 2 = Stargate/Tunnel (during quiet sections)
+// 3 = Perlin Ripple (organic flowing effect)
+// ============================================================================
+
+#define STATE_NO_EFFECT  0.0
+#define STATE_KALEIDO    1.0
+#define STATE_STARGATE   2.0
+#define STATE_PERLIN     3.0
+
+/**
+ * Determine Current Effect State
+ *
+ * Computes which effect should be active based on time and audio.
+ * Time-based cycling provides variety; audio overrides for reactivity.
+ *
+ * @param t  Current time
+ * @return   State ID (0-3)
+ */
+float determineState(float t) {
+    // Calculate cycle position
+    float cycleDuration = STATE_NO_EFFECT_DURATION * 2.0
+                        + STATE_PERLIN_DURATION
+                        + STATE_STARGATE_DURATION;
+    float cycleTime = mod(t, cycleDuration);
+
+    // Default state based on cycle position
+    float state = STATE_NO_EFFECT;
+
+    if (cycleTime < STATE_NO_EFFECT_DURATION) {
+        state = STATE_NO_EFFECT;
+    } else if (cycleTime < STATE_NO_EFFECT_DURATION + STATE_PERLIN_DURATION) {
+        state = STATE_PERLIN;
+    } else if (cycleTime < STATE_NO_EFFECT_DURATION + STATE_PERLIN_DURATION + STATE_STARGATE_DURATION) {
+        state = STATE_STARGATE;
+    } else {
+        state = STATE_NO_EFFECT;
+    }
+
+    // Audio overrides
+    // Kaleidoscope: Brief blink when loud
+    float kaleidoTrigger = step(KALEIDO_AMPLITUDE_TRIGGER, uAmplitude)
+                         * step(KALEIDO_BASS_TRIGGER, uBassLevel);
+    float kaleidoPulse = mod(t, KALEIDO_BLINK_PERIOD);
+    float kaleidoBlink = step(kaleidoPulse, KALEIDO_BLINK_DURATION);
+
+    if (kaleidoTrigger > 0.5 && kaleidoBlink > 0.5) {
+        state = STATE_KALEIDO;
+    }
+    // Stargate also triggers during moderate audio (not just silence)
+    // This makes it appear more frequently
+    else if (uAmplitude < 0.5 && uBassLevel < 0.5) {
+        state = STATE_STARGATE;
+    }
+
+    return state;
+}
+
+/**
+ * Calculate Transition Factor
+ *
+ * Smooth fade between states at boundaries.
+ */
+float calculateTransition(float t) {
+    float cycleDuration = STATE_NO_EFFECT_DURATION * 2.0
+                        + STATE_PERLIN_DURATION
+                        + STATE_STARGATE_DURATION;
+    float cycleProgress = mod(t, cycleDuration) / cycleDuration;
+
+    float fadeIn = smoothstep(0.0, STATE_FADE_TIME / cycleDuration, cycleProgress);
+    float fadeOut = smoothstep(1.0, 1.0 - STATE_FADE_TIME / cycleDuration, cycleProgress);
+
+    return max(fadeIn * fadeOut, 0.95);
+}
+
+// ============================================================================
+// MAIN FUNCTION
+// ============================================================================
+// Orchestrates all effects in a clean, readable pipeline.
+// Each stage is clearly separated for debugging and modification.
+// ============================================================================
+
+void main() {
+    // ------------------------------------------------------------------------
+    // STAGE 1: COORDINATE SETUP
+    // ------------------------------------------------------------------------
+    // Flip Y (WebGL video textures are typically upside-down)
+    vec2 uv = vec2(vUv.x, 1.0 - vUv.y);
+
+    // COVER SCALE: Zoom in slightly so distortion effects have margin
+    // Without this, distortion can push UVs outside [0,1] causing edge artifacts
+    // 0.94 means we use 94% of the texture, centered (3% margin each side)
+    const float COVER_SCALE = 0.94;
+    uv = (uv - 0.5) * COVER_SCALE + 0.5;
+
+    // Centered coordinates for radial effects (-1 to 1, aspect-corrected)
+    vec2 p = (uv - 0.5) * 2.0;
+    float aspect = uResolution.x / uResolution.y;
+    p.x *= aspect;
+
+    float t = uTime * 0.5;  // Slower animation time base
+
+    // ------------------------------------------------------------------------
+    // STAGE 2: UV DISTORTION PIPELINE
+    // ------------------------------------------------------------------------
+    // Layer multiple distortion effects onto the UV coordinates.
+    // Order matters: each effect builds on the previous.
+
+    // 2a. Domain warping (organic FBM-based distortion)
+    vec2 warpedUV = computeDomainWarp(uv, p, t);
+
+    // 2b. Barrel distortion (bass-reactive fisheye)
+    vec2 barrelUV = applyBarrelDistortion(p, aspect);
+
+    // 2c. Blend warping and barrel based on bass level
+    vec2 distortedUV = mix(warpedUV, barrelUV, uBassLevel * 0.4);
+
+    // 2d. Smooth wave distortion (Dali-inspired liquid effect)
+    distortedUV = applySmoothWaves(distortedUV, t);
+
+    // 2e. Audio-reactive waves
+    distortedUV = applyAudioWaves(distortedUV, t);
+
+    // 2f. Mouse ripple effect (add displacement then clamp)
+    vec2 rippleDisplacement = computeMouseRipple(distortedUV, uMouse);
+    distortedUV = clamp(distortedUV + rippleDisplacement, vec2(UV_MIN), vec2(UV_MAX));
+
+    // Final UV for consistent sampling
+    // Each distortion function above already clamps internally,
+    // this is a safety net for any accumulated numerical error
+    vec2 finalUV = safeUV(distortedUV);
+
+    // ------------------------------------------------------------------------
+    // STAGE 3: BASE VIDEO SAMPLE
+    // ------------------------------------------------------------------------
+    vec4 baseColor = texture2D(uVideoTexture, finalUV);
+
+    // EDGE FADE: Smoothly fade to black near edges to hide any artifacts
+    // This handles both out-of-bounds AND white letterboxing in the video
+    float edgeMargin = 0.03;  // 3% margin for fade
+    float edgeFade = smoothstep(0.0, edgeMargin, finalUV.x)
+                   * smoothstep(1.0, 1.0 - edgeMargin, finalUV.x)
+                   * smoothstep(0.0, edgeMargin, finalUV.y)
+                   * smoothstep(1.0, 1.0 - edgeMargin, finalUV.y);
+    baseColor.rgb *= edgeFade;
+
+    vec4 color = baseColor;
+
+    // ------------------------------------------------------------------------
+    // STAGE 4: EFFECT STATE MACHINE
+    // ------------------------------------------------------------------------
+    // Apply the current major effect (kaleidoscope, tunnel, perlin, or none)
+
+    float state = determineState(uTime);
+    float transition = calculateTransition(uTime);
+
+    if (state > 0.5 && state < 1.5) {
+        // KALEIDOSCOPE
+        // Pass base video for soft light blending (preserves video visibility)
+        vec3 kaleidoColor = renderKaleidoscope((uv - 0.5) * 2.0, aspect, t, uVideoTexture, baseColor.rgb);
+
+        // Full intensity kaleidoscope effect
+        float intensity = transition * 0.95;
+        color.rgb = mix(baseColor.rgb, kaleidoColor, intensity);
+
+    } else if (state > 1.5 && state < 2.5) {
+        // STARGATE TUNNEL
+        float tunnelOrientation = mod(floor(uTime / 4.0), 2.0);
+        vec2 tunnelUV = (uv - 0.5) * 2.0;
+        tunnelUV.x *= aspect;
+
+        vec3 tunnelColor = raymarchTunnel(tunnelUV, uTime, uVideoTexture, finalUV, tunnelOrientation);
+
+        // Use screen blend to add tunnel light on top of video - stronger mix
+        vec3 blendedTunnel = blendScreen(baseColor.rgb, tunnelColor * 0.8);
+        color.rgb = mix(baseColor.rgb, blendedTunnel, transition * 0.9);
+
+    } else if (state > 2.5) {
+        // PERLIN RIPPLE
+        vec3 rippleColor = perlinRippleEffect(uv, uTime, uVideoTexture, finalUV, aspect);
+        color.rgb = mix(color.rgb, rippleColor, transition * 0.85);
+    }
+    // else: STATE_NO_EFFECT - base color with distortion only
+
+    // ------------------------------------------------------------------------
+    // STAGE 5: POST-PROCESSING CHAIN
+    // ------------------------------------------------------------------------
+    // Apply audio-reactive effects in a consistent order.
+    // Each effect preserves the work of previous effects.
+
+    // 5a. Chromatic aberration
+    color.rgb = applyChromaticAberration(color.rgb, finalUV, uVideoTexture);
+
+    // 5b. Bass blur
+    color.rgb = applyBassBlur(color.rgb, finalUV, uVideoTexture);
+
+    // 5c. Hue rotation
+    color.rgb = applyHueRotation(color.rgb, finalUV, t);
+
+    // 5d. Edge detection
+    color.rgb = applyEdgeDetection(color.rgb, finalUV, uVideoTexture, t);
+
+    // 5e. Saturation boost
+    color.rgb = applySaturationBoost(color.rgb);
+
+    // 5f. Solarization (silence effect)
+    color.rgb = applySolarization(color.rgb);
+
+    // 5g. Dominant color tint (visual→audio feedback visualization)
+    color.rgb = applyDominantColorTint(color.rgb);
+
+    // 5h. Motion particles
+    color.rgb = applyMotionParticles(color.rgb, finalUV, t);
+
+    // 5i. Glitch effects
+    color.rgb = applyGlitch(color.rgb, finalUV, uVideoTexture, t);
+    color.rgb = applyScanlines(color.rgb, finalUV);
+    color.rgb = applyTVStatic(color.rgb, finalUV, t);
+    color.rgb = applyGlitchTransition(color.rgb, finalUV, uVideoTexture, t);
+
+    // 5j. Vignette (always last before output)
+    color.rgb = applyVignette(color.rgb, p, aspect);
+
+    // ------------------------------------------------------------------------
+    // OUTPUT
+    // ------------------------------------------------------------------------
+    gl_FragColor = color;
 }

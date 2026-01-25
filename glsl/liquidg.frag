@@ -3,9 +3,10 @@ precision highp float;
 varying vec2 vUv;
 
 // =============================================================================
-// MAX BLOBS - Compile-time constant for array sizes
+// Compile-time constants for array sizes
 // =============================================================================
 #define MAX_BLOBS 6
+#define SPECTRUM_BANDS 32
 
 uniform float uTime;
 uniform vec2 uResolution;
@@ -36,6 +37,9 @@ uniform float uRippleDecay;
 uniform float uRippleStrength;
 uniform float uWobbleFreq;
 uniform float uWobbleDecay;
+
+// Audio spectrum data (0-1 per band)
+uniform float uSpectrum[SPECTRUM_BANDS];
 
 // =============================================================================
 // IQ's Superellipse SDF
@@ -115,8 +119,34 @@ float sdCircle(vec2 p, float r) {
     return length(p) - r;
 }
 
+// Get spectrum value for a grid cell
+float getSpectrumForCell(vec2 gridID, float aspect) {
+    // Map grid X position to spectrum band
+    // Grid spans roughly -15 to +15 in X (accounting for wide aspect ratios)
+    float xRange = 20.0 * aspect;  // ~34 for 16:9, ~40 for ultrawide
+    float normalizedX = (gridID.x + xRange * 0.5) / xRange;  // 0 to 1
+    normalizedX = clamp(normalizedX, 0.0, 0.999);
+    
+    // Calculate band index as float, then clamp
+    float bandF = normalizedX * float(SPECTRUM_BANDS);
+    bandF = clamp(bandF, 0.0, float(SPECTRUM_BANDS - 1));
+    int band = int(bandF);
+    
+    // Sample the spectrum (manual array indexing for WebGL1 compatibility)
+    float value = 0.0;
+    for (int i = 0; i < SPECTRUM_BANDS; i++) {
+        if (i == band) {
+            value = uSpectrum[i];
+            break;
+        }
+    }
+    
+    return value;
+}
+
 vec3 sampleBackground(vec2 uv) {
     float time = uTime * 0.3;
+    float aspect = uResolution.x / uResolution.y;
     
     vec3 col1 = vec3(0.02, 0.02, 0.05);
     vec3 col2 = vec3(0.05, 0.02, 0.08);
@@ -127,15 +157,40 @@ vec3 sampleBackground(vec2 uv) {
     vec2 gridUV = mod(uv + gridSize * 0.5, gridSize) - gridSize * 0.5;
     vec2 gridID = floor((uv + gridSize * 0.5) / gridSize);
     
-    float circleR = 0.04;
+    // Get spectrum intensity for this column (X = frequency band)
+    float spectrum = getSpectrumForCell(gridID, aspect);
+    
+    // Map grid Y to height threshold (bottom = -5, top = +5 roughly)
+    // Normalize Y position to 0-1 range (bottom to top)
+    float normalizedY = (gridID.y + 5.0) / 10.0;
+    normalizedY = clamp(normalizedY, 0.0, 1.0);
+    
+    // Circle lights up if spectrum level exceeds this row's threshold
+    // spectrum = 1.0 means full bar, spectrum = 0.0 means nothing lit
+    float isLit = step(normalizedY, spectrum);
+    
+    // Smooth falloff near the "top" of the bar for nicer look
+    float barEdge = smoothstep(spectrum - 0.1, spectrum, normalizedY);
+    float intensity = isLit * (1.0 - barEdge * 0.5);
+    
+    // Base circle (always visible but dim)
+    float baseRadius = 0.04;
+    float circleR = baseRadius * (1.0 + intensity * 0.3);
     float circle = sdCircle(gridUV, circleR);
     
-    float hue = mod(gridID.x * 0.1 + gridID.y * 0.15 + time * 0.1, 1.0);
+    // Hue based on column (frequency) - low freq = red, high = blue/purple
+    float hue = mod(gridID.x * 0.08 + 0.0, 1.0);
+    
+    // Brightness: dim base + bright when lit by spectrum
+    float baseBrightness = 0.25;
+    float litBrightness = 1.8;
+    float brightness = mix(baseBrightness, litBrightness, intensity);
+    
     vec3 circleColor = vec3(
         0.5 + 0.5 * sin(hue * 6.28),
         0.5 + 0.5 * sin(hue * 6.28 + 2.09),
         0.5 + 0.5 * sin(hue * 6.28 + 4.18)
-    ) * 0.7;
+    ) * brightness;
     
     float circleMask = smoothstep(0.005, -0.005, circle);
     gradient = mix(gradient, circleColor, circleMask);

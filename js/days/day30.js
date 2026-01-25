@@ -35,6 +35,16 @@ const CONFIG = {
   hue: 135,             // Terminal green
   hueRange: 60,         // Color variation range
 
+  // Performance: Video texture undersampling
+  // Limits the texture resolution uploaded to GPU
+  // Lower = better performance, higher = sharper video
+  maxTextureWidth: 640,   // Max texture width (GPU upload limit)
+  maxTextureHeight: 480,  // Max texture height (GPU upload limit)
+
+  // Cover scale: how much larger than canvas to draw video
+  // 1.0 = exact fit, 1.05 = 5% larger (hides edge artifacts from distortion)
+  coverScale: 1.06,       // Slightly overscan to hide distortion edges
+
   // Synesthesia effects
   effects: {
     // Audio → Visual
@@ -92,6 +102,12 @@ class Day30Demo extends Game {
     this.videoCanvas = null;
     this.videoCtx = null;
     this.currentFrame = null;
+
+    // Undersampled texture canvas (for GPU upload performance)
+    this.textureCanvas = null;
+    this.textureCtx = null;
+    this.textureWidth = 0;
+    this.textureHeight = 0;
     
     // Audio analysis
     this.frequencyData = null;
@@ -524,6 +540,7 @@ class Day30Demo extends Game {
       this.videoElement = document.createElement('video');
       this.videoElement.autoplay = true;
       this.videoElement.playsInline = true;
+      this.videoElement.muted = true; // Mute video - audio comes from selected audio source only
       this.videoElement.width = this.width;
       this.videoElement.height = this.height;
       this.videoElement.loop = true; // Loop video files
@@ -543,17 +560,28 @@ class Day30Demo extends Game {
         const videoURL = URL.createObjectURL(this.selectedVideoFile);
         this.videoElement.src = videoURL;
         this.videoElement.addEventListener('loadedmetadata', () => {
-          // Video file loaded, start processing
-          this.processVideo();
+          // Video file loaded, start playback and processing
+          this.videoElement.play().then(() => {
+            this.processVideo();
+          }).catch(err => {
+            console.error('Video play failed:', err);
+            // Try processing anyway - some browsers may still work
+            this.processVideo();
+          });
         });
       }
       
-    // Create offscreen canvas for video capture (for texture upload)
+    // Create offscreen canvas for video capture (full resolution for display)
     this.videoCanvas = document.createElement('canvas');
     this.videoCanvas.width = this.width;
     this.videoCanvas.height = this.height;
     // Use willReadFrequently for better performance when reading pixels frequently
     this.videoCtx = this.videoCanvas.getContext('2d', { willReadFrequently: true });
+
+    // Create undersampled texture canvas for GPU upload performance
+    // This smaller canvas is what gets uploaded to the GPU texture each frame
+    this.textureCanvas = document.createElement('canvas');
+    this.textureCtx = this.textureCanvas.getContext('2d', { willReadFrequently: false });
 
       // Initialize WebGL renderer
       this.webgl = new WebGLRenderer(this.width, this.height);
@@ -690,6 +718,10 @@ class Day30Demo extends Game {
     this.currentFrame = null;
     this.videoCanvas = null;
     this.videoCtx = null;
+    this.textureCanvas = null;
+    this.textureCtx = null;
+    this.textureWidth = 0;
+    this.textureHeight = 0;
     this.rawAnalysisCanvas = null;
     this.rawAnalysisCtx = null;
     this.frequencyData = null;
@@ -781,6 +813,10 @@ class Day30Demo extends Game {
 
   /**
    * Process video frames - capture and upload to WebGL texture
+   *
+   * Performance optimization: Uses an undersampled texture canvas for GPU upload.
+   * The shader samples from this smaller texture (WebGL LINEAR filtering interpolates).
+   * This dramatically improves performance with large videos (4K, etc.).
    */
   processVideo() {
     if (!this.fsm.is('synesthesia') || !this.videoElement) return;
@@ -788,67 +824,96 @@ class Day30Demo extends Game {
     // Get actual video dimensions
     const videoWidth = this.videoElement.videoWidth || this.width;
     const videoHeight = this.videoElement.videoHeight || this.height;
-    
-    // Update video canvas to match canvas size
+
+    // Calculate undersampled texture dimensions (maintain aspect ratio)
+    // This is what gets uploaded to the GPU each frame
+    const videoAspect = videoWidth / videoHeight;
+    let texWidth = CONFIG.maxTextureWidth;
+    let texHeight = CONFIG.maxTextureHeight;
+
+    // Fit within max bounds while maintaining aspect ratio
+    if (texWidth / videoAspect > texHeight) {
+      // Height-limited
+      texWidth = Math.floor(texHeight * videoAspect);
+    } else {
+      // Width-limited
+      texHeight = Math.floor(texWidth / videoAspect);
+    }
+
+    // Update texture canvas size if needed
+    if (this.textureCanvas.width !== texWidth || this.textureCanvas.height !== texHeight) {
+      this.textureCanvas.width = texWidth;
+      this.textureCanvas.height = texHeight;
+      this.textureWidth = texWidth;
+      this.textureHeight = texHeight;
+      console.log(`[Day30] Texture undersampled: ${videoWidth}x${videoHeight} → ${texWidth}x${texHeight}`);
+    }
+
+    // Update video canvas to match canvas size (for display if needed)
     if (this.videoCanvas.width !== this.width || this.videoCanvas.height !== this.height) {
       this.videoCanvas.width = this.width;
       this.videoCanvas.height = this.height;
     }
 
-    // Draw video frame scaled to fill canvas while maintaining aspect ratio
-    const videoAspect = videoWidth / videoHeight;
+    // Draw video frame to undersampled texture canvas (GPU upload source)
+    // Draw at native video aspect ratio - fills the texture canvas
+    this.textureCtx.drawImage(this.videoElement, 0, 0, texWidth, texHeight);
+
+    // Draw video frame scaled to cover canvas while maintaining aspect ratio
+    // Use "cover" mode: video fills canvas completely, may crop edges
     const canvasAspect = this.width / this.height;
-    
+
     let drawWidth, drawHeight, drawX, drawY;
-    if (videoAspect > canvasAspect) {
-      // Video is wider - fit to height
-      drawHeight = this.height;
-      drawWidth = this.height * videoAspect;
-      drawX = (this.width - drawWidth) / 2;
-      drawY = 0;
-    } else {
-      // Video is taller - fit to width
+    if (canvasAspect > videoAspect) {
+      // Canvas is wider than video - fit to canvas width, crop top/bottom
       drawWidth = this.width;
       drawHeight = this.width / videoAspect;
       drawX = 0;
       drawY = (this.height - drawHeight) / 2;
+    } else {
+      // Canvas is taller than video - fit to canvas height, crop left/right
+      drawHeight = this.height;
+      drawWidth = this.height * videoAspect;
+      drawX = (this.width - drawWidth) / 2;
+      drawY = 0;
     }
-    
-    // Clear and draw video frame
+
+    // Clear and draw video frame (for fallback 2D rendering)
     this.videoCtx.fillStyle = '#000';
     this.videoCtx.fillRect(0, 0, this.width, this.height);
     this.videoCtx.drawImage(this.videoElement, drawX, drawY, drawWidth, drawHeight);
-    
-    // Analyze visual properties from RAW video element (before any processing)
-    // Use a temporary canvas to analyze raw video at its native resolution
+
+    // Analyze visual properties from undersampled texture (faster than raw video)
+    // Use texture canvas for analysis - already downsampled, good enough for frequency data
     if (!this.rawAnalysisCanvas) {
       this.rawAnalysisCanvas = document.createElement('canvas');
       this.rawAnalysisCtx = this.rawAnalysisCanvas.getContext('2d', { willReadFrequently: true });
     }
-    
-    // Set analysis canvas to video's native dimensions (raw feed)
-    if (this.rawAnalysisCanvas.width !== videoWidth || this.rawAnalysisCanvas.height !== videoHeight) {
-      this.rawAnalysisCanvas.width = videoWidth;
-      this.rawAnalysisCanvas.height = videoHeight;
+
+    // Set analysis canvas to match texture dimensions (already undersampled)
+    if (this.rawAnalysisCanvas.width !== texWidth || this.rawAnalysisCanvas.height !== texHeight) {
+      this.rawAnalysisCanvas.width = texWidth;
+      this.rawAnalysisCanvas.height = texHeight;
     }
-    
-    // Draw raw video element directly (no scaling, no processing)
-    this.rawAnalysisCtx.drawImage(this.videoElement, 0, 0, videoWidth, videoHeight);
-    
-    // Analyze raw video frame
-    const rawImageData = this.rawAnalysisCtx.getImageData(0, 0, videoWidth, videoHeight);
+
+    // Draw from texture canvas (already undersampled)
+    this.rawAnalysisCtx.drawImage(this.textureCanvas, 0, 0, texWidth, texHeight);
+
+    // Analyze undersampled video frame (much faster than full resolution)
+    const rawImageData = this.rawAnalysisCtx.getImageData(0, 0, texWidth, texHeight);
     this.analyzeVisual(rawImageData);
-    
-    // Store current frame for motion detection (from raw feed)
+
+    // Store current frame for motion detection (from undersampled feed)
     this.prevFrame = new Uint8Array(rawImageData.data);
-    
-    // Upload video frame to WebGL texture
+
+    // Upload undersampled texture to WebGL (MUCH smaller = MUCH faster)
     if (this.webglAvailable && this.videoTexture && this.webgl) {
       const gl = this.webgl.gl;
       // Check if texture is still valid before using it
       if (gl.isTexture(this.videoTexture)) {
         gl.bindTexture(gl.TEXTURE_2D, this.videoTexture);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, this.videoCanvas);
+        // Upload smaller texture canvas instead of full-res video canvas
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, this.textureCanvas);
       }
     }
 

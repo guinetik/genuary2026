@@ -80,7 +80,7 @@ export const INTERPRETATIONS = {
   27: 'Gaseous Sentience: click to feed it colored nebulae, watch it grow complex. It slowly starves as it radiates.',
   28: 'GENUARY 2006: No canvas, only HTML! What if Genuary existed in 2006? Synthwave sunset, neon grid, VHS scanlines, and maximum vaporwave energy. Click to visit.',
   29: 'SEIR epidemic model with viral mutation. Click agent to infect, watch variants emerge. Hospital zone (cyan) forces mutation pressure. [i] for analytics.',
-  30: 'QUIET ANALYZER: The quieter the sound, the CRAZIER the line goes. Loud = calm. Silence = chaos. It\'s not a bug, it\'s a feature!',
+  30: 'Synesthesia Experiment: See the sound, hear the image. A feedback loop where music paints the screen and video plays the music. It\'s not a bug, it\'s a feature!',
   31: 'Finale: A synthwave tour into a black hole. Fractal skies, passing billboards, birds overhead. Move mouse to look around.'
 };
 
