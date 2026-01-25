@@ -1,15 +1,19 @@
 /**
  * Genuary 2026 - Day 18
  * Prompt: "Unexpected path"
- *
- * LANGTON'S ANT - YIN & YANG
- *
+ * 
+ * @fileoverview LANGTON'S ANT - YIN & YANG
+ * 
  * Two ants on two planes of existence (blend modes):
  * 1. The Light (Screen blend)
  * 2. The Shadow (Exclusion blend)
- *
+ * 
  * They move in symmetry but their worlds interact in unexpected ways
  * when they cross paths, creating complex interference patterns.
+ * 
+ * @author guinetik
+ * @see {@link https://genuary.art|Genuary}
+ * @see {@link https://gcanvas.guinetik.com|GCanvas Library}
  */
 
 import { Game } from '@guinetik/gcanvas';
@@ -43,6 +47,15 @@ const CONFIG = {
 const DX = [0, 1, 0, -1];
 const DY = [-1, 0, 1, 0];
 
+/**
+ * Langton's Ant Demo
+ * 
+ * Main game class for Day 18, creating dual Langton's Ant simulations
+ * on different blend modes that interact when paths cross.
+ * 
+ * @class LangtonAntDemo
+ * @extends {Game}
+ */
 class LangtonAntDemo extends Game {
   constructor(canvas) {
     super(canvas);
@@ -702,8 +715,10 @@ class LangtonAntDemo extends Game {
 
 /**
  * Create Day 18 visualization
- * @param {HTMLCanvasElement} canvas
- * @returns {Object} Game instance with stop() method
+ * @param {HTMLCanvasElement} canvas - The canvas element to render to
+ * @returns {Object} Control object with stop() method and game instance
+ * @returns {Function} returns.stop - Function to stop the game
+ * @returns {LangtonAntDemo} returns.game - The game instance
  */
 export default function day18(canvas) {
   const game = new LangtonAntDemo(canvas);

@@ -1,7 +1,9 @@
 /**
  * Genuary 2026 - Day 24
  * Prompt: "Perfectionist's nightmare"
- *
+ * 
+ * @fileoverview Pi (1998) - Irrational visualization
+ * 
  * Inspired by Pi (1998) - Darren Aronofsky
  * "Mathematics is the language of nature"
  * 
@@ -12,6 +14,10 @@
  * When π is irrational, they never align. The circles never close.
  * 
  * Black and white. Grainy. Obsessive. Hand-drawn.
+ * 
+ * @author guinetik
+ * @see {@link https://genuary.art|Genuary}
+ * @see {@link https://gcanvas.guinetik.com|GCanvas Library}
  */
 
 import { Game, Painter, Camera3D, Gesture } from '@guinetik/gcanvas';
@@ -80,6 +86,15 @@ const CONFIG = {
   blowWhites: 235,           // Values above this become 255
 };
 
+/**
+ * Perfectionist's Nightmare Demo
+ * 
+ * Main game class for Day 24, visualizing the irrationality of π
+ * through rotating circles that never align.
+ * 
+ * @class PerfectionistNightmare
+ * @extends {Game}
+ */
 class PerfectionistNightmare extends Game {
   constructor(canvas) {
     super(canvas);
@@ -663,8 +678,10 @@ class PerfectionistNightmare extends Game {
 
 /**
  * Create Day 24 visualization
- * @param {HTMLCanvasElement} canvas
- * @returns {Object} Game instance with stop() method
+ * @param {HTMLCanvasElement} canvas - The canvas element to render to
+ * @returns {Object} Control object with stop() method and game instance
+ * @returns {Function} returns.stop - Function to stop the game
+ * @returns {PerfectionistNightmare} returns.game - The game instance
  */
 export default function day24(canvas) {
   const game = new PerfectionistNightmare(canvas);

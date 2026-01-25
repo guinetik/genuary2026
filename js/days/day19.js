@@ -1,17 +1,21 @@
 /**
- * Day 19: 16×16
+ * Genuary 2026 - Day 19
  * Prompt: "16×16"
- *
- * GROKKING NEURAL NETWORK
- *
+ * 
+ * @fileoverview GROKKING NEURAL NETWORK - Modular arithmetic learning
+ * 
  * A neural network learns modular arithmetic: (a + b) mod p = c
  * The 16×16 grid visualizes the hidden layer activations (256 neurons).
  * Watch the network transition from memorization to generalization (grokking).
- *
+ * 
  * The network starts by memorizing training examples, then suddenly
  * discovers the underlying pattern and generalizes to unseen examples.
- *
+ * 
  * Click to restart training. Hover to see current test case.
+ * 
+ * @author guinetik
+ * @see {@link https://genuary.art|Genuary}
+ * @see {@link https://gcanvas.guinetik.com|GCanvas Library}
  */
 
 import { Game, Painter, Motion, StateMachine, Tweenetik, Easing } from '@guinetik/gcanvas';
@@ -338,7 +342,14 @@ const CONFIG = {
 };
 
 /**
- * Grokking Neural Network Demo
+ * Day 19 Demo
+ * 
+ * Main game class for Day 19, creating a grokking neural network visualization
+ * that learns modular arithmetic. Features 16×16 grid visualization of
+ * hidden layer activations.
+ * 
+ * @class Day19Demo
+ * @extends {Game}
  */
 class Day19Demo extends Game {
   constructor(canvas) {
@@ -1579,8 +1590,10 @@ class Day19Demo extends Game {
 
 /**
  * Mount Day 19 into the provided canvas.
- * @param {HTMLCanvasElement} canvas
- * @returns {{ stop: () => void, game: Day19Demo }}
+ * @param {HTMLCanvasElement} canvas - The canvas element to render to
+ * @returns {Object} Control object with stop() method and game instance
+ * @returns {Function} returns.stop - Function to stop the game
+ * @returns {Day19Demo} returns.game - The game instance
  */
 export default function day19(canvas) {
   const game = new Day19Demo(canvas);

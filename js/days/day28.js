@@ -1,8 +1,9 @@
 /**
  * Genuary 2026 - Day 28
- * Prompt: "No libraries, no canvas, only HTML elements"
+ * Prompt: "No libraries, only HTML"
  * 
- * GENUARY 2006 - VAPORWAVE EDITION
+ * @fileoverview GENUARY 2006 - VAPORWAVE EDITION
+ * 
  * What if Genuary existed in 2006 and was designed by someone
  * who traveled back from the vaporwave future?
  * 
@@ -13,10 +14,19 @@
  * - VHS scanlines
  * - Floating geometric shapes
  * - Over-the-top everything
+ * 
+ * @author guinetik
+ * @see {@link https://genuary.art|Genuary}
+ * @see {@link https://gcanvas.guinetik.com|GCanvas Library}
  */
 
 /**
  * Genuary 2006 Vaporwave Demo
+ * 
+ * Main demo class for Day 28, creating a vaporwave aesthetic using
+ * only HTML elements (no canvas, no libraries).
+ * 
+ * @class Genuary2006Demo
  */
 class Genuary2006Demo {
   constructor(canvas) {
@@ -540,6 +550,17 @@ class Genuary2006Demo {
   }
 }
 
+/**
+ * Create Day 28 visualization
+ * 
+ * Factory function that creates and starts the Genuary 2006 demo.
+ * Returns a control object with stop() method for lifecycle management.
+ * 
+ * @param {HTMLCanvasElement} canvas - The canvas element (unused, HTML-only demo)
+ * @returns {Object} Control object with stop() method and game instance
+ * @returns {Function} returns.stop - Function to stop the game
+ * @returns {Genuary2006Demo} returns.game - The game instance
+ */
 export default function day28(canvas) {
   const game = new Genuary2006Demo(canvas);
   game.start();

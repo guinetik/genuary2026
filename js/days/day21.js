@@ -1,11 +1,12 @@
 /**
  * Genuary 2026 - Day 21
  * Prompt: "Bauhaus Poster"
- *
- * PROCEDURAL BAUHAUS - Farnsworth Edition
+ * 
+ * @fileoverview PROCEDURAL BAUHAUS - Farnsworth Edition
+ * 
  * An homage to the German art school's geometric aesthetic (1919-1933)
  * featuring Mies van der Rohe's Farnsworth House (1951).
- *
+ * 
  * Features:
  * - Farnsworth House SVG as architectural anchor
  * - Multi-layer parallax mouse tracking using gcanvas shapes
@@ -13,6 +14,10 @@
  * - Tweenetik animations for smooth entrances
  * - Subtle rotation and breathing animations
  * - Click to regenerate composition
+ * 
+ * @author guinetik
+ * @see {@link https://genuary.art|Genuary}
+ * @see {@link https://gcanvas.guinetik.com|GCanvas Library}
  */
 
 import {
@@ -716,6 +721,14 @@ class BauhausPosterDemo extends Game {
 
 /**
  * Create Day 21 visualization
+ * 
+ * Factory function that creates and starts the Bauhaus Poster demo.
+ * Returns a control object with stop() method for lifecycle management.
+ * 
+ * @param {HTMLCanvasElement} canvas - The canvas element to render to
+ * @returns {Object} Control object with stop() method and game instance
+ * @returns {Function} returns.stop - Function to stop the game
+ * @returns {BauhausPosterDemo} returns.game - The game instance
  */
 export default function day21(canvas) {
   const game = new BauhausPosterDemo(canvas);

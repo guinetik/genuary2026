@@ -1,12 +1,17 @@
 /**
  * Genuary 2026 - Day 17
  * Prompt: "Wallpaper group"
- *
- * POINCARÉ HYPERBOLIC WALLPAPER
+ * 
+ * @fileoverview POINCARÉ HYPERBOLIC WALLPAPER - Infinite tessellation
+ * 
  * WebGL shader-based hyperbolic tessellation that tiles the entire plane.
  * Uses Möbius transformations (circle inversions) for {n1,n2} tilings.
- *
+ * 
  * Click to cycle tilings. Drag to pan. Scroll to zoom.
+ * 
+ * @author guinetik
+ * @see {@link https://genuary.art|Genuary}
+ * @see {@link https://gcanvas.guinetik.com|GCanvas Library}
  */
 
 import { Game, WebGLRenderer } from '@guinetik/gcanvas';
@@ -192,6 +197,15 @@ const CONFIG = {
   hueSpeed: 0.02,
 };
 
+/**
+ * Poincaré Demo
+ * 
+ * Main game class for Day 17, creating infinite hyperbolic tessellations
+ * using WebGL shaders and Möbius transformations.
+ * 
+ * @class PoincareDemo
+ * @extends {Game}
+ */
 class PoincareDemo extends Game {
   constructor(canvas) {
     super(canvas);
@@ -530,8 +544,10 @@ class PoincareDemo extends Game {
 
 /**
  * Create Day 17 visualization
- * @param {HTMLCanvasElement} canvas
- * @returns {Object} Game instance with stop() method
+ * @param {HTMLCanvasElement} canvas - The canvas element to render to
+ * @returns {Object} Control object with stop() method and game instance
+ * @returns {Function} returns.stop - Function to stop the game
+ * @returns {PoincareDemo} returns.game - The game instance
  */
 export default function day17(canvas) {
   const game = new PoincareDemo(canvas);

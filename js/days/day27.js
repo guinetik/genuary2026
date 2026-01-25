@@ -1,10 +1,15 @@
 /**
  * Genuary 2026 - Day 27
  * Prompt: "Lifeform"
- *
- * GASEOUS SENTIENCE
+ * 
+ * @fileoverview GASEOUS SENTIENCE - Energy lifeform visualization
+ * 
  * A massive spherical ball of swirling energy from No Man's Sky.
  * Glowing core with ribbon-like tendrils orbiting around it.
+ * 
+ * @author guinetik
+ * @see {@link https://genuary.art|Genuary}
+ * @see {@link https://gcanvas.guinetik.com|GCanvas Library}
  */
 
 import { Game, Painter } from '@guinetik/gcanvas';
@@ -129,6 +134,15 @@ function rotateZ(x, y, z, angle) {
 
 /**
  * Gaseous Sentience Demo
+ */
+/**
+ * Gaseous Sentience Demo
+ * 
+ * Main game class for Day 27, creating a gaseous lifeform with
+ * glowing core and orbiting ribbon tendrils.
+ * 
+ * @class GaseousSentienceDemo
+ * @extends {Game}
  */
 class GaseousSentienceDemo extends Game {
   constructor(canvas) {
@@ -1532,6 +1546,14 @@ class GaseousSentienceDemo extends Game {
 
 /**
  * Create Day 27 visualization
+ * 
+ * Factory function that creates and starts the Gaseous Sentience demo.
+ * Returns a control object with stop() method for lifecycle management.
+ * 
+ * @param {HTMLCanvasElement} canvas - The canvas element to render to
+ * @returns {Object} Control object with stop() method and game instance
+ * @returns {Function} returns.stop - Function to stop the game
+ * @returns {GaseousSentienceDemo} returns.game - The game instance
  */
 export default function day27(canvas) {
   const game = new GaseousSentienceDemo(canvas);

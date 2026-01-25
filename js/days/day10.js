@@ -29,11 +29,11 @@ import {
 } from '@guinetik/gcanvas';
 
 const CONFIG = {
-  // Visual - Teal/Blue like the crochet
-  background: '#0a0a12',
+  // Visual - Terminal green aesthetic
+  background: '#000',
   trailAlpha: 0.08,
-  hueBase: 195,      // Teal
-  hueRange: 25,      // Variation toward blue
+  hueBase: 135,      // Green (#0f0)
+  hueRange: 20,      // Variation toward yellow-green
 
   // Camera - flat top-down view
   perspective: 800,
@@ -89,6 +89,16 @@ function clamp(v, min, max) {
   return Math.max(min, Math.min(max, v));
 }
 
+/**
+ * Day 10 Demo
+ * 
+ * Main game class for Day 10, creating a hyperbolic worldsheet using
+ * polar coordinates. Features 3D mesh generation, camera controls, and
+ * energy injection effects.
+ * 
+ * @class Day10Demo
+ * @extends {Game}
+ */
 class Day10Demo extends Game {
   constructor(canvas) {
     super(canvas);
@@ -160,7 +170,7 @@ class Day10Demo extends Game {
       velocitySpread: { x: spd, y: spd, z: spd },
       lifetime: CONFIG.excitationLifetime,
       size: CONFIG.excitationSize,
-      color: { r: 100, g: 200, b: 255, a: 1 },  // Teal/cyan
+      color: { r: 0, g: 255, b: 0, a: 1 },  // Terminal green (#0f0)
       shape: 'circle',
     }));
 
@@ -367,10 +377,10 @@ class Day10Demo extends Game {
       p.y = v.y;
       p.z = z;
 
-      // Teal/cyan colors like yarn fibers
-      p.color.r = Math.floor(80 + 40 * this.energy);
-      p.color.g = Math.floor(180 + 50 * v.rRatio);
-      p.color.b = 255;
+      // Terminal green colors - brighter with energy
+      p.color.r = 0;
+      p.color.g = Math.floor(180 + 75 * (1 - v.rRatio * 0.4)); // 180-255 (bright green)
+      p.color.b = Math.floor(0 + 20 * this.energy); // Slight blue tint only with energy
       p.color.a = 0.85;
     }
   }
@@ -434,10 +444,10 @@ class Day10Demo extends Game {
       for (const edge of edgeData) {
         const { p1, p2, avgR, avgZ } = edge;
 
-        // Color varies with radius and depth - teal to blue
+        // Color varies with radius and depth - green variations
         const hue = CONFIG.hueBase + avgR * CONFIG.hueRange;
-        const lightness = 40 + avgZ * 0.08;
-        const saturation = 70 + avgR * 20;
+        const lightness = 35 + avgZ * 0.1 + avgR * 15; // 35-60% (stays green)
+        const saturation = 90 + avgR * 10; // High saturation for vibrant green
 
         ctx.globalAlpha = 0.4 + avgR * 0.5;
         ctx.strokeStyle = `hsl(${hue}, ${saturation}%, ${clamp(lightness, 30, 65)}%)`;
@@ -455,8 +465,10 @@ class Day10Demo extends Game {
 
 /**
  * Create Day 10 visualization
- * @param {HTMLCanvasElement} canvas
- * @returns {{ stop: () => void, game: Day10Demo }} Game entry compatible with main.js lifecycle
+ * @param {HTMLCanvasElement} canvas - The canvas element to render to
+ * @returns {Object} Control object with stop() method and game instance
+ * @returns {Function} returns.stop - Function to stop the game
+ * @returns {Day10Demo} returns.game - The game instance
  */
 export default function day10(canvas) {
   const game = new Day10Demo(canvas);

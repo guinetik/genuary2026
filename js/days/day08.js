@@ -1,17 +1,21 @@
 /**
  * Genuary 2026 - Day 8
  * Prompt: "A City"
- *
- * FORGE STAR - A Stellar Foundry
- *
+ * 
+ * @fileoverview FORGE STAR - A Stellar Foundry
+ * 
  * An optimistic sci-fi vision of a Dyson-like megastructure:
  * a civilization that has industrialized a blue hypergiant star,
  * turning cosmic fury into abundance.
- *
+ * 
  * Not a monument, but an organ. Not colonization, but symbiosis.
  * Energy is infinite. Distance is a parameter. Pattern persists.
- *
+ * 
  * Drag to orbit. Watch the city breathe.
+ * 
+ * @author guinetik
+ * @see {@link https://genuary.art|Genuary}
+ * @see {@link https://gcanvas.guinetik.com|GCanvas Library}
  */
 
 import {
@@ -1221,6 +1225,16 @@ class OrbitalStation {
 // MAIN GAME CLASS
 // ============================================================================
 
+/**
+ * Forge Star Demo
+ * 
+ * Main game class for Day 8, creating a Dyson-like megastructure around
+ * a blue hypergiant star. Features orbital stations, starships, particle
+ * systems, and 3D camera controls.
+ * 
+ * @class ForgeStarDemo
+ * @extends {Game}
+ */
 class ForgeStarDemo extends Game {
   constructor(canvas) {
     super(canvas);
@@ -2643,8 +2657,14 @@ class ForgeStarDemo extends Game {
 
 /**
  * Create Day 8 visualization
- * @param {HTMLCanvasElement} canvas
- * @returns {Object} Game instance with stop() method
+ * 
+ * Factory function that creates and starts the Forge Star demo.
+ * Returns a control object with stop() method for lifecycle management.
+ * 
+ * @param {HTMLCanvasElement} canvas - The canvas element to render to
+ * @returns {Object} Control object with stop() method and game instance
+ * @returns {Function} returns.stop - Function to stop the game
+ * @returns {ForgeStarDemo} returns.game - The game instance
  */
 export default function day08(canvas) {
   console.log('[Day08] Initializing Forge Star...', canvas);

@@ -1,11 +1,18 @@
 /**
- * Day 11: Quine - Matrix Code Rain
- *
+ * Genuary 2026 - Day 11
+ * Prompt: "Quine"
+ * 
+ * @fileoverview Matrix Code Rain - Self-referential quine
+ * 
  * A quine outputs its own source code.
  * This file fetches itself and displays its own source as falling Matrix rain.
  * Each column shows a random line of code falling - readable syntax.
- *
+ * 
  * Mouse interaction: hover repels nearby drops
+ * 
+ * @author guinetik
+ * @see {@link https://genuary.art|Genuary}
+ * @see {@link https://gcanvas.guinetik.com|GCanvas Library}
  */
 import { Game, Painter } from "@guinetik/gcanvas";
 
@@ -17,6 +24,16 @@ const CONFIG = {
   glow: { blur: 10, color: "#0f0" },
 };
 
+/**
+ * Quine Demo
+ * 
+ * Main game class for Day 11, creating a Matrix-style code rain that
+ * displays the file's own source code. Features mouse interaction and
+ * falling text effects.
+ * 
+ * @class QuineDemo
+ * @extends {Game}
+ */
 class QuineDemo extends Game {
   constructor(canvas) {
     super(canvas);
@@ -252,6 +269,17 @@ class QuineDemo extends Game {
   }
 }
 
+/**
+ * Create Day 11 visualization
+ * 
+ * Factory function that creates and starts the Quine demo.
+ * Returns a control object with stop() method for lifecycle management.
+ * 
+ * @param {HTMLCanvasElement} canvas - The canvas element to render to
+ * @returns {Object} Control object with stop() method and game instance
+ * @returns {Function} returns.stop - Function to stop the game
+ * @returns {QuineDemo} returns.game - The game instance
+ */
 export default function day11(canvas) {
   const game = new QuineDemo(canvas);
   game.start();

@@ -1,12 +1,12 @@
 /**
  * Genuary 2026 - Day 2
  * Prompt: "Twelve principles of animation"
- *
- * ORIGAMI MURMURATION
  * 
- * A flock of paper cranes demonstrating animation principles
- * through emergent flocking behavior (boids algorithm).
- *
+ * @fileoverview ORIGAMI MURMURATION - Flocking paper cranes
+ * 
+ * A flock of paper cranes demonstrating animation principles through
+ * emergent flocking behavior using the boids algorithm.
+ * 
  * Principles demonstrated:
  * 1. Follow Through - Birds bank into turns, body lags behind
  * 2. Overlapping Action - Turns ripple through the flock in waves
@@ -17,12 +17,37 @@
  * 7. Anticipation - Leaders turn, followers react
  * 8. Staging - Flock creates dramatic shapes
  * 9. Timing - Rhythm of collective movement
- *
+ * 
  * Move mouse to guide the wind. Click to scatter.
+ * 
+ * @author guinetik
+ * @see {@link https://genuary.art|Genuary}
+ * @see {@link https://gcanvas.guinetik.com|GCanvas Library}
  */
 
 import { Game, Painter, Easing, Tweenetik } from '@guinetik/gcanvas';
 
+/**
+ * Configuration object for Day 2
+ * 
+ * @type {Object}
+ * @property {number} birdDensity - Birds per square pixel
+ * @property {number} minBirds - Minimum birds (ensures mobile has enough)
+ * @property {number} maxSpeed - Maximum bird speed
+ * @property {number} maxForce - Maximum steering force
+ * @property {number} separationDist - Distance for separation behavior
+ * @property {number} alignmentDist - Distance for alignment behavior
+ * @property {number} cohesionDist - Distance for cohesion behavior
+ * @property {number} separationWeight - Weight for separation force
+ * @property {number} alignmentWeight - Weight for alignment force
+ * @property {number} cohesionWeight - Weight for cohesion force
+ * @property {number} mouseAvoidWeight - Weight for mouse avoidance
+ * @property {number} mouseAvoidDist - Distance for mouse avoidance
+ * @property {number} birdSizeRatio - Bird size relative to canvas
+ * @property {number} cycleDuration - Seconds for full day/night cycle
+ * @property {Object} sky - Sky colors for different times of day
+ * @property {string[]} colors - Available bird colors
+ */
 const CONFIG = {
   // Flock
   birdDensity: 0.00012,  // Birds per square pixel
@@ -68,6 +93,11 @@ const CONFIG = {
 
 /**
  * A single origami crane in the flock
+ * 
+ * Implements boids behavior (separation, alignment, cohesion) with
+ * animation principles like follow-through, arcs, and squash & stretch.
+ * 
+ * @class Bird
  */
 class Bird {
   constructor(x, y, color) {
@@ -289,6 +319,16 @@ class Bird {
   }
 }
 
+/**
+ * Origami Murmuration Demo
+ * 
+ * Main game class for Day 2, managing a flock of origami cranes that
+ * demonstrate animation principles through emergent boids behavior.
+ * Features day/night cycle and mouse interaction.
+ * 
+ * @class OrigamiMurmurationDemo
+ * @extends {Game}
+ */
 class OrigamiMurmurationDemo extends Game {
   constructor(canvas) {
     super(canvas);
@@ -831,8 +871,14 @@ class OrigamiMurmurationDemo extends Game {
 
 /**
  * Create Day 2 visualization
- * @param {HTMLCanvasElement} canvas
- * @returns {Object} Game instance with stop() method
+ * 
+ * Factory function that creates and starts the Origami Murmuration demo.
+ * Returns a control object with stop() method for lifecycle management.
+ * 
+ * @param {HTMLCanvasElement} canvas - The canvas element to render to
+ * @returns {Object} Control object with stop() method and game instance
+ * @returns {Function} returns.stop - Function to stop the game
+ * @returns {OrigamiMurmurationDemo} returns.game - The game instance
  */
 export default function day02(canvas) {
   const game = new OrigamiMurmurationDemo(canvas);

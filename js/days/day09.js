@@ -1,12 +1,18 @@
 /**
- * Day 9: Crazy Automaton
- *
- * COMPETING MYCELIUM SIMULATION
+ * Genuary 2026 - Day 9
+ * Prompt: "Crazy automaton"
+ * 
+ * @fileoverview COMPETING MYCELIUM SIMULATION
+ * 
  * Multiple slime mold colonies compete for territory.
  * Each colony has its own color and agents that follow their own trails
  * while avoiding other species. Creates beautiful organic boundary patterns.
- *
+ * 
  * Click to spawn a new colony at that location.
+ * 
+ * @author guinetik
+ * @see {@link https://genuary.art|Genuary}
+ * @see {@link https://gcanvas.guinetik.com|GCanvas Library}
  */
 import { Game, Painter, ToggleButton } from "@guinetik/gcanvas";
 
@@ -85,6 +91,16 @@ class Colony {
 
 /**
  * Main competing mycelium simulation
+ */
+/**
+ * Day 9 Demo
+ * 
+ * Main game class for Day 9, creating a competing mycelium simulation
+ * with multiple slime mold colonies. Features agent-based pathfinding
+ * and territory competition.
+ * 
+ * @class Day09Demo
+ * @extends {Game}
  */
 class Day09Demo extends Game {
   constructor(canvas) {
@@ -953,9 +969,15 @@ class Day09Demo extends Game {
 }
 
 /**
- * Mount Day 09 into the provided canvas.
- * @param {HTMLCanvasElement} canvas
- * @returns {{ stop: () => void, game: Day09Demo }}
+ * Create Day 9 visualization
+ * 
+ * Factory function that creates and starts the Competing Mycelium demo.
+ * Returns a control object with stop() method for lifecycle management.
+ * 
+ * @param {HTMLCanvasElement} canvas - The canvas element to render to
+ * @returns {Object} Control object with stop() method and game instance
+ * @returns {Function} returns.stop - Function to stop the game
+ * @returns {Day09Demo} returns.game - The game instance
  */
 export default function day09(canvas) {
   const game = new Day09Demo(canvas);

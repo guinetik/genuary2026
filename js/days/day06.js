@@ -167,6 +167,15 @@ function clamp01(v) {
   return Math.max(0, Math.min(1, v));
 }
 
+/**
+ * Digital Lights Demo
+ * 
+ * Main game class for Day 6, creating a digital lava lamp using thermal
+ * simulation. Features lights toggle that fades heat, glow, and motion.
+ * 
+ * @class Day06DigitalLightsDemo
+ * @extends {Game}
+ */
 class Day06DigitalLightsDemo extends Game {
   /**
    * @param {HTMLCanvasElement} canvas
@@ -932,9 +941,15 @@ class Day06DigitalLightsDemo extends Game {
 }
 
 /**
- * Mount Day 06 into the provided canvas.
- * @param {HTMLCanvasElement} canvas
- * @returns {{ stop: () => void, game: Day06DigitalLightsDemo }}
+ * Create Day 6 visualization
+ * 
+ * Factory function that creates and starts the Digital Lights demo.
+ * Returns a control object with stop() method for lifecycle management.
+ * 
+ * @param {HTMLCanvasElement} canvas - The canvas element to render to
+ * @returns {Object} Control object with stop() method and game instance
+ * @returns {Function} returns.stop - Function to stop the game
+ * @returns {Day06DigitalLightsDemo} returns.game - The game instance
  */
 export default function day06(canvas) {
   const game = new Day06DigitalLightsDemo(canvas);

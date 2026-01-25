@@ -1,15 +1,21 @@
 /**
- * Day 26: Recursive Grids
- * Prompt: "Split the canvas into a grid and recurse on each cell again and again"
- *
- * Menger Sponge - the classic 3D recursive fractal.
+ * Genuary 2026 - Day 26
+ * Prompt: "Recursive Grids"
+ * 
+ * @fileoverview Menger Sponge - 3D recursive fractal
+ * 
+ * The classic 3D recursive fractal.
  * 8000 particles (1 per cube) assemble from chaos into the fractal structure.
  * Particle size scales with cube depth - smaller cubes = smaller dots.
- *
+ * 
  * Controls:
  * - Drag: Rotate camera
  * - Double-click: Scatter and reassemble
  * - Scroll: Manual zoom
+ * 
+ * @author guinetik
+ * @see {@link https://genuary.art|Genuary}
+ * @see {@link https://gcanvas.guinetik.com|GCanvas Library}
  */
 
 import { Game, Camera3D, ParticleSystem, Painter, Gesture } from "@guinetik/gcanvas";
@@ -117,7 +123,13 @@ function generateMengerPositions(
 }
 
 /**
- * Day 26 Demo - Menger Sponge with Particle Vertices
+ * Day 26 Demo
+ * 
+ * Main game class for Day 26, creating a Menger Sponge fractal using
+ * 8000 particles that assemble from chaos into the recursive structure.
+ * 
+ * @class Day26Demo
+ * @extends {Game}
  */
 class Day26Demo extends Game {
   constructor(canvas) {
@@ -489,6 +501,17 @@ class Day26Demo extends Game {
   }
 }
 
+/**
+ * Create Day 26 visualization
+ * 
+ * Factory function that creates and starts the Menger Sponge demo.
+ * Returns a control object with stop() method for lifecycle management.
+ * 
+ * @param {HTMLCanvasElement} canvas - The canvas element to render to
+ * @returns {Object} Control object with stop() method and game instance
+ * @returns {Function} returns.stop - Function to stop the game
+ * @returns {Day26Demo} returns.game - The game instance
+ */
 export default function day26(canvas) {
   const game = new Day26Demo(canvas);
   game.start();

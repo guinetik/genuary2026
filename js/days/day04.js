@@ -1,11 +1,16 @@
 /**
  * Genuary 2026 - Day 4
  * Prompt: "Lowres"
- *
- * STREET ART WALL
+ * 
+ * @fileoverview STREET ART WALL - Infinite scrolling pixelated scene
+ * 
  * An infinite scrolling street scene with pixelated pattern murals.
  * Everything scrolls: wall patterns, lamp posts, sidewalk slabs.
  * Camera returns to default after mouse release.
+ * 
+ * @author guinetik
+ * @see {@link https://genuary.art|Genuary}
+ * @see {@link https://gcanvas.guinetik.com|GCanvas Library}
  */
 
 import { Game, Camera3D, Patterns, Painter, Fractals, SpriteSheet } from '@guinetik/gcanvas';
@@ -97,6 +102,16 @@ const CONFIG = {
   hue: 135,
 };
 
+/**
+ * Street Art Demo
+ * 
+ * Main game class for Day 4, creating an infinite scrolling street scene
+ * with pixelated pattern murals, lamp posts, sidewalk slabs, and a runner sprite.
+ * Features 3D camera controls and procedural building generation.
+ * 
+ * @class StreetArtDemo
+ * @extends {Game}
+ */
 class StreetArtDemo extends Game {
   constructor(canvas) {
     super(canvas);
@@ -1132,6 +1147,17 @@ class StreetArtDemo extends Game {
   }
 }
 
+/**
+ * Create Day 4 visualization
+ * 
+ * Factory function that creates and starts the Street Art demo.
+ * Returns a control object with stop() method for lifecycle management.
+ * 
+ * @param {HTMLCanvasElement} canvas - The canvas element to render to
+ * @returns {Object} Control object with stop() method and game instance
+ * @returns {Function} returns.stop - Function to stop the game
+ * @returns {StreetArtDemo} returns.game - The game instance
+ */
 export default function day04(canvas) {
   const game = new StreetArtDemo(canvas);
   game.start();

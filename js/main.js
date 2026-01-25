@@ -1,11 +1,18 @@
 /**
  * Genuary 2026 - Main Application Controller
- *
+ * 
+ * @fileoverview Bootstrap and lifecycle management for Genuary showcase
+ * 
  * Handles:
- * - Dynamic section generation
- * - Snap scroll detection
- * - Game lifecycle (mount/unmount)
- * - Navigation (sidebar, hamburger, arrows)
+ * - Dynamic section generation for all 31 days
+ * - Snap scroll detection and navigation
+ * - Game lifecycle (mount/unmount) for lazy loading
+ * - Navigation (sidebar, hamburger, arrow keys)
+ * - Mobile UI and fullscreen support
+ * 
+ * @author guinetik
+ * @see {@link https://genuary.art|Genuary}
+ * @see {@link https://gcanvas.guinetik.com|GCanvas Library}
  */
 
 import { PROMPTS, TOTAL_DAYS, getPrompt, getInterpretation } from './prompts.js';

@@ -1,6 +1,15 @@
 /**
  * Genuary 2026 Prompts
- * Official prompts from genuary.art
+ * 
+ * @fileoverview Official prompts and creative interpretations
+ * 
+ * Contains the official Genuary 2026 prompts and our creative
+ * interpretations for each day. Used by the main application
+ * to display prompt information in the UI.
+ * 
+ * @module prompts
+ * @author guinetik
+ * @see {@link https://genuary.art|Genuary}
  */
 
 export const PROMPTS = {
@@ -65,14 +74,14 @@ export const INTERPRETATIONS = {
   21: 'Procedural Bauhaus: Living geometric composition with primary colors and breathing shapes. Parallax layers respond to mouse, click to regenerate.',
   22: 'Etch-a-Sketch: terminal-style drawing toy with rotary knobs. Drag to draw, shake to clear, [S] exports SVG for pen plotters.',
   23: 'Liquid Glass: Apple-inspired metaball blobs with frosted glass refraction, chromatic aberration, and fresnel rim lighting. Move mouse to attract.',
-  24: 'Spirograph Nightmare: π (irrational) creates patterns that NEVER close. 3.14 (rational) eventually meets itself. Click to toggle and watch the difference.',
+  24: 'Mathematician\'s Bad Dream: watch an irrational spiral grow from z(θ) = e^(θi) + e^(πθi) and engulf you with patterns that never close. Inspired by Pi (1998). Drag to orbit, scroll to zoom.',
   25: 'Primordial Soup: Simple molecules in a warm ocean, energized by lightning and hydrothermal vents. Watch amino acids and peptides emerge from chaos.',
   26: 'Menger Sponge: 8,000 particles assemble into the 3D recursive fractal, one cube at a time. Double-click to scatter and watch them reform. Drag to orbit, scroll to zoom.',
   27: 'Gaseous Sentience: click to feed it colored nebulae, watch it grow complex. It slowly starves as it radiates.',
   28: 'GENUARY 2006: No canvas, only HTML! What if Genuary existed in 2006? Synthwave sunset, neon grid, VHS scanlines, and maximum vaporwave energy. Click to visit.',
   29: 'SEIR epidemic model with viral mutation. Click agent to infect, watch variants emerge. Hospital zone (cyan) forces mutation pressure. [i] for analytics.',
   30: 'QUIET ANALYZER: The quieter the sound, the CRAZIER the line goes. Loud = calm. Silence = chaos. It\'s not a bug, it\'s a feature!',
-  31: 'Domain Warping: psychedelic flowing patterns created entirely in GLSL. Layers of noise distort space itself, creating organic fluid motion. Move mouse to disturb.'
+  31: 'Finale: A synthwave tour into a black hole. Fractal skies, passing billboards, birds overhead. Move mouse to look around.'
 };
 
 /**
@@ -97,4 +106,4 @@ export function getInterpretation(day) {
  * Total number of Genuary days to display
  * (Expand as implementations are added)
  */
-export const TOTAL_DAYS = 23;
+export const TOTAL_DAYS = 31;

@@ -1,17 +1,22 @@
 /**
  * Genuary 2026 - Day 7
- * Prompt: Boolean algebra. Get inspired by Boolean algebra, in any way.
- *
- * BITWISE FRACTALS
+ * Prompt: "Boolean algebra"
+ * 
+ * @fileoverview BITWISE FRACTALS - Boolean operations create fractal patterns
+ * 
  * Sierpinski triangles and other fractal patterns emerge from simple
  * bitwise boolean operations on pixel coordinates.
- *
+ * 
  * The formula (x & y) creates a Sierpinski triangle.
  * (x ^ y) creates XOR patterns. Combining them creates infinite complexity.
- *
+ * 
  * Interaction:
  * - Click: cycle through different bitwise formulas
  * - Mouse: distort the pattern
+ * 
+ * @author guinetik
+ * @see {@link https://genuary.art|Genuary}
+ * @see {@link https://gcanvas.guinetik.com|GCanvas Library}
  */
 
 import { Game, Painter, Screen } from "@guinetik/gcanvas";
@@ -169,6 +174,16 @@ const FORMULAS = [
   },
 ];
 
+/**
+ * Bitwise Fractals Demo
+ * 
+ * Main game class for Day 7, creating fractal patterns using bitwise
+ * boolean operations on pixel coordinates. Features multiple formulas
+ * and mouse distortion effects.
+ * 
+ * @class BitwiseFractalsDemo
+ * @extends {Game}
+ */
 class BitwiseFractalsDemo extends Game {
   constructor(canvas) {
     super(canvas);
@@ -456,9 +471,15 @@ class BitwiseFractalsDemo extends Game {
 }
 
 /**
- * Mount Day 07 into the provided canvas.
- * @param {HTMLCanvasElement} canvas
- * @returns {{ stop: () => void, game: BitwiseFractalsDemo }}
+ * Create Day 7 visualization
+ * 
+ * Factory function that creates and starts the Bitwise Fractals demo.
+ * Returns a control object with stop() method for lifecycle management.
+ * 
+ * @param {HTMLCanvasElement} canvas - The canvas element to render to
+ * @returns {Object} Control object with stop() method and game instance
+ * @returns {Function} returns.stop - Function to stop the game
+ * @returns {BitwiseFractalsDemo} returns.game - The game instance
  */
 export default function day07(canvas) {
   const game = new BitwiseFractalsDemo(canvas);

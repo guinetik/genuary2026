@@ -1,13 +1,13 @@
 /**
  * Genuary 2026 - Day 23
  * Prompt: "Transparency"
- * Credit: PaoloCurtoni
- *
- * LIQUID! AT THE DISCO
+ * 
+ * @fileoverview LIQUID! AT THE DISCO - Interactive glass lens shader
+ * 
  * Interactive glass lens shader with proper fresnel and refraction physics,
  * floating over an audio-reactive spectrum analyzer background.
  * Click to spawn blobs. Drag them around. Release for ripples. [R] to restart.
- *
+ * 
  * Features:
  * - Unlimited spawnable blobs (up to MAX_BLOBS)
  * - IQ's superellipse SDF design
@@ -16,6 +16,11 @@
  * - Chromatic aberration with lens distortion
  * - Water ripple effect on release
  * - Billiard-style physics
+ * 
+ * @author guinetik
+ * @credit PaoloCurtoni - Shader inspiration
+ * @see {@link https://genuary.art|Genuary}
+ * @see {@link https://gcanvas.guinetik.com|GCanvas Library}
  */
 
 import { Game, WebGLRenderer } from '@guinetik/gcanvas';
@@ -99,6 +104,12 @@ function createBlob(x, y) {
 
 /**
  * Liquid Glass Demo
+ * 
+ * Main game class for Day 23, managing WebGL shader rendering,
+ * blob physics, audio spectrum analysis, and user interaction.
+ * 
+ * @class LiquidGlassDemo
+ * @extends {Game}
  */
 class LiquidGlassDemo extends Game {
   constructor(canvas) {
@@ -751,8 +762,14 @@ class LiquidGlassDemo extends Game {
 
 /**
  * Create Day 23 visualization
- * @param {HTMLCanvasElement} canvas
- * @returns {Object} Game instance with stop() method
+ * 
+ * Factory function that creates and starts the Liquid Glass demo.
+ * Returns a control object with stop() method for lifecycle management.
+ * 
+ * @param {HTMLCanvasElement} canvas - The canvas element to render to
+ * @returns {Object} Control object with stop() method and game instance
+ * @returns {Function} returns.stop - Function to stop the game
+ * @returns {LiquidGlassDemo} returns.game - The game instance
  */
 export default function day23(canvas) {
   const game = new LiquidGlassDemo(canvas);

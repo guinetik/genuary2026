@@ -1,20 +1,43 @@
 /**
  * Genuary 2026 - Day 3
  * Prompt: "Fibonacci forever"
- *
- * GOLDEN VORTEX
- *
- * A living, breathing phyllotaxis pattern.
- * Seeds pulse, spiral, and react to your mouse.
- * The golden angle creates infinite spiraling beauty.
- *
+ * 
+ * @fileoverview GOLDEN VORTEX - Phyllotaxis pattern visualization
+ * 
+ * A living, breathing phyllotaxis pattern. Seeds pulse, spiral, and react
+ * to your mouse. The golden angle creates infinite spiraling beauty.
+ * 
  * Move mouse to disturb. Click to explode.
- *
+ * 
  * Showcases: Painter utilities (shapes, colors, effects, gradients)
+ * 
+ * @author guinetik
+ * @see {@link https://genuary.art|Genuary}
+ * @see {@link https://gcanvas.guinetik.com|GCanvas Library}
  */
 
 import { Game, Painter } from "@guinetik/gcanvas";
 
+/**
+ * Configuration object for Day 3
+ * 
+ * @type {Object}
+ * @property {number} goldenAngle - Golden angle in degrees (137.507...)
+ * @property {number} numSeeds - Total number of seeds in the pattern
+ * @property {number} baseRadiusRatio - Base seed radius as ratio of min dimension
+ * @property {number} spacingRatio - Spacing between seeds as ratio of min dimension
+ * @property {number} pulseSpeed - Pulse animation speed
+ * @property {number} rotationSpeed - Global rotation speed
+ * @property {number} waveSpeed - Wave animation speed
+ * @property {number} waveAmplitudeRatio - Wave amplitude as ratio of min dimension
+ * @property {number} hueSpeed - Color hue rotation speed
+ * @property {number} saturation - HSL saturation value
+ * @property {number} mouseRadiusRatio - Mouse interaction radius as ratio of min dimension
+ * @property {number} mouseForceRatio - Mouse force strength as ratio of min dimension
+ * @property {number} explosionForceRatio - Explosion force as ratio of min dimension
+ * @property {number} explosionDecay - Explosion velocity decay factor
+ * @property {number} centerSizeRatio - Center glow size as ratio of min dimension
+ */
 const CONFIG = {
   goldenAngle: 137.5077640500378,
   numSeeds: 1000,
@@ -47,12 +70,18 @@ const TAU = Math.PI * 2;
 const GOLDEN_ANGLE_RAD = (CONFIG.goldenAngle * Math.PI) / 180;
 
 /**
- * GoldenVortexDemo - Phyllotaxis visualization using Painter utilities
- * @extends Game
+ * Golden Vortex Demo
+ * 
+ * Main game class for Day 3, creating a phyllotaxis pattern using the
+ * golden angle. Features pulsing seeds, mouse interaction, and explosion effects.
+ * 
+ * @class GoldenVortexDemo
+ * @extends {Game}
  */
 class GoldenVortexDemo extends Game {
   /**
    * Create the demo
+   * 
    * @param {HTMLCanvasElement} canvas - Target canvas element
    */
   constructor(canvas) {
@@ -375,9 +404,15 @@ class GoldenVortexDemo extends Game {
 }
 
 /**
- * Initialize Day 3 demo
- * @param {HTMLCanvasElement} canvas - Target canvas element
- * @returns {{stop: Function, game: GoldenVortexDemo}} Demo control object
+ * Create Day 3 visualization
+ * 
+ * Factory function that creates and starts the Golden Vortex demo.
+ * Returns a control object with stop() method for lifecycle management.
+ * 
+ * @param {HTMLCanvasElement} canvas - The canvas element to render to
+ * @returns {Object} Control object with stop() method and game instance
+ * @returns {Function} returns.stop - Function to stop the game
+ * @returns {GoldenVortexDemo} returns.game - The game instance
  */
 export default function day03(canvas) {
   const game = new GoldenVortexDemo(canvas);

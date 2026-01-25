@@ -1,16 +1,23 @@
 /**
- * Day 16: Order and Disorder - Maxwell's Demon
- *
+ * Genuary 2026 - Day 16
+ * Prompt: "Order and disorder"
+ * 
+ * @fileoverview Maxwell's Demon - Particle sorting visualization
+ * 
  * A thought experiment demon that sorts hot/cold gas particles,
  * seemingly violating the second law of thermodynamics!
- *
+ * 
  * Left chamber = Hot (red)
  * Right chamber = Cold (blue)
  * Demon in middle controls a door, letting fast particles left
  * and slow particles right.
- *
+ * 
  * The perfect visualization for "Order and Disorder" - the demon
  * creates order from chaos by sorting particles by temperature.
+ * 
+ * @author guinetik
+ * @see {@link https://genuary.art|Genuary}
+ * @see {@link https://gcanvas.guinetik.com|GCanvas Library}
  */
 import {
   Game,
@@ -421,6 +428,15 @@ const CONFIG = {
   },
 };
 
+/**
+ * Day 16 Demo
+ * 
+ * Main game class for Day 16, creating Maxwell's Demon visualization
+ * with particle sorting, fluid simulation, and demon character animation.
+ * 
+ * @class Day16Demo
+ * @extends {Game}
+ */
 class Day16Demo extends Game {
   constructor(canvas) {
     super(canvas);
@@ -1510,6 +1526,17 @@ class Day16Demo extends Game {
   }
 }
 
+/**
+ * Create Day 16 visualization
+ * 
+ * Factory function that creates and starts the Maxwell's Demon demo.
+ * Returns a control object with stop() method for lifecycle management.
+ * 
+ * @param {HTMLCanvasElement} canvas - The canvas element to render to
+ * @returns {Object} Control object with stop() method and game instance
+ * @returns {Function} returns.stop - Function to stop the game
+ * @returns {Day16Demo} returns.game - The game instance
+ */
 export default function day16(canvas) {
   console.log("[Day16] Module loaded, creating game...");
   const game = new Day16Demo(canvas);

@@ -1,13 +1,13 @@
 /**
  * Genuary 2026 - Day 22
  * Prompt: "Pen plotter ready"
- * Credit: Sophia (fractal kitty)
- *
- * ETCH-A-SKETCH
+ * 
+ * @fileoverview ETCH-A-SKETCH - Terminal-style drawing toy
+ * 
  * Terminal-style drawing toy with two draggable knobs.
  * Left knob controls X, right knob controls Y.
  * Output is a single continuous line - perfect for pen plotters!
- *
+ * 
  * Controls:
  * - Drag knobs to draw
  * - Arrow keys for precise control
@@ -17,6 +17,11 @@
  * - Press 'P' to load an SVG file for auto-draw
  * - Press '1' for logo, '2' for star, '3' for spiral, '4' for house
  * - Press 'ESC' to stop auto-drawing
+ * 
+ * @author guinetik
+ * @credit Sophia (fractal kitty) - Inspiration
+ * @see {@link https://genuary.art|Genuary}
+ * @see {@link https://gcanvas.guinetik.com|GCanvas Library}
  */
 
 import {
@@ -1328,6 +1333,14 @@ class EtchASketchDemo extends Game {
 
 /**
  * Create Day 22 visualization
+ * 
+ * Factory function that creates and starts the Etch-a-Sketch demo.
+ * Returns a control object with stop() method for lifecycle management.
+ * 
+ * @param {HTMLCanvasElement} canvas - The canvas element to render to
+ * @returns {Object} Control object with stop() method and game instance
+ * @returns {Function} returns.stop - Function to stop the game
+ * @returns {EtchASketchDemo} returns.game - The game instance
  */
 export default function day22(canvas) {
   const game = new EtchASketchDemo(canvas);

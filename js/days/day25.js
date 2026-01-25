@@ -85,9 +85,11 @@ const CONFIG = {
   lightningEnergy: 0.4, // Temperature boost
   lightningRadius: 150,
 
-  // Visual
-  bgColor: '#050510',
-  ventGlow: 0.4,
+  // Visual - Terminal green aesthetic
+  bgColor: '#000',
+  ventGlow: 0.3,
+  hueBase: 135,      // Green (#0f0)
+  hueRange: 30,       // Variation for differentiation
 
   // Ambient particles
   bubbleCount: 40,
@@ -103,13 +105,14 @@ const TIERS = {
   PEPTIDE: 3, // Di/tripeptides
 };
 
-// Atom visual properties
+// Atom visual properties - Terminal green spectrum
+// Differentiated by hue offset, saturation, and lightness
 const ATOMS = {
-  C: { radius: 18, hue: 30, sat: 10, light: 35, name: 'Carbon' },
-  H: { radius: 10, hue: 200, sat: 5, light: 90, name: 'Hydrogen' },
-  O: { radius: 16, hue: 0, sat: 70, light: 50, name: 'Oxygen' },
-  N: { radius: 15, hue: 220, sat: 70, light: 55, name: 'Nitrogen' },
-  S: { radius: 20, hue: 55, sat: 75, light: 50, name: 'Sulfur' },
+  C: { radius: 18, hue: 135, sat: 60, light: 45, name: 'Carbon' },      // Base green
+  H: { radius: 10, hue: 150, sat: 40, light: 70, name: 'Hydrogen' },  // Yellow-green, lighter
+  O: { radius: 16, hue: 120, sat: 80, light: 50, name: 'Oxygen' },      // Cyan-green, vibrant
+  N: { radius: 15, hue: 145, sat: 70, light: 55, name: 'Nitrogen' },  // Yellow-green, medium
+  S: { radius: 20, hue: 125, sat: 75, light: 60, name: 'Sulfur' },    // Blue-green, brighter
 };
 
 // Molecule templates - primordial soup ingredients
@@ -656,10 +659,11 @@ class Molecule3D extends GameObject {
       const avgZ = (a1.worldZ + a2.worldZ) / 2;
       const depthLightMod = Math.max(-10, Math.min(10, avgZ / 40));
 
-      // Temperature affects bond color
-      const tempHue = 200 - this.temperature * 180;
-      const bondLight = 45 + depthLightMod;
-      ctx.strokeStyle = `hsl(${tempHue}, 35%, ${bondLight}%)`;
+      // Temperature affects bond color - green spectrum
+      const tempHue = Math.round(CONFIG.hueBase + (this.temperature - 0.5) * CONFIG.hueRange);
+      const bondLight = Math.round(40 + depthLightMod + this.temperature * 15);
+      const bondSat = Math.round(50 + this.temperature * 30);
+      ctx.strokeStyle = `hsl(${tempHue}, ${bondSat}%, ${bondLight}%)`;
       ctx.lineWidth = 3 * avgScale;
       ctx.lineCap = 'round';
 
@@ -703,13 +707,13 @@ class Molecule3D extends GameObject {
     // Depth affects lightness
     const depthLightMod = Math.max(-15, Math.min(10, atom.worldZ / 30));
 
-    // Temperature-shifted colors
-    const tempShift = (this.temperature - 0.5) * 40;
-    const hue = props.hue + tempShift;
-    const sat = props.sat + this.temperature * 20;
-    const light = props.light + depthLightMod;
+    // Temperature-shifted colors - subtle green variations
+    const tempShift = (this.temperature - 0.5) * 15; // Smaller shift for cohesion
+    const hue = Math.round(props.hue + tempShift);
+    const sat = Math.round(Math.min(100, props.sat + this.temperature * 15));
+    const light = Math.round(props.light + depthLightMod);
 
-    // Reaction flash
+    // Reaction flash - green glow
     if (this.flash > 0) {
       const flashRadius = radius * (2 + this.flash);
       const flashGrad = ctx.createRadialGradient(
@@ -720,8 +724,8 @@ class Molecule3D extends GameObject {
         atom.screenY,
         flashRadius
       );
-      flashGrad.addColorStop(0, `rgba(255, 255, 200, ${this.flash * 0.9})`);
-      flashGrad.addColorStop(0.4, `rgba(255, 180, 80, ${this.flash * 0.5})`);
+      flashGrad.addColorStop(0, `rgba(0, 255, 100, ${this.flash * 0.8})`);
+      flashGrad.addColorStop(0.4, `rgba(0, 255, 50, ${this.flash * 0.4})`);
       flashGrad.addColorStop(1, 'transparent');
       ctx.fillStyle = flashGrad;
       ctx.beginPath();
@@ -729,23 +733,36 @@ class Molecule3D extends GameObject {
       ctx.fill();
     }
 
-    // Atom sphere with gradient
+    // Atom sphere with terminal-style gradient (sharper, less photorealistic)
     const grad = ctx.createRadialGradient(
-      atom.screenX - radius * 0.3,
-      atom.screenY - radius * 0.3,
+      atom.screenX - radius * 0.4,
+      atom.screenY - radius * 0.4,
       0,
       atom.screenX,
       atom.screenY,
       radius
     );
-    grad.addColorStop(0, `hsl(${hue}, ${sat * 0.3}%, ${Math.min(light + 35, 95)}%)`);
-    grad.addColorStop(0.4, `hsl(${hue}, ${sat}%, ${light}%)`);
-    grad.addColorStop(1, `hsl(${hue}, ${sat + 10}%, ${Math.max(light - 20, 10)}%)`);
+    // More defined gradient stops for terminal aesthetic - round all HSL values
+    const sat1 = Math.round(Math.min(sat + 20, 100));
+    const light1 = Math.round(Math.min(light + 30, 90));
+    const light2 = Math.round(Math.max(light - 15, 20));
+    const sat2 = Math.round(Math.min(sat + 10, 100));
+    const light3 = Math.round(Math.max(light - 25, 10));
+    
+    grad.addColorStop(0, `hsl(${hue}, ${sat1}%, ${light1}%)`);
+    grad.addColorStop(0.3, `hsl(${hue}, ${sat}%, ${light}%)`);
+    grad.addColorStop(0.7, `hsl(${hue}, ${sat}%, ${light2}%)`);
+    grad.addColorStop(1, `hsl(${hue}, ${sat2}%, ${light3}%)`);
 
     ctx.fillStyle = grad;
     ctx.beginPath();
     ctx.arc(atom.screenX, atom.screenY, radius, 0, TAU);
     ctx.fill();
+    
+    // Add subtle outline for definition (terminal style)
+    ctx.strokeStyle = `hsla(${hue}, ${sat}%, ${light}%, 0.3)`;
+    ctx.lineWidth = 0.5;
+    ctx.stroke();
   }
 
   /**
@@ -939,7 +956,7 @@ class PrimordialSoupDemo extends Game {
       vx: (Math.random() - 0.5) * 10,
       vy: (Math.random() - 0.5) * 5,
       alpha: 0.05 + Math.random() * 0.15,
-      hue: Math.random() < 0.3 ? 30 : 200,
+      hue: Math.random() < 0.5 ? CONFIG.hueBase - 10 : CONFIG.hueBase + 10, // Green variations
     };
   }
 
@@ -1277,17 +1294,20 @@ class PrimordialSoupDemo extends Game {
     const cx = w / 2;
     const cy = h / 2;
 
-    // Gradient background
+    // Pure black background with subtle green vignette
+    ctx.fillStyle = CONFIG.bgColor;
+    ctx.fillRect(0, 0, w, h);
+    
+    // Subtle green gradient overlay (very dark)
     const bgGrad = ctx.createLinearGradient(0, 0, 0, h);
-    bgGrad.addColorStop(0, '#030612');
-    bgGrad.addColorStop(0.5, '#050510');
-    bgGrad.addColorStop(0.8, '#0a0508');
-    bgGrad.addColorStop(1, '#1a0505');
+    bgGrad.addColorStop(0, 'rgba(0, 15, 5, 0.3)');
+    bgGrad.addColorStop(0.5, 'rgba(0, 10, 5, 0.2)');
+    bgGrad.addColorStop(1, 'rgba(0, 20, 10, 0.4)');
     ctx.fillStyle = bgGrad;
     ctx.fillRect(0, 0, w, h);
 
-    // Caustic light patterns
-    ctx.globalAlpha = 0.03;
+    // Subtle green light patterns (generative, not realistic)
+    ctx.globalAlpha = 0.02;
     const causticScale = 120;
     const t = this.totalTime * CONFIG.causticSpeed;
     for (let i = 0; i < 5; i++) {
@@ -1298,34 +1318,34 @@ class PrimordialSoupDemo extends Game {
       const cy2 = h * 0.3 + Math.cos(phase * 0.5 + 1) * h * 0.1;
 
       const causticGrad = ctx.createRadialGradient(cx1, cy1, 0, cx1, cy1, causticScale);
-      causticGrad.addColorStop(0, 'rgba(100, 180, 255, 1)');
+      causticGrad.addColorStop(0, 'rgba(0, 255, 100, 1)');
       causticGrad.addColorStop(1, 'transparent');
       ctx.fillStyle = causticGrad;
       ctx.fillRect(0, 0, w, h);
 
       const causticGrad2 = ctx.createRadialGradient(cx2, cy2, 0, cx2, cy2, causticScale * 0.8);
-      causticGrad2.addColorStop(0, 'rgba(150, 200, 255, 1)');
+      causticGrad2.addColorStop(0, 'rgba(0, 255, 150, 1)');
       causticGrad2.addColorStop(1, 'transparent');
       ctx.fillStyle = causticGrad2;
       ctx.fillRect(0, 0, w, h);
     }
     ctx.globalAlpha = 1;
 
-    // Hydrothermal vent glow
+    // Energy source glow - green (generative, not realistic vent)
     const ventGrad = ctx.createRadialGradient(cx, h + 50, 0, cx, h + 50, h * 0.7);
-    ventGrad.addColorStop(0, `rgba(255, 100, 30, ${CONFIG.ventGlow})`);
-    ventGrad.addColorStop(0.3, `rgba(255, 60, 10, ${CONFIG.ventGlow * 0.5})`);
-    ventGrad.addColorStop(0.6, `rgba(200, 30, 5, ${CONFIG.ventGlow * 0.2})`);
+    ventGrad.addColorStop(0, `rgba(0, 255, 100, ${CONFIG.ventGlow})`);
+    ventGrad.addColorStop(0.3, `rgba(0, 255, 50, ${CONFIG.ventGlow * 0.5})`);
+    ventGrad.addColorStop(0.6, `rgba(0, 200, 30, ${CONFIG.ventGlow * 0.2})`);
     ventGrad.addColorStop(1, 'transparent');
     ctx.fillStyle = ventGrad;
     ctx.fillRect(0, 0, w, h);
 
-    // Secondary vent hotspots
+    // Secondary energy hotspots
     const vent2Grad = ctx.createRadialGradient(
       cx - w * 0.2, h + 30, 0,
       cx - w * 0.2, h + 30, h * 0.3
     );
-    vent2Grad.addColorStop(0, `rgba(255, 80, 20, ${CONFIG.ventGlow * 0.4})`);
+    vent2Grad.addColorStop(0, `rgba(0, 255, 80, ${CONFIG.ventGlow * 0.4})`);
     vent2Grad.addColorStop(1, 'transparent');
     ctx.fillStyle = vent2Grad;
     ctx.fillRect(0, 0, w, h);
@@ -1334,15 +1354,16 @@ class PrimordialSoupDemo extends Game {
       cx + w * 0.25, h + 40, 0,
       cx + w * 0.25, h + 40, h * 0.35
     );
-    vent3Grad.addColorStop(0, `rgba(255, 60, 10, ${CONFIG.ventGlow * 0.3})`);
+    vent3Grad.addColorStop(0, `rgba(0, 255, 60, ${CONFIG.ventGlow * 0.3})`);
     vent3Grad.addColorStop(1, 'transparent');
     ctx.fillStyle = vent3Grad;
     ctx.fillRect(0, 0, w, h);
 
-    // Floating particles (behind molecules)
+    // Floating particles (behind molecules) - green spectrum
     for (const p of this.particles) {
       const depthScale = 0.5 + ((p.z + 200) / 400) * 0.5;
-      ctx.fillStyle = `hsla(${p.hue}, 30%, 60%, ${p.alpha * depthScale})`;
+      // Use the stored green hue variation
+      ctx.fillStyle = `hsla(${p.hue}, 50%, 50%, ${p.alpha * depthScale})`;
       ctx.beginPath();
       ctx.arc(p.x, p.y, p.size * depthScale, 0, TAU);
       ctx.fill();
@@ -1361,15 +1382,15 @@ class PrimordialSoupDemo extends Game {
       const flashGrad = ctx.createRadialGradient(lx, ly, 0, lx, ly, 250);
       flashGrad.addColorStop(
         0,
-        `rgba(220, 240, 255, ${this.lightningFlash.intensity * 0.9})`
+        `rgba(0, 255, 150, ${this.lightningFlash.intensity * 0.9})`
       );
       flashGrad.addColorStop(
         0.2,
-        `rgba(180, 210, 255, ${this.lightningFlash.intensity * 0.5})`
+        `rgba(0, 255, 100, ${this.lightningFlash.intensity * 0.5})`
       );
       flashGrad.addColorStop(
         0.5,
-        `rgba(100, 150, 255, ${this.lightningFlash.intensity * 0.2})`
+        `rgba(0, 200, 80, ${this.lightningFlash.intensity * 0.2})`
       );
       flashGrad.addColorStop(1, 'transparent');
       ctx.fillStyle = flashGrad;
@@ -1387,7 +1408,7 @@ class PrimordialSoupDemo extends Game {
       mol.render(cx, cy);
     }
 
-    // Bubbles (in front of molecules)
+    // Bubbles (in front of molecules) - green glow
     for (const b of this.bubbles) {
       const grad = ctx.createRadialGradient(
         b.x - b.size * 0.3,
@@ -1397,28 +1418,28 @@ class PrimordialSoupDemo extends Game {
         b.y,
         b.size
       );
-      grad.addColorStop(0, `rgba(255, 255, 255, ${b.alpha * 0.8})`);
-      grad.addColorStop(0.5, `rgba(200, 220, 255, ${b.alpha * 0.3})`);
-      grad.addColorStop(1, `rgba(150, 180, 220, ${b.alpha * 0.1})`);
+      grad.addColorStop(0, `rgba(0, 255, 100, ${b.alpha * 0.6})`);
+      grad.addColorStop(0.5, `rgba(0, 255, 80, ${b.alpha * 0.3})`);
+      grad.addColorStop(1, `rgba(0, 200, 60, ${b.alpha * 0.1})`);
 
       ctx.fillStyle = grad;
       ctx.beginPath();
       ctx.arc(b.x, b.y, b.size, 0, TAU);
       ctx.fill();
 
-      ctx.fillStyle = `rgba(255, 255, 255, ${b.alpha * 0.6})`;
+      ctx.fillStyle = `rgba(0, 255, 120, ${b.alpha * 0.5})`;
       ctx.beginPath();
       ctx.arc(b.x - b.size * 0.3, b.y - b.size * 0.3, b.size * 0.25, 0, TAU);
       ctx.fill();
     }
 
-    // Vignette overlay
+    // Vignette overlay - dark green
     const vignetteGrad = ctx.createRadialGradient(
       cx, cy, Math.min(w, h) * 0.3,
       cx, cy, Math.max(w, h) * 0.8
     );
     vignetteGrad.addColorStop(0, 'transparent');
-    vignetteGrad.addColorStop(1, 'rgba(0, 5, 15, 0.6)');
+    vignetteGrad.addColorStop(1, 'rgba(0, 10, 5, 0.6)');
     ctx.fillStyle = vignetteGrad;
     ctx.fillRect(0, 0, w, h);
 
@@ -1431,11 +1452,11 @@ class PrimordialSoupDemo extends Game {
     ctx.font = `${fontSize}px "Fira Code", monospace`;
     ctx.textAlign = 'left';
 
-    // Reaction log (compact on mobile)
+    // Reaction log (compact on mobile) - terminal green
     let y = 25;
     for (const log of this.reactionLog) {
       const alpha = Math.min(1, log.time);
-      ctx.fillStyle = `rgba(255, 200, 100, ${alpha * 0.9})`;
+      ctx.fillStyle = `rgba(0, 255, 100, ${alpha * 0.9})`;
       
       // Truncate if too wide for mobile
       let text = log.text;
@@ -1450,8 +1471,8 @@ class PrimordialSoupDemo extends Game {
       y += lineHeight;
     }
 
-    // Stats
-    ctx.fillStyle = 'rgba(150, 180, 200, 0.6)';
+    // Stats - terminal green
+    ctx.fillStyle = 'rgba(0, 255, 120, 0.7)';
     ctx.textAlign = 'right';
     ctx.fillText(`Molecules: ${this.molecules.length}`, w - 15, 25);
     ctx.fillText(`Reactions: ${this.stats.reactions}`, w - 15, 25 + lineHeight);

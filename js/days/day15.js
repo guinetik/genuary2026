@@ -1,15 +1,20 @@
 /**
  * Genuary 2026 - Day 15
- * Prompt: "Invisible object (shadows)"
- *
- * THE BLACK HOLE
+ * Prompt: "Invisible object"
+ * 
+ * @fileoverview THE BLACK HOLE - Gravitational lensing visualization
+ * 
  * An invisible singularity revealed only through:
  * - Gravitational lensing distorting background stars
  * - Light from the accretion disk bending around it
  * - The dark silhouette where no light escapes
- *
+ * 
  * The black hole is truly invisible - we see only its effects.
  * Click to spawn a burst of matter. Drag to orbit the view.
+ * 
+ * @author guinetik
+ * @see {@link https://genuary.art|Genuary}
+ * @see {@link https://gcanvas.guinetik.com|GCanvas Library}
  */
 
 import { Game, Camera3D, Painter, Easing, applyGravitationalLensing, keplerianOmega } from '@guinetik/gcanvas';
@@ -59,6 +64,15 @@ const STAR_TYPES = [
   { size: 0.6, brightness: 0.5 },
 ];
 
+/**
+ * Black Hole Demo
+ * 
+ * Main game class for Day 15, creating a black hole visualization with
+ * gravitational lensing, accretion disk, and particle effects.
+ * 
+ * @class BlackHoleDemo
+ * @extends {Game}
+ */
 class BlackHoleDemo extends Game {
   constructor(canvas) {
     super(canvas);
@@ -792,8 +806,10 @@ class BlackHoleDemo extends Game {
 
 /**
  * Create Day 15 visualization
- * @param {HTMLCanvasElement} canvas
- * @returns {Object} Game instance with stop() method
+ * @param {HTMLCanvasElement} canvas - The canvas element to render to
+ * @returns {Object} Control object with stop() method and game instance
+ * @returns {Function} returns.stop - Function to stop the game
+ * @returns {BlackHoleDemo} returns.game - The game instance
  */
 export default function day15(canvas) {
   const game = new BlackHoleDemo(canvas);

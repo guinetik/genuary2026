@@ -1,13 +1,18 @@
 /**
  * Genuary 2026 - Day 20
  * Prompt: "One line"
- * Credit: Jos Vromans
- *
- * OUROBOROS
+ * 
+ * @fileoverview OUROBOROS - The eternal serpent
+ * 
  * The ancient symbol - a serpent eating its own tail.
  * One continuous line, eternally consuming and regenerating itself.
- *
+ * 
  * Move mouse to rotate the view.
+ * 
+ * @author guinetik
+ * @credit Jos Vromans - Inspiration
+ * @see {@link https://genuary.art|Genuary}
+ * @see {@link https://gcanvas.guinetik.com|GCanvas Library}
  */
 import { Game, Painter } from "@guinetik/gcanvas";
 
@@ -719,6 +724,17 @@ class Day20Demo extends Game {
   }
 }
 
+/**
+ * Create Day 20 visualization
+ * 
+ * Factory function that creates and starts the Ouroboros demo.
+ * Returns a control object with stop() method for lifecycle management.
+ * 
+ * @param {HTMLCanvasElement} canvas - The canvas element to render to
+ * @returns {Object} Control object with stop() method and game instance
+ * @returns {Function} returns.stop - Function to stop the game
+ * @returns {Day20Demo} returns.game - The game instance
+ */
 export default function day20(canvas) {
   const game = new Day20Demo(canvas);
   game.start();

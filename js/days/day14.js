@@ -1,8 +1,15 @@
 /**
- * Day 14: Everything fits perfectly
- *
+ * Genuary 2026 - Day 14
+ * Prompt: "Everything fits perfectly"
+ * 
+ * @fileoverview Interactive Tangram Puzzle
+ * 
  * Interactive Tangram puzzle with mathematically precise geometry.
  * See /docs/tangram-geometry.md for detailed documentation.
+ * 
+ * @author guinetik
+ * @see {@link https://genuary.art|Genuary}
+ * @see {@link https://gcanvas.guinetik.com|GCanvas Library}
  */
 
 import {
@@ -209,6 +216,15 @@ class TangramPiece extends GameObject {
 // Main Demo
 // ============================================
 
+/**
+ * Tangram Demo
+ * 
+ * Main game class for Day 14, creating an interactive Tangram puzzle
+ * with mathematically precise geometry and draggable pieces.
+ * 
+ * @class TangramDemo
+ * @extends {Game}
+ */
 class TangramDemo extends Game {
   constructor(canvas) {
     super(canvas);
@@ -1237,6 +1253,17 @@ ${this.pieces
 // Export
 // ============================================
 
+/**
+ * Create Day 14 visualization
+ * 
+ * Factory function that creates and starts the Tangram demo.
+ * Returns a control object with stop() method for lifecycle management.
+ * 
+ * @param {HTMLCanvasElement} canvas - The canvas element to render to
+ * @returns {Object} Control object with stop() method and game instance
+ * @returns {Function} returns.stop - Function to stop the game
+ * @returns {TangramDemo} returns.game - The game instance
+ */
 export default function day14(canvas) {
   const game = new TangramDemo(canvas);
   game.start();

@@ -1,14 +1,20 @@
 /**
- * Day 13: Self Portrait
+ * Genuary 2026 - Day 13
  * Prompt: "Self portrait"
- *
- * Pixel Teleporter - Upload an image and watch as its pixels
- * fly across the screen to recreate the hidden avatar portrait.
- * Each pixel finds its best color match and animates from source to target.
- *
+ * 
+ * @fileoverview Pixel Teleporter - Image transformation visualization
+ * 
+ * Upload an image and watch as its pixels fly across the screen to recreate
+ * the hidden avatar portrait. Each pixel finds its best color match and
+ * animates from source to target.
+ * 
  * Controls:
  * - Drag & drop an image onto the left box
  * - Click "Transform" to teleport pixels
+ * 
+ * @author guinetik
+ * @see {@link https://genuary.art|Genuary}
+ * @see {@link https://gcanvas.guinetik.com|GCanvas Library}
  */
 
 import {
@@ -385,7 +391,13 @@ function createMatchingWorker() {
 }
 
 /**
- * Pixel Teleporter Demo
+ * Day 13 Demo
+ * 
+ * Main game class for Day 13, creating a pixel teleporter that transforms
+ * uploaded images into a portrait using animated pixel matching.
+ * 
+ * @class Day13Demo
+ * @extends {Game}
  */
 class Day13Demo extends Game {
   constructor(canvas) {
@@ -1012,6 +1024,17 @@ class Day13Demo extends Game {
   }
 }
 
+/**
+ * Create Day 13 visualization
+ * 
+ * Factory function that creates and starts the Pixel Teleporter demo.
+ * Returns a control object with stop() method for lifecycle management.
+ * 
+ * @param {HTMLCanvasElement} canvas - The canvas element to render to
+ * @returns {Object} Control object with stop() method and game instance
+ * @returns {Function} returns.stop - Function to stop the game
+ * @returns {Day13Demo} returns.game - The game instance
+ */
 export default function day13(canvas) {
   const game = new Day13Demo(canvas);
   game.start();

@@ -1,19 +1,40 @@
 /**
  * Genuary 2026 - Day 1
  * Prompt: "One color, one shape"
- *
- * THE WORMHOLE
- * One shape: Circle
- * One color: Green (#0f0)
- *
- * An infinite tunnel of circles rushing toward you.
- * Each ring is the same circle, just at different depths.
- * The tunnel twists and warps as you travel through it.
- * Click/tap to change direction. Drag to look around.
+ * 
+ * @fileoverview THE WORMHOLE - Infinite tunnel visualization
+ * 
+ * An infinite tunnel of circles rushing toward you. Each ring is the same
+ * circle, just at different depths. The tunnel twists and warps as you
+ * travel through it. Click/tap to change direction. Drag to look around.
+ * 
+ * Constraints:
+ * - One shape: Circle
+ * - One color: Green (#0f0)
+ * 
+ * @author guinetik
+ * @see {@link https://genuary.art|Genuary}
+ * @see {@link https://gcanvas.guinetik.com|GCanvas Library}
  */
 
 import { Game, Camera3D } from '@guinetik/gcanvas';
 
+/**
+ * Configuration object for Day 1
+ * 
+ * @type {Object}
+ * @property {number} ringCount - Number of rings in the tunnel
+ * @property {number} ringSpacing - Z distance between rings
+ * @property {number} baseRadiusRatio - Base radius as ratio of canvas size
+ * @property {number} circlesPerRing - Number of circles per ring
+ * @property {number} speed - Forward/backward movement speed
+ * @property {number} twistSpeed - Rotation speed of tunnel twist
+ * @property {number} wobbleRatio - Wobble amount as ratio of canvas size
+ * @property {number} wobbleSpeed - Wobble animation speed
+ * @property {number} hue - HSL hue value (135 = green)
+ * @property {number} pulseSpeed - Ring pulsing animation speed
+ * @property {number} glowIntensity - Center vortex glow intensity
+ */
 const CONFIG = {
   // Tunnel geometry
   ringCount: 30,
@@ -33,12 +54,27 @@ const CONFIG = {
   glowIntensity: 0.4,
 };
 
+/**
+ * Wormhole Demo
+ * 
+ * Main game class for Day 1, creating an infinite tunnel effect using
+ * only circles in a single color (green). Features 3D camera controls
+ * and directional movement.
+ * 
+ * @class WormholeDemo
+ * @extends {Game}
+ */
 class WormholeDemo extends Game {
   constructor(canvas) {
     super(canvas);
     this.backgroundColor = '#000';
   }
 
+  /**
+   * Initialize the wormhole demo
+   * 
+   * Sets up 3D camera with mouse controls and initializes tunnel state.
+   */
   init() {
     super.init();
 
@@ -77,6 +113,11 @@ class WormholeDemo extends Game {
     });
   }
 
+  /**
+   * Update game state each frame
+   * 
+   * @param {number} dt - Delta time in seconds since last frame
+   */
   update(dt) {
     super.update(dt);
     this.time += dt;
@@ -84,6 +125,13 @@ class WormholeDemo extends Game {
     this.camera.update(dt);
   }
 
+  /**
+   * Render the wormhole tunnel
+   * 
+   * Projects circles at various depths through the 3D camera, sorts them
+   * by depth, and renders with varying lightness based on distance.
+   * Includes a center vortex glow effect.
+   */
   render() {
     const ctx = this.ctx;
     const w = this.width;
@@ -199,8 +247,14 @@ class WormholeDemo extends Game {
 
 /**
  * Create Day 1 visualization
- * @param {HTMLCanvasElement} canvas
- * @returns {Object} Game instance with stop() method
+ * 
+ * Factory function that creates and starts the Wormhole demo.
+ * Returns a control object with stop() method for lifecycle management.
+ * 
+ * @param {HTMLCanvasElement} canvas - The canvas element to render to
+ * @returns {Object} Control object with stop() method and game instance
+ * @returns {Function} returns.stop - Function to stop the game
+ * @returns {WormholeDemo} returns.game - The game instance
  */
 export default function day01(canvas) {
   const game = new WormholeDemo(canvas);

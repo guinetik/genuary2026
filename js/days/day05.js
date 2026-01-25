@@ -1,12 +1,13 @@
 /**
  * Genuary 2026 - Day 5
  * Prompt: "Write 'Genuary'. Avoid using a font."
- *
- * RIPPLE TEXT - Fingerprint Style
+ * 
+ * @fileoverview RIPPLE TEXT - Fingerprint Style
+ * 
  * Hand-coded 5x7 pixel font - NO system fonts used.
  * G pulses like a heartbeat, spawning expanding ripples.
  * Each pulse creates a new letter as the wave reaches it.
- *
+ * 
  * Features:
  * - Pure pixel-art letters defined as coordinate arrays
  * - Heartbeat pulse spawns shockwaves from G
@@ -14,6 +15,10 @@
  * - Orbital rings expand outward on each pulse
  * - Fingerprint ridge pattern on letters
  * - Mouse repulsion with glow effect
+ * 
+ * @author guinetik
+ * @see {@link https://genuary.art|Genuary}
+ * @see {@link https://gcanvas.guinetik.com|GCanvas Library}
  */
 
 import {
@@ -292,7 +297,14 @@ class DashParticleSystem extends ParticleSystem {
 }
 
 /**
- * Main Demo Class
+ * Ripple Text Demo
+ * 
+ * Main game class for Day 5, creating particle-based text using a hand-coded
+ * 5x7 pixel font. Features heartbeat pulses, shockwaves, orbital rings, and
+ * fingerprint ridge patterns.
+ * 
+ * @class RippleTextDemo
+ * @extends {Game}
  */
 class RippleTextDemo extends Game {
   constructor(canvas) {
@@ -899,8 +911,14 @@ class RippleTextDemo extends Game {
 
 /**
  * Create Day 5 visualization
- * @param {HTMLCanvasElement} canvas - Target canvas element
- * @returns {Object} Game control object with stop() method
+ * 
+ * Factory function that creates and starts the Ripple Text demo.
+ * Returns a control object with stop() method for lifecycle management.
+ * 
+ * @param {HTMLCanvasElement} canvas - The canvas element to render to
+ * @returns {Object} Control object with stop() method and game instance
+ * @returns {Function} returns.stop - Function to stop the game
+ * @returns {RippleTextDemo} returns.game - The game instance
  */
 export default function day05(canvas) {
   const game = new RippleTextDemo(canvas);

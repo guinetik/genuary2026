@@ -1,13 +1,19 @@
 /**
- * Day 12: Boxes Only
+ * Genuary 2026 - Day 12
  * Prompt: "Boxes only"
- *
- * Isometric Mondrian - recursive grid subdivision rendered as 3D boxes.
+ * 
+ * @fileoverview Isometric Mondrian - Recursive grid subdivision
+ * 
+ * Recursive grid subdivision rendered as 3D boxes.
  * Classic Mondrian primary colors on black background.
- *
+ * 
  * Controls:
  * - Click: Regenerate composition
  * - Q/E: Rotate camera
+ * 
+ * @author guinetik
+ * @see {@link https://genuary.art|Genuary}
+ * @see {@link https://gcanvas.guinetik.com|GCanvas Library}
  */
 
 import {
@@ -260,7 +266,13 @@ class MondrianBox extends GameObject {
 }
 
 /**
- * Day 12 Demo - Isometric Mondrian
+ * Day 12 Demo
+ * 
+ * Main game class for Day 12, creating an isometric Mondrian composition
+ * using recursive grid subdivision rendered as 3D boxes.
+ * 
+ * @class Day12Demo
+ * @extends {Game}
  */
 class Day12Demo extends Game {
   constructor(canvas) {
@@ -562,6 +574,17 @@ class Day12Demo extends Game {
   }
 }
 
+/**
+ * Create Day 12 visualization
+ * 
+ * Factory function that creates and starts the Isometric Mondrian demo.
+ * Returns a control object with stop() method for lifecycle management.
+ * 
+ * @param {HTMLCanvasElement} canvas - The canvas element to render to
+ * @returns {Object} Control object with stop() method and game instance
+ * @returns {Function} returns.stop - Function to stop the game
+ * @returns {Day12Demo} returns.game - The game instance
+ */
 export default function day12(canvas) {
   const game = new Day12Demo(canvas);
   game.start();
