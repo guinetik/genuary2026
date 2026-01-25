@@ -1,17 +1,22 @@
 /**
  * Genuary 2026 - Day 25
  * Prompt: "Organic Geometry"
- * Credit: Manuel Larino
- *
- * PRIMORDIAL SOUP
+ * 
+ * @fileoverview PRIMORDIAL SOUP - Origin of life simulation
+ * 
  * The origin of life: simple molecules in a warm ocean,
  * energized by lightning and hydrothermal vents.
  * Watch complexity emerge as molecules combine.
- *
+ * 
  * Refactored to showcase gcanvas 3D features:
  * - Scene3D for automatic depth sorting and projection
  * - Sphere3D for atoms with proper 3D lighting
  * - GameObject for molecule lifecycle management
+ * 
+ * @author guinetik
+ * @credit Manuel Larino - Inspiration
+ * @see {@link https://genuary.art|Genuary}
+ * @see {@link https://gcanvas.guinetik.com|GCanvas Library}
  */
 
 import {
@@ -761,6 +766,15 @@ class Molecule3D extends GameObject {
  * Primordial Soup Demo - Main game class
  * Uses Scene3D for automatic 3D management of Molecule3D objects
  */
+/**
+ * Primordial Soup Demo
+ * 
+ * Main game class for Day 25, creating a molecular simulation where
+ * simple molecules combine to form complex structures in a warm ocean.
+ * 
+ * @class PrimordialSoupDemo
+ * @extends {Game}
+ */
 class PrimordialSoupDemo extends Game {
   constructor(canvas) {
     super(canvas);
@@ -1449,8 +1463,10 @@ class PrimordialSoupDemo extends Game {
 
 /**
  * Create Day 25 visualization
- * @param {HTMLCanvasElement} canvas
- * @returns {Object} Game instance with stop() method
+ * @param {HTMLCanvasElement} canvas - The canvas element to render to
+ * @returns {Object} Control object with stop() method and game instance
+ * @returns {Function} returns.stop - Function to stop the game
+ * @returns {PrimordialSoupDemo} returns.game - The game instance
  */
 export default function day25(canvas) {
   const game = new PrimordialSoupDemo(canvas);
