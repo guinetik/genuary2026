@@ -23,730 +23,23 @@ import {
   Game,
   Painter,
   Camera3D,
-  GameObject,
-  Easing,
   Screen,
-  zoneTemperature,
-  thermalBuoyancy,
   heatTransferFalloff,
+  SVGShape,
+  Scene,
+  VerticalLayout,
+  HorizontalLayout,
+  Text,
+  ToggleButton,
+  Rectangle,
+  ShapeGOFactory,
 } from '@guinetik/gcanvas';
 
-const TAU = Math.PI * 2;
+// Local modules
+import { TAU, CONFIG } from './day25.config.js';
+import { MOLECULES, PRIMORDIAL_KEYS, REACTIONS } from './day25.chemistry.js';
+import { Molecule3D, Molecule2D } from './day25.molecule.js';
 
-const CONFIG = {
-  // Molecule counts - scaled by canvas size
-  baseMolecules: 40,    // Base count for 1920x1080
-  minMolecules: 20,     // Minimum for small screens
-  maxMolecules: 200,    // Maximum for 4K screens (soft limit for performance)
-
-  // Camera
-  perspective: 800,
-
-  // Heat zones (normalized y: 0 = top, 1 = bottom)
-  heatZone: 0.85, // Hydrothermal vent at bottom
-  coolZone: 0.15, // Cold surface water at top
-  heatRate: 0.06, // Was 0.008 - much faster temperature changes
-
-  // Thermal physics (buoyancy handles both rise AND sink)
-  buoyancyStrength: 150, // Gentler vertical movement
-  neutralTemp: 0.5,
-
-  // Movement
-  baseSpeed: 25, // Was 15
-  damping: 0.985, // Was 0.97 - less friction for more visible motion
-
-  // Convection currents (replaces Motion.float/oscillate)
-  convectionCurrentX: 80, // Horizontal circulation force
-  convectionTurbulence: 40, // Random jitter for organic feel
-
-  // Spatial bounds
-  worldWidthRatio: 0.95, // Was implicit 0.8
-  worldHeightRatio: 0.95, // Was implicit 0.9
-  worldDepth: 400, // Was 200
-
-  // Heat transfer between molecules
-  heatTransferDist: 80,
-  heatTransferRate: 0.02,
-
-  // Reactions
-  reactionDistance: 100, // Increased range for more collisions
-  reactionCooldown: 0.3,
-  baseReactionChance: 0.4, // Much higher base chance
-
-  // Collision / separation - stronger for bouncy molecules
-  separationPadding: 5, // Buffer zone around molecules
-  separationStiffness: 0.85, // Was 0.5 - faster separation
-  collisionDamping: 0.6, // Was 0.25 - bouncier collisions
-
-  // Lightning
-  lightningInterval: 4, // Seconds between strikes
-  lightningVariance: 2,
-  lightningEnergy: 0.4, // Temperature boost
-  lightningRadius: 150,
-
-  // Visual - Terminal green aesthetic
-  bgColor: '#000',
-  ventGlow: 0.3,
-  hueBase: 135,      // Green (#0f0)
-  hueRange: 30,       // Variation for differentiation
-
-  // Ambient particles
-  bubbleCount: 40,
-  particleCount: 60,
-  causticSpeed: 0.3,
-};
-
-// Molecule complexity tiers
-const TIERS = {
-  PRIMORDIAL: 0, // H2O, CH4, NH3, H2, CO2, H2S
-  PRECURSOR: 1, // Formaldehyde, HCN
-  AMINO_ACID: 2, // Glycine, Alanine
-  PEPTIDE: 3, // Di/tripeptides
-};
-
-// Atom visual properties - CPK coloring (standard chemistry convention)
-// Adjusted for visibility on black background
-const ATOMS = {
-  C: { radius: 18, hue: 0,   sat: 0,  light: 40, name: 'Carbon' },     // Dark gray
-  H: { radius: 10, hue: 0,   sat: 0,  light: 90, name: 'Hydrogen' },   // White/light gray
-  O: { radius: 16, hue: 0,   sat: 85, light: 55, name: 'Oxygen' },     // Red
-  N: { radius: 15, hue: 220, sat: 80, light: 55, name: 'Nitrogen' },   // Blue
-  S: { radius: 20, hue: 50,  sat: 90, light: 55, name: 'Sulfur' },     // Yellow
-};
-
-// Molecule templates - primordial soup ingredients
-const MOLECULES = {
-  // Tier 0: Primordial
-  water: {
-    name: 'H₂O',
-    label: 'Water',
-    tier: TIERS.PRIMORDIAL,
-    // Bond angle: 104.5° (bent geometry)
-    atoms: [
-      { element: 'O', x: 0, y: 0, z: 0 },
-      { element: 'H', x: -15, y: 12, z: 0 },
-      { element: 'H', x: 15, y: 12, z: 0 },
-    ],
-    bonds: [
-      { from: 0, to: 1, order: 1 },
-      { from: 0, to: 2, order: 1 },
-    ],
-  },
-  methane: {
-    name: 'CH₄',
-    label: 'Methane',
-    tier: TIERS.PRIMORDIAL,
-    atoms: [
-      { element: 'C', x: 0, y: 0, z: 0 },
-      { element: 'H', x: 20, y: 20, z: 20 },
-      { element: 'H', x: -20, y: -20, z: 20 },
-      { element: 'H', x: -20, y: 20, z: -20 },
-      { element: 'H', x: 20, y: -20, z: -20 },
-    ],
-    bonds: [
-      { from: 0, to: 1, order: 1 },
-      { from: 0, to: 2, order: 1 },
-      { from: 0, to: 3, order: 1 },
-      { from: 0, to: 4, order: 1 },
-    ],
-  },
-  ammonia: {
-    name: 'NH₃',
-    label: 'Ammonia',
-    tier: TIERS.PRIMORDIAL,
-    // Trigonal pyramidal: N at apex, 3 H form base, ~107° bond angles
-    atoms: [
-      { element: 'N', x: 0, y: -8, z: 0 },
-      { element: 'H', x: 18, y: 10, z: 0 },
-      { element: 'H', x: -9, y: 10, z: 16 },
-      { element: 'H', x: -9, y: 10, z: -16 },
-    ],
-    bonds: [
-      { from: 0, to: 1, order: 1 },
-      { from: 0, to: 2, order: 1 },
-      { from: 0, to: 3, order: 1 },
-    ],
-  },
-  hydrogen: {
-    name: 'H₂',
-    label: 'Hydrogen',
-    tier: TIERS.PRIMORDIAL,
-    atoms: [
-      { element: 'H', x: -12, y: 0, z: 0 },
-      { element: 'H', x: 12, y: 0, z: 0 },
-    ],
-    bonds: [{ from: 0, to: 1, order: 1 }],
-  },
-  carbonDioxide: {
-    name: 'CO₂',
-    label: 'Carbon Dioxide',
-    tier: TIERS.PRIMORDIAL,
-    atoms: [
-      { element: 'C', x: 0, y: 0, z: 0 },
-      { element: 'O', x: -28, y: 0, z: 0 },
-      { element: 'O', x: 28, y: 0, z: 0 },
-    ],
-    bonds: [
-      { from: 0, to: 1, order: 2 },
-      { from: 0, to: 2, order: 2 },
-    ],
-  },
-  hydrogenSulfide: {
-    name: 'H₂S',
-    label: 'Hydrogen Sulfide',
-    tier: TIERS.PRIMORDIAL,
-    // Bond angle: ~92° (more acute than water due to larger S atom)
-    atoms: [
-      { element: 'S', x: 0, y: 0, z: 0 },
-      { element: 'H', x: -12, y: 16, z: 0 },
-      { element: 'H', x: 12, y: 16, z: 0 },
-    ],
-    bonds: [
-      { from: 0, to: 1, order: 1 },
-      { from: 0, to: 2, order: 1 },
-    ],
-  },
-
-  // Tier 1: Precursors
-  formaldehyde: {
-    name: 'CH₂O',
-    label: 'Formaldehyde',
-    tier: TIERS.PRECURSOR,
-    atoms: [
-      { element: 'C', x: 0, y: 0, z: 0 },
-      { element: 'O', x: 0, y: -24, z: 0 },
-      { element: 'H', x: -18, y: 14, z: 0 },
-      { element: 'H', x: 18, y: 14, z: 0 },
-    ],
-    bonds: [
-      { from: 0, to: 1, order: 2 },
-      { from: 0, to: 2, order: 1 },
-      { from: 0, to: 3, order: 1 },
-    ],
-  },
-  hydrogenCyanide: {
-    name: 'HCN',
-    label: 'Hydrogen Cyanide',
-    tier: TIERS.PRECURSOR,
-    atoms: [
-      { element: 'H', x: -30, y: 0, z: 0 },
-      { element: 'C', x: 0, y: 0, z: 0 },
-      { element: 'N', x: 26, y: 0, z: 0 },
-    ],
-    bonds: [
-      { from: 0, to: 1, order: 1 },
-      { from: 1, to: 2, order: 3 },
-    ],
-  },
-
-  // Tier 2: Amino Acids
-  glycine: {
-    name: 'Glycine',
-    label: 'Glycine',
-    tier: TIERS.AMINO_ACID,
-    // NH₂-CH₂-COOH structure
-    atoms: [
-      { element: 'N', x: -35, y: 0, z: 0 },      // 0: Amino N
-      { element: 'C', x: -5, y: 0, z: 0 },       // 1: Alpha C
-      { element: 'C', x: 30, y: 0, z: 0 },       // 2: Carboxyl C
-      { element: 'O', x: 45, y: -18, z: 0 },     // 3: C=O (carbonyl)
-      { element: 'O', x: 45, y: 18, z: 0 },      // 4: O-H (hydroxyl)
-      { element: 'H', x: -50, y: -10, z: 0 },    // 5: NH₂ H
-      { element: 'H', x: -50, y: 10, z: 0 },     // 6: NH₂ H
-      { element: 'H', x: -5, y: 18, z: 10 },     // 7: CH₂ H
-      { element: 'H', x: -5, y: 18, z: -10 },    // 8: CH₂ H
-      { element: 'H', x: 58, y: 25, z: 0 },      // 9: COOH H
-    ],
-    bonds: [
-      { from: 0, to: 1, order: 1 },  // N-C
-      { from: 1, to: 2, order: 1 },  // C-C
-      { from: 2, to: 3, order: 2 },  // C=O
-      { from: 2, to: 4, order: 1 },  // C-OH
-      { from: 0, to: 5, order: 1 },  // N-H
-      { from: 0, to: 6, order: 1 },  // N-H
-      { from: 1, to: 7, order: 1 },  // C-H
-      { from: 1, to: 8, order: 1 },  // C-H
-      { from: 4, to: 9, order: 1 },  // O-H
-    ],
-  },
-  alanine: {
-    name: 'Alanine',
-    label: 'Alanine',
-    tier: TIERS.AMINO_ACID,
-    // NH₂-CH(CH₃)-COOH structure
-    atoms: [
-      { element: 'N', x: -40, y: 0, z: 0 },      // 0: Amino N
-      { element: 'C', x: -10, y: 0, z: 0 },      // 1: Alpha C
-      { element: 'C', x: 25, y: 0, z: 0 },       // 2: Carboxyl C
-      { element: 'O', x: 40, y: -18, z: 0 },     // 3: C=O
-      { element: 'O', x: 40, y: 18, z: 0 },      // 4: O-H
-      { element: 'C', x: -10, y: 0, z: 28 },     // 5: CH₃ (methyl)
-      { element: 'H', x: -55, y: -10, z: 0 },    // 6: NH₂ H
-      { element: 'H', x: -55, y: 10, z: 0 },     // 7: NH₂ H
-      { element: 'H', x: -10, y: 20, z: 0 },     // 8: Alpha C-H
-      { element: 'H', x: 53, y: 25, z: 0 },      // 9: COOH H
-      { element: 'H', x: -10, y: 10, z: 40 },    // 10: CH₃ H
-      { element: 'H', x: -20, y: -8, z: 35 },    // 11: CH₃ H
-      { element: 'H', x: 0, y: -8, z: 35 },      // 12: CH₃ H
-    ],
-    bonds: [
-      { from: 0, to: 1, order: 1 },  // N-C
-      { from: 1, to: 2, order: 1 },  // C-C
-      { from: 2, to: 3, order: 2 },  // C=O
-      { from: 2, to: 4, order: 1 },  // C-OH
-      { from: 1, to: 5, order: 1 },  // C-CH₃
-      { from: 0, to: 6, order: 1 },  // N-H
-      { from: 0, to: 7, order: 1 },  // N-H
-      { from: 1, to: 8, order: 1 },  // C-H
-      { from: 4, to: 9, order: 1 },  // O-H
-      { from: 5, to: 10, order: 1 }, // CH₃-H
-      { from: 5, to: 11, order: 1 }, // CH₃-H
-      { from: 5, to: 12, order: 1 }, // CH₃-H
-    ],
-  },
-
-  // Tier 3: Simple peptide
-  diglycine: {
-    name: 'Gly-Gly',
-    label: 'Peptide',
-    tier: TIERS.PEPTIDE,
-    atoms: [
-      { element: 'N', x: -60, y: 0, z: 0 },
-      { element: 'C', x: -35, y: 0, z: 0 },
-      { element: 'C', x: -10, y: 0, z: 0 },
-      { element: 'O', x: -10, y: -22, z: 0 },
-      { element: 'N', x: 15, y: 0, z: 0 },
-      { element: 'C', x: 40, y: 0, z: 0 },
-      { element: 'C', x: 65, y: 0, z: 0 },
-      { element: 'O', x: 80, y: -18, z: 0 },
-      { element: 'O', x: 80, y: 18, z: 0 },
-    ],
-    bonds: [
-      { from: 0, to: 1, order: 1 },
-      { from: 1, to: 2, order: 1 },
-      { from: 2, to: 3, order: 2 },
-      { from: 2, to: 4, order: 1 },
-      { from: 4, to: 5, order: 1 },
-      { from: 5, to: 6, order: 1 },
-      { from: 6, to: 7, order: 2 },
-      { from: 6, to: 8, order: 1 },
-    ],
-  },
-};
-
-// Primordial molecules for initial spawn
-const PRIMORDIAL_KEYS = [
-  'water',
-  'methane',
-  'ammonia',
-  'hydrogen',
-  'carbonDioxide',
-  'hydrogenSulfide',
-];
-
-// Reaction rules - complexity increases with energy
-const REACTIONS = [
-  // Tier 0 → 1: Primordial to precursors
-  {
-    reactants: ['methane', 'water'],
-    products: ['formaldehyde', 'hydrogen'],
-    minTemp: 0.35,
-    energy: 0.15,
-  },
-  {
-    reactants: ['ammonia', 'methane'],
-    products: ['hydrogenCyanide', 'hydrogen', 'hydrogen'],
-    minTemp: 0.4,
-    energy: 0.2,
-  },
-  {
-    reactants: ['carbonDioxide', 'hydrogen'],
-    products: ['formaldehyde'],
-    minTemp: 0.35,
-    energy: 0.15,
-  },
-
-  // Tier 1 → 2: Precursors to amino acids (Strecker synthesis analog)
-  {
-    reactants: ['formaldehyde', 'hydrogenCyanide'],
-    products: ['glycine'],
-    minTemp: 0.45,
-    energy: 0.25,
-  },
-  {
-    reactants: ['formaldehyde', 'ammonia'],
-    products: ['glycine', 'water'],
-    minTemp: 0.5,
-    energy: 0.3,
-  },
-  {
-    reactants: ['hydrogenCyanide', 'ammonia'],
-    products: ['alanine'],
-    minTemp: 0.5,
-    energy: 0.3,
-  },
-
-  // Tier 2 → 3: Amino acids to peptides
-  {
-    reactants: ['glycine', 'glycine'],
-    products: ['diglycine', 'water'],
-    minTemp: 0.55,
-    energy: 0.4,
-  },
-  {
-    reactants: ['glycine', 'alanine'],
-    products: ['diglycine', 'water'],
-    minTemp: 0.55,
-    energy: 0.4,
-  },
-];
-
-/**
- * Molecule3D - A molecule composed of Atom3D children
- * Handles molecular rotation, movement, and thermal physics
- * @extends GameObject
- */
-class Molecule3D extends GameObject {
-  /**
-   * @param {Game} game - Game instance
-   * @param {string} templateKey - Key into MOLECULES dictionary
-   * @param {Object} options - Position options
-   */
-  constructor(game, templateKey, options = {}) {
-    super(game, options);
-
-    this.templateKey = templateKey;
-    this.template = MOLECULES[templateKey];
-    this.name = this.template.name;
-    this.label = this.template.label;
-    this.tier = this.template.tier;
-
-    // 3D position (in world space)
-    this.x = options.x ?? 0;
-    this.y = options.y ?? 0;
-    this.z = options.z ?? 0;
-
-    // Velocity
-    this.vx = (Math.random() - 0.5) * CONFIG.baseSpeed;
-    this.vy = (Math.random() - 0.5) * CONFIG.baseSpeed;
-    this.vz = (Math.random() - 0.5) * CONFIG.baseSpeed;
-
-    // Temperature: 0 = cold, 1 = hot
-    this.temperature = 0.5;
-    this.reactionCooldown = 0;
-    this.flash = 0; // Visual flash on reaction
-
-    // Molecular rotation - gentle tumble
-    this.rotX = Math.random() * TAU;
-    this.rotY = Math.random() * TAU;
-    this.rotZ = Math.random() * TAU;
-    this.rotSpeedX = (Math.random() - 0.5) * 0.15;
-    this.rotSpeedY = (Math.random() - 0.5) * 0.15;
-    this.rotSpeedZ = (Math.random() - 0.5) * 0.08;
-
-    // Turbulence phase offsets for organic movement
-    this.turbulencePhase = Math.random() * Math.PI * 2;
-
-    // Store atom data for rendering
-    this.atomData = this.template.atoms.map((a) => ({
-      element: a.element,
-      localX: a.x,
-      localY: a.y,
-      localZ: a.z,
-      props: ATOMS[a.element],
-      screenX: 0,
-      screenY: 0,
-      screenScale: 1,
-      worldZ: 0,
-    }));
-
-    this.bonds = this.template.bonds;
-
-    // Calculate bounding radius
-    let maxDist = 0;
-    for (const a of this.atomData) {
-      const dist = Math.sqrt(a.localX ** 2 + a.localY ** 2 + a.localZ ** 2);
-      maxDist = Math.max(maxDist, dist + a.props.radius);
-    }
-    this.boundingRadius = maxDist;
-  }
-
-  /**
-   * Update molecule physics and state
-   * @param {number} dt - Delta time
-   */
-  update(dt) {
-    super.update(dt);
-
-    const demo = this.game;
-    const halfHeight = demo.worldHeight / 2;
-    const time = demo.totalTime;
-
-    // Normalized Y for temperature zones (0 = top/cold, 1 = bottom/hot)
-    const normalizedY = (this.y + halfHeight) / demo.worldHeight;
-
-    // === TEMPERATURE ZONE ===
-    this.temperature = zoneTemperature(
-      Math.max(0, Math.min(1, normalizedY)),
-      this.temperature,
-      {
-        heatZone: CONFIG.heatZone,
-        coolZone: CONFIG.coolZone,
-        rate: CONFIG.heatRate,
-      }
-    );
-
-    // === THERMAL BUOYANCY (dramatic vertical movement) ===
-    // Hot molecules rise strongly, cold sink strongly
-    const buoyancy = thermalBuoyancy(
-      this.temperature,
-      CONFIG.neutralTemp,
-      CONFIG.buoyancyStrength
-    );
-    this.vy -= buoyancy * dt;
-
-    // === OCEAN CURRENTS (wavy horizontal drift) ===
-    // Slow sinusoidal drift that varies with depth and time
-    // This brings molecules together for reactions
-    const driftPhase = time * 0.3 + normalizedY * 2.5 + this.turbulencePhase;
-    const driftStrength = CONFIG.convectionCurrentX * (0.6 + this.temperature * 0.4);
-    this.vx += Math.sin(driftPhase) * driftStrength * dt;
-
-    // Slight Z drift too for 3D ocean feel
-    const zDriftPhase = time * 0.2 + normalizedY * 1.8 + this.turbulencePhase + 1.5;
-    this.vz += Math.sin(zDriftPhase) * driftStrength * 0.5 * dt;
-
-    // === TURBULENCE (organic random jitter) ===
-    // Phase-shifted noise for each molecule - adds organic feel
-    const turbPhase = this.turbulencePhase + time;
-    const turbStrength = CONFIG.convectionTurbulence * (0.4 + this.temperature * 0.3);
-    this.vx += Math.sin(turbPhase * 1.3) * turbStrength * dt;
-    this.vy += Math.sin(turbPhase * 1.7 + 1.5) * turbStrength * 0.2 * dt;
-    this.vz += Math.sin(turbPhase * 1.1 + 3.0) * turbStrength * 0.6 * dt;
-
-    // === DAMPING ===
-    const dampFactor = Math.pow(CONFIG.damping, dt * 60);
-    this.vx *= dampFactor;
-    this.vy *= dampFactor;
-    this.vz *= dampFactor;
-
-    // === UPDATE POSITION ===
-    this.x += this.vx * dt;
-    this.y += this.vy * dt;
-    this.z += this.vz * dt;
-
-    // === TUMBLE (gentle rotation coupled to motion) ===
-    const speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy + this.vz * this.vz);
-    // Much gentler tumble - capped velocity influence
-    const tumbleIntensity = 0.015 + Math.min(speed * 0.002, 0.03);
-
-    // Cross-axis rotation creates "rolling through fluid" effect
-    this.rotX += (this.vy * 0.008 + this.rotSpeedX * 0.2) * tumbleIntensity * dt * 60;
-    this.rotY += (this.vx * 0.008 + this.rotSpeedY * 0.2) * tumbleIntensity * dt * 60;
-    this.rotZ += (this.vz * 0.005 + this.rotSpeedZ * 0.15) * tumbleIntensity * dt * 60;
-
-    // Decay cooldown and flash
-    if (this.reactionCooldown > 0) this.reactionCooldown -= dt;
-    if (this.flash > 0) this.flash -= dt * 0.5; // Slow fade (~2 sec for full)
-  }
-
-  /**
-   * Project atoms through camera and render
-   * @param {number} cx - Screen center X
-   * @param {number} cy - Screen center Y
-   */
-  render(cx, cy) {
-    if (!this.visible) return;
-
-    const ctx = Painter.ctx;
-    const camera = this.game.camera;
-
-    // Pre-compute rotation matrices
-    const cosX = Math.cos(this.rotX),
-      sinX = Math.sin(this.rotX);
-    const cosY = Math.cos(this.rotY),
-      sinY = Math.sin(this.rotY);
-    const cosZ = Math.cos(this.rotZ),
-      sinZ = Math.sin(this.rotZ);
-
-    // Project each atom
-    for (const atom of this.atomData) {
-      let x = atom.localX,
-        y = atom.localY,
-        z = atom.localZ;
-
-      // Rotate X
-      let ty = y * cosX - z * sinX;
-      let tz = y * sinX + z * cosX;
-      y = ty;
-      z = tz;
-
-      // Rotate Y
-      let tx = x * cosY + z * sinY;
-      tz = -x * sinY + z * cosY;
-      x = tx;
-      z = tz;
-
-      // Rotate Z
-      tx = x * cosZ - y * sinZ;
-      ty = x * sinZ + y * cosZ;
-      x = tx;
-      y = ty;
-
-      // World position
-      const worldX = this.x + x;
-      const worldY = this.y + y;
-      const worldZ = this.z + z;
-
-      const proj = camera.project(worldX, worldY, worldZ);
-      atom.screenX = cx + proj.x;
-      atom.screenY = cy + proj.y;
-      atom.screenScale = proj.scale;
-      atom.worldZ = proj.z;
-    }
-
-    // Sort atoms by depth for rendering
-    const sortedAtoms = [...this.atomData].sort((a, b) => a.worldZ - b.worldZ);
-
-    // Render bonds first (behind atoms)
-    this._renderBonds(ctx);
-
-    // Render atoms
-    for (const atom of sortedAtoms) {
-      this._renderAtom(ctx, atom);
-    }
-  }
-
-  /**
-   * Render bonds between atoms
-   * @param {CanvasRenderingContext2D} ctx
-   * @private
-   */
-  _renderBonds(ctx) {
-    for (const bond of this.bonds) {
-      const a1 = this.atomData[bond.from];
-      const a2 = this.atomData[bond.to];
-      if (a1.screenScale <= 0 || a2.screenScale <= 0) continue;
-
-      const avgScale = (a1.screenScale + a2.screenScale) / 2;
-
-      // Depth affects lightness
-      const avgZ = (a1.worldZ + a2.worldZ) / 2;
-      const depthLightMod = Math.max(-10, Math.min(10, avgZ / 40));
-
-      // Temperature affects bond color - green spectrum
-      const tempHue = Math.round(CONFIG.hueBase + (this.temperature - 0.5) * CONFIG.hueRange);
-      const bondLight = Math.round(40 + depthLightMod + this.temperature * 15);
-      const bondSat = Math.round(50 + this.temperature * 30);
-      ctx.strokeStyle = `hsl(${tempHue}, ${bondSat}%, ${bondLight}%)`;
-      ctx.lineWidth = 3 * avgScale;
-      ctx.lineCap = 'round';
-
-      if (bond.order === 1) {
-        ctx.beginPath();
-        ctx.moveTo(a1.screenX, a1.screenY);
-        ctx.lineTo(a2.screenX, a2.screenY);
-        ctx.stroke();
-      } else if (bond.order >= 2) {
-        const dx = a2.screenX - a1.screenX;
-        const dy = a2.screenY - a1.screenY;
-        const len = Math.sqrt(dx * dx + dy * dy) || 1;
-        const gap = 4 * avgScale;
-        const nx = (-dy / len) * gap;
-        const ny = (dx / len) * gap;
-
-        ctx.lineWidth = 2 * avgScale;
-        for (let i = 0; i < bond.order; i++) {
-          const offset = i - (bond.order - 1) / 2;
-          ctx.beginPath();
-          ctx.moveTo(a1.screenX + nx * offset, a1.screenY + ny * offset);
-          ctx.lineTo(a2.screenX + nx * offset, a2.screenY + ny * offset);
-          ctx.stroke();
-        }
-      }
-    }
-  }
-
-  /**
-   * Render a single atom with gradient
-   * @param {CanvasRenderingContext2D} ctx
-   * @param {Object} atom - Atom data
-   * @private
-   */
-  _renderAtom(ctx, atom) {
-    if (atom.screenScale <= 0) return;
-
-    const props = atom.props;
-    const radius = props.radius * atom.screenScale;
-
-    // Depth affects lightness
-    const depthLightMod = Math.max(-15, Math.min(10, atom.worldZ / 30));
-
-    // Temperature affects lightness (hot = brighter, cold = darker)
-    // For CPK grays, this creates warm/cool feel without breaking color identity
-    const tempLight = (this.temperature - 0.5) * 12; // Hot brightens, cold darkens
-    const hue = props.hue;
-    const sat = props.sat;
-    const light = Math.round(Math.max(20, Math.min(90, props.light + depthLightMod + tempLight)));
-
-
-    // Atom sphere with terminal-style gradient (sharper, less photorealistic)
-    const grad = ctx.createRadialGradient(
-      atom.screenX - radius * 0.4,
-      atom.screenY - radius * 0.4,
-      0,
-      atom.screenX,
-      atom.screenY,
-      radius
-    );
-    // More defined gradient stops for terminal aesthetic - round all HSL values
-    const sat1 = Math.round(Math.min(sat + 20, 100));
-    const light1 = Math.round(Math.min(light + 30, 90));
-    const light2 = Math.round(Math.max(light - 15, 20));
-    const sat2 = Math.round(Math.min(sat + 10, 100));
-    const light3 = Math.round(Math.max(light - 25, 10));
-    
-    grad.addColorStop(0, `hsl(${hue}, ${sat1}%, ${light1}%)`);
-    grad.addColorStop(0.3, `hsl(${hue}, ${sat}%, ${light}%)`);
-    grad.addColorStop(0.7, `hsl(${hue}, ${sat}%, ${light2}%)`);
-    grad.addColorStop(1, `hsl(${hue}, ${sat2}%, ${light3}%)`);
-
-    ctx.fillStyle = grad;
-    ctx.beginPath();
-    ctx.arc(atom.screenX, atom.screenY, radius, 0, TAU);
-    ctx.fill();
-
-    // Reaction effect - green outline that fades
-    if (this.flash > 0) {
-      ctx.strokeStyle = `rgba(0, 255, 100, ${Math.min(1, this.flash * 1.5)})`;
-      ctx.lineWidth = 2 * atom.screenScale * (0.5 + this.flash * 0.5);
-      ctx.stroke();
-    } else {
-      // Normal subtle outline for definition
-      ctx.strokeStyle = `hsla(${hue}, ${sat}%, ${light}%, 0.3)`;
-      ctx.lineWidth = 0.5;
-      ctx.stroke();
-    }
-  }
-
-  /**
-   * Get bounds for Scene3D depth sorting
-   * @returns {Object}
-   */
-  getBounds() {
-    return {
-      x: this.x,
-      y: this.y,
-      width: this.boundingRadius * 2,
-      height: this.boundingRadius * 2,
-    };
-  }
-}
-
-/**
- * Primordial Soup Demo - Main game class
- * Uses Scene3D for automatic 3D management of Molecule3D objects
- */
 /**
  * Primordial Soup Demo
  * 
@@ -798,6 +91,10 @@ class PrimordialSoupDemo extends Game {
     // Stats
     this.stats = { reactions: 0, maxTier: 0 };
 
+    // UI state - hide info by default
+    this.showInfo = false;
+    this.showLegend = false;
+
     // World bounds - expanded for better spread
     this.worldWidth = this.width * CONFIG.worldWidthRatio;
     this.worldHeight = this.height * CONFIG.worldHeightRatio;
@@ -805,7 +102,7 @@ class PrimordialSoupDemo extends Game {
     // Use Screen.responsive for device-appropriate counts
     // Mobile: fewer for performance, Desktop: more for fuller scene
     // Tuned for good density without overcrowding
-    this.moleculeCount = Screen.responsive(18, 30, 45);
+    this.moleculeCount = Screen.responsive(14, 24, 36);
     const bubbleCount = Screen.responsive(15, 25, 35);
     const particleCount = Screen.responsive(25, 40, 55);
 
@@ -823,10 +120,22 @@ class PrimordialSoupDemo extends Game {
       this.particles.push(this.createParticle());
     }
 
+    // Reaction burst particles (temporary, spawned on reactions)
+    this.reactionBursts = [];
+
     // Spawn primordial molecules
     for (let i = 0; i < this.moleculeCount; i++) {
       this.spawnMolecule(true);
     }
+
+    // Load thermal vent silhouettes asynchronously
+    // SVG is 2048x2048, we want vents to be ~40% of canvas height
+    this.leftVent = null;
+    this.rightVent = null;
+    this.loadThermalVents();
+
+    // Create UI - toggle buttons at bottom left
+    this.createUI();
 
     // Track drag vs click
     let dragStart = null;
@@ -882,38 +191,221 @@ class PrimordialSoupDemo extends Game {
   }
 
   /**
-   * Create an ambient bubble
-   * @param {boolean} randomY - Start at random Y position
+   * Create an ambient bubble spawning from thermal vents
+   * @param {boolean} randomY - Start at random Y position (for initial spawn)
    * @returns {Object}
    */
   createBubble(randomY = false) {
-    const spread = this.width * 0.3;
+    // Spawn from left or right vent
+    const fromLeft = Math.random() < 0.5;
+    const ventX = fromLeft ? this.width * 0.08 : this.width * 0.92;
+    const spread = this.width * 0.05; // Small spread around vent
+
     return {
-      x: this.width / 2 + (Math.random() - 0.5) * spread,
-      y: randomY ? Math.random() * this.height : this.height + Math.random() * 50,
+      x: ventX + (Math.random() - 0.5) * spread,
+      y: randomY ? Math.random() * this.height : this.height + Math.random() * 20,
       size: 2 + Math.random() * 6,
-      speed: 30 + Math.random() * 50,
+      speed: 40 + Math.random() * 60, // Slightly faster - thermal energy
       wobblePhase: Math.random() * TAU,
-      wobbleSpeed: 1 + Math.random() * 2,
-      alpha: 0.1 + Math.random() * 0.3,
+      wobbleSpeed: 1.5 + Math.random() * 2.5,
+      alpha: 0.15 + Math.random() * 0.35,
     };
   }
 
   /**
-   * Create a floating particle
+   * Create a floating particle (marine snow / bioluminescence)
    * @returns {Object}
    */
   createParticle() {
+    // Mostly pale blue/cyan marine snow, occasional green bioluminescence
+    const isBioluminescent = Math.random() < 0.3;
     return {
       x: Math.random() * this.width,
       y: Math.random() * this.height,
       z: (Math.random() - 0.5) * 400,
       size: 1 + Math.random() * 2,
-      vx: (Math.random() - 0.5) * 10,
-      vy: (Math.random() - 0.5) * 5,
-      alpha: 0.05 + Math.random() * 0.15,
-      hue: Math.random() < 0.5 ? CONFIG.hueBase - 10 : CONFIG.hueBase + 10, // Green variations
+      vx: (Math.random() - 0.5) * 8,
+      vy: (Math.random() - 0.5) * 4 - 2, // Slight upward drift
+      alpha: 0.04 + Math.random() * 0.12,
+      hue: isBioluminescent ? 160 + Math.random() * 40 : 190 + Math.random() * 30, // Green-cyan or blue
     };
+  }
+
+  /**
+   * Load thermal vent SVG silhouettes asynchronously
+   */
+  async loadThermalVents() {
+    const ventScale = (this.height * 0.4) / 2048;
+    const ventHeight = 2048 * ventScale;
+
+    try {
+      // Load left vent
+      this.leftVent = await SVGShape.fromURL('./thermal-vent.svg', {
+        x: 0,
+        y: this.height - ventHeight * 0.85,
+        scale: ventScale,
+        centerPath: false,
+        color: '#000',
+      });
+
+      // Load right vent (mirrored) - load fresh instance
+      this.rightVent = await SVGShape.fromURL('./thermal-vent.svg', {
+        x: this.width,
+        y: this.height - ventHeight * 0.85,
+        scale: ventScale,
+        centerPath: false,
+        color: '#000',
+        scaleX: -1, // Flip horizontally
+      });
+
+      console.log('[Day25] Thermal vents loaded');
+    } catch (err) {
+      console.warn('[Day25] Failed to load thermal vents:', err);
+    }
+  }
+
+  /**
+   * Create UI with toggle buttons and legend dialog
+   */
+  createUI() {
+    const isMobile = Screen.isMobile;
+    const btnSize = isMobile ? 36 : 44;
+    const btnFont = isMobile ? '16px "Fira Code", monospace' : '18px "Fira Code", monospace';
+    const btnY = this.height - 60;
+    const btnStartX = 20;
+
+    // Info toggle button [i]
+    this.infoBtn = new ToggleButton(this, {
+      text: "i",
+      width: btnSize,
+      height: btnSize,
+      font: btnFont,
+      startToggled: this.showInfo,
+      onToggle: (isOn) => {
+        this.showInfo = isOn;
+      },
+    });
+    this.infoBtn.x = btnStartX + btnSize / 2;
+    this.infoBtn.y = btnY;
+    this.pipeline.add(this.infoBtn);
+
+    // Legend toggle button
+    this.legendBtn = new ToggleButton(this, {
+      text: "?",
+      width: btnSize,
+      height: btnSize,
+      font: btnFont,
+      startToggled: this.showLegend,
+      onToggle: (isOn) => {
+        this.showLegend = isOn;
+        if (this.legendScene) {
+          this.legendScene.visible = isOn;
+        }
+      },
+    });
+    this.legendBtn.x = btnStartX + btnSize + 10 + btnSize / 2;
+    this.legendBtn.y = btnY;
+    this.pipeline.add(this.legendBtn);
+
+    // Create legend dialog
+    this.createLegendDialog();
+  }
+
+  /**
+   * Create the legend dialog showing primordial molecules
+   */
+  createLegendDialog() {
+    const debugLegend = CONFIG.debugLegend;
+
+    const isMobile = Screen.isMobile;
+    const dialogWidth = isMobile ? 240 : 300;
+    const dialogHeight = isMobile ? 260 : 320;
+    const fontSize = isMobile ? 10 : 12;
+
+    // Legend scene centered on screen
+    this.legendScene = new Scene(this, {
+      width: dialogWidth,
+      height: dialogHeight,
+    });
+    this.legendScene.x = this.width / 2;
+    this.legendScene.y = this.height / 2;
+    this.legendScene.visible = false;
+
+    // Create background rectangle using ShapeGOFactory
+    const bgRect = new Rectangle({
+      x: 0,
+      y: 0,
+      width: dialogWidth,
+      height: dialogHeight,
+      color: 'rgba(0, 10, 15, 0.9)',
+      stroke: '#0f0',
+      lineWidth: 2,
+    });
+    const background = ShapeGOFactory.create(this, bgRect, {
+      name: 'legendBackground',
+    });
+    this.legendScene.add(background);
+
+    // Vertical layout for molecule entries
+    const layout = new VerticalLayout(this, {
+      spacing: isMobile ? 4 : 6,
+      padding: 8,
+      debug: debugLegend,
+      debugColor: "red",
+    });
+    this.legendScene.add(layout);
+
+    // Title
+    const title = new Text(this, "PRIMORDIAL MOLECULES", {
+      font: `bold ${fontSize + 2}px "Fira Code", monospace`,
+      color: '#0f0',
+      align: 'center',
+      baseline: 'middle',
+    });
+    layout.add(title);
+
+    // Add each primordial molecule
+    const previewSize = isMobile ? 32 : 40;
+    for (const key of PRIMORDIAL_KEYS) {
+      const mol = MOLECULES[key];
+      if (!mol) continue;
+
+      // Horizontal layout for each molecule entry
+      const entry = new HorizontalLayout(this, {
+        autoSize: false,
+        width: dialogWidth - 25,
+        height: previewSize,
+        align: "start",
+        spacing: 0,
+        padding: 0,
+        debug: debugLegend,
+        debugColor: "yellow",
+      });
+
+      // Create molecule preview using Molecule2D GameObject (auto-scales to fit)
+      const preview = new Molecule2D(this, key, {
+        width: previewSize,
+        height: previewSize,
+        debug: debugLegend,
+        debugColor: "green",
+      });
+      entry.add(preview);
+
+      // Molecule name and formula - white labels
+      const label = new Text(this, `${mol.name} - ${mol.label}`, {
+        font: `${fontSize}px "Fira Code", monospace`,
+        color: '#fff',
+        align: 'left',
+        baseline: 'middle',
+        debug: debugLegend,
+        debugColor: "blue",
+      });
+      entry.add(label);
+
+      layout.add(entry);
+    }
+
+    this.pipeline.add(this.legendScene);
   }
 
   /**
@@ -949,6 +441,59 @@ class PrimordialSoupDemo extends Game {
   }
 
   /**
+   * Analyze pool and pick a molecule that would enable more reactions
+   * @returns {string} Molecule template key to spawn
+   */
+  pickSmartMolecule() {
+    // Count current molecules by type
+    const counts = {};
+    for (const mol of this.molecules) {
+      counts[mol.templateKey] = (counts[mol.templateKey] || 0) + 1;
+    }
+
+    // Calculate "need score" for each primordial molecule
+    // Higher score = spawning this would enable more reactions
+    const scores = {};
+    for (const key of PRIMORDIAL_KEYS) {
+      scores[key] = 1; // Base score so everything has some chance
+    }
+
+    // For each reaction, boost the score of missing/low reactants
+    for (const reaction of REACTIONS) {
+      const [r1, r2] = reaction.reactants;
+      const count1 = counts[r1] || 0;
+      const count2 = counts[r2] || 0;
+
+      // Only consider reactions where at least one reactant exists
+      if (count1 > 0 || count2 > 0) {
+        // Boost the one we have less of (or none of)
+        if (PRIMORDIAL_KEYS.includes(r1)) {
+          // More of r2 means we need more r1 to react with it
+          scores[r1] += count2 * 2;
+          // If we have zero r1, extra boost
+          if (count1 === 0) scores[r1] += 5;
+        }
+        if (PRIMORDIAL_KEYS.includes(r2)) {
+          scores[r2] += count1 * 2;
+          if (count2 === 0) scores[r2] += 5;
+        }
+      }
+    }
+
+    // Weighted random selection
+    const totalScore = Object.values(scores).reduce((a, b) => a + b, 0);
+    let roll = Math.random() * totalScore;
+
+    for (const key of PRIMORDIAL_KEYS) {
+      roll -= scores[key];
+      if (roll <= 0) return key;
+    }
+
+    // Fallback
+    return PRIMORDIAL_KEYS[Math.floor(Math.random() * PRIMORDIAL_KEYS.length)];
+  }
+
+  /**
    * Spawn a primordial molecule from off-screen (left or right)
    * Simulates fresh reactants being brought in by ocean currents
    */
@@ -957,8 +502,8 @@ class PrimordialSoupDemo extends Game {
     const softLimit = Math.min(CONFIG.maxMolecules, this.moleculeCount * 3);
     if (this.molecules.length >= softLimit) return null;
 
-    // Pick random primordial molecule
-    const key = PRIMORDIAL_KEYS[Math.floor(Math.random() * PRIMORDIAL_KEYS.length)];
+    // Pick molecule that would enable more reactions
+    const key = this.pickSmartMolecule();
 
     // Spawn off-screen left or right
     const fromLeft = Math.random() < 0.5;
@@ -981,6 +526,37 @@ class PrimordialSoupDemo extends Game {
 
     this.molecules.push(mol);
     return mol;
+  }
+
+  /**
+   * Spawn burst particles at reaction site (energy release effect)
+   * @param {number} x - World X position
+   * @param {number} y - World Y position
+   * @param {number} z - World Z position
+   * @param {number} energy - Reaction energy (affects particle count/speed)
+   */
+  spawnReactionBurst(x, y, z, energy) {
+    // More particles for higher energy reactions
+    const count = Math.floor(12 + energy * 25);
+    const speed = 250 + energy * 200; // FAST - get out like they owe money
+
+    for (let i = 0; i < count; i++) {
+      // Random direction in 3D sphere
+      const theta = Math.random() * TAU;
+      const phi = Math.acos(2 * Math.random() - 1);
+      const v = speed * (0.6 + Math.random() * 0.4);
+
+      this.reactionBursts.push({
+        x,
+        y,
+        z,
+        vx: Math.sin(phi) * Math.cos(theta) * v,
+        vy: Math.sin(phi) * Math.sin(theta) * v,
+        vz: Math.cos(phi) * v,
+        life: 1.0,
+        size: 1.5 + Math.random() * 2,
+      });
+    }
   }
 
   /**
@@ -1073,6 +649,9 @@ class PrimordialSoupDemo extends Game {
             this.stats.maxTier = Math.max(this.stats.maxTier, product.tier);
           }
 
+          // Energy burst particles at reaction site
+          this.spawnReactionBurst(midX, midY, midZ, reaction.energy);
+
           this.stats.reactions++;
           const formatMol = (m) => `${m.label} (${m.name})`;
           const reactantLabels = [formatMol(mol1), formatMol(mol2)].join(' + ');
@@ -1088,9 +667,11 @@ class PrimordialSoupDemo extends Game {
           });
           if (this.reactionLog.length > 5) this.reactionLog.pop();
 
-          // Spawn new primordial molecule from off-screen (brought in by current)
-          // This maintains a flow of fresh reactants
-          this.spawnFromOffscreen();
+          // 50% chance to spawn new primordial molecule from off-screen
+          // Prevents cluttering while maintaining fresh reactant flow
+          if (Math.random() < 0.5) {
+            this.spawnFromOffscreen();
+          }
 
           break;
         }
@@ -1255,6 +836,20 @@ class PrimordialSoupDemo extends Game {
       if (p.y > this.height) p.y = 0;
     }
 
+    // Update reaction burst particles
+    for (const b of this.reactionBursts) {
+      b.x += b.vx * dt;
+      b.y += b.vy * dt;
+      b.z += b.vz * dt;
+      b.life -= dt * 2.5; // Quick fade - sparks not farts
+      // Minimal drag - they're escaping
+      b.vx *= 0.98;
+      b.vy *= 0.98;
+      b.vz *= 0.98;
+    }
+    // Remove dead particles
+    this.reactionBursts = this.reactionBursts.filter(b => b.life > 0);
+
     // Update molecules
     for (const mol of this.molecules) {
       mol.update(dt);
@@ -1291,82 +886,123 @@ class PrimordialSoupDemo extends Game {
     const cx = w / 2;
     const cy = h / 2;
 
-    // Pure black background with subtle green vignette
-    ctx.fillStyle = CONFIG.bgColor;
-    ctx.fillRect(0, 0, w, h);
-    
-    // Subtle green gradient overlay (very dark)
-    const bgGrad = ctx.createLinearGradient(0, 0, 0, h);
-    bgGrad.addColorStop(0, 'rgba(0, 15, 5, 0.3)');
-    bgGrad.addColorStop(0.5, 'rgba(0, 10, 5, 0.2)');
-    bgGrad.addColorStop(1, 'rgba(0, 20, 10, 0.4)');
-    ctx.fillStyle = bgGrad;
+    // Deep sea gradient background - dark blue depths
+    const deepSeaGrad = ctx.createLinearGradient(0, 0, 0, h);
+    deepSeaGrad.addColorStop(0, '#000508');    // Nearly black at top (deep water)
+    deepSeaGrad.addColorStop(0.3, '#001015');  // Very dark blue-green
+    deepSeaGrad.addColorStop(0.6, '#001a1a');  // Dark teal hints
+    deepSeaGrad.addColorStop(0.85, '#002020'); // Slightly lighter near vents
+    deepSeaGrad.addColorStop(1, '#001515');    // Bottom
+    ctx.fillStyle = deepSeaGrad;
     ctx.fillRect(0, 0, w, h);
 
-    // Subtle green light patterns (generative, not realistic)
-    ctx.globalAlpha = 0.02;
-    const causticScale = 120;
+    // Subtle light rays from above (bioluminescence / distant surface)
+    ctx.globalAlpha = 0.015;
     const t = this.totalTime * CONFIG.causticSpeed;
-    for (let i = 0; i < 5; i++) {
-      const phase = i * 1.3 + t;
-      const cx1 = w * 0.3 + Math.sin(phase) * w * 0.2;
-      const cy1 = h * 0.2 + Math.cos(phase * 0.7) * h * 0.1;
-      const cx2 = w * 0.7 + Math.sin(phase * 0.8 + 2) * w * 0.2;
-      const cy2 = h * 0.3 + Math.cos(phase * 0.5 + 1) * h * 0.1;
+    for (let i = 0; i < 4; i++) {
+      const phase = i * 1.5 + t * 0.5;
+      const rayX = w * (0.2 + i * 0.2) + Math.sin(phase) * w * 0.05;
+      const rayGrad = ctx.createLinearGradient(rayX, 0, rayX + w * 0.1, h * 0.6);
+      rayGrad.addColorStop(0, 'rgba(100, 200, 255, 0.8)');
+      rayGrad.addColorStop(0.5, 'rgba(50, 150, 200, 0.3)');
+      rayGrad.addColorStop(1, 'transparent');
+      ctx.fillStyle = rayGrad;
+      ctx.fillRect(rayX - 20, 0, 40, h * 0.6);
+    }
+    ctx.globalAlpha = 1;
 
-      const causticGrad = ctx.createRadialGradient(cx1, cy1, 0, cx1, cy1, causticScale);
-      causticGrad.addColorStop(0, 'rgba(0, 255, 100, 1)');
-      causticGrad.addColorStop(1, 'transparent');
-      ctx.fillStyle = causticGrad;
-      ctx.fillRect(0, 0, w, h);
+    // Left thermal vent glow (orange/red heat)
+    const leftVentX = w * 0.08;
+    const leftVentGrad = ctx.createRadialGradient(
+      leftVentX, h + 30, 0,
+      leftVentX, h + 30, h * 0.45
+    );
+    leftVentGrad.addColorStop(0, `rgba(255, 100, 20, ${CONFIG.ventGlow * 0.6})`);
+    leftVentGrad.addColorStop(0.2, `rgba(255, 60, 10, ${CONFIG.ventGlow * 0.4})`);
+    leftVentGrad.addColorStop(0.5, `rgba(100, 40, 10, ${CONFIG.ventGlow * 0.2})`);
+    leftVentGrad.addColorStop(1, 'transparent');
+    ctx.fillStyle = leftVentGrad;
+    ctx.fillRect(0, 0, w, h);
 
-      const causticGrad2 = ctx.createRadialGradient(cx2, cy2, 0, cx2, cy2, causticScale * 0.8);
-      causticGrad2.addColorStop(0, 'rgba(0, 255, 150, 1)');
-      causticGrad2.addColorStop(1, 'transparent');
-      ctx.fillStyle = causticGrad2;
+    // Right thermal vent glow
+    const rightVentX = w * 0.92;
+    const rightVentGrad = ctx.createRadialGradient(
+      rightVentX, h + 30, 0,
+      rightVentX, h + 30, h * 0.45
+    );
+    rightVentGrad.addColorStop(0, `rgba(255, 80, 15, ${CONFIG.ventGlow * 0.5})`);
+    rightVentGrad.addColorStop(0.2, `rgba(255, 50, 10, ${CONFIG.ventGlow * 0.35})`);
+    rightVentGrad.addColorStop(0.5, `rgba(80, 30, 10, ${CONFIG.ventGlow * 0.15})`);
+    rightVentGrad.addColorStop(1, 'transparent');
+    ctx.fillStyle = rightVentGrad;
+    ctx.fillRect(0, 0, w, h);
+
+    // Ambient green bioluminescence scattered in water
+    ctx.globalAlpha = 0.02;
+    const causticScale = 100;
+    for (let i = 0; i < 3; i++) {
+      const phase = i * 2.1 + t;
+      const bx = w * (0.3 + i * 0.2) + Math.sin(phase) * w * 0.15;
+      const by = h * (0.3 + i * 0.1) + Math.cos(phase * 0.7) * h * 0.1;
+
+      const bioGrad = ctx.createRadialGradient(bx, by, 0, bx, by, causticScale);
+      bioGrad.addColorStop(0, 'rgba(0, 255, 150, 1)');
+      bioGrad.addColorStop(0.5, 'rgba(0, 200, 100, 0.5)');
+      bioGrad.addColorStop(1, 'transparent');
+      ctx.fillStyle = bioGrad;
       ctx.fillRect(0, 0, w, h);
     }
     ctx.globalAlpha = 1;
 
-    // Energy source glow - green (generative, not realistic vent)
-    const ventGrad = ctx.createRadialGradient(cx, h + 50, 0, cx, h + 50, h * 0.7);
-    ventGrad.addColorStop(0, `rgba(0, 255, 100, ${CONFIG.ventGlow})`);
-    ventGrad.addColorStop(0.3, `rgba(0, 255, 50, ${CONFIG.ventGlow * 0.5})`);
-    ventGrad.addColorStop(0.6, `rgba(0, 200, 30, ${CONFIG.ventGlow * 0.2})`);
-    ventGrad.addColorStop(1, 'transparent');
-    ctx.fillStyle = ventGrad;
-    ctx.fillRect(0, 0, w, h);
+    // Bubbles rising from thermal vents (behind vent silhouettes)
+    for (const b of this.bubbles) {
+      // Bubble body - translucent with subtle refraction
+      const grad = ctx.createRadialGradient(
+        b.x - b.size * 0.3,
+        b.y - b.size * 0.3,
+        0,
+        b.x,
+        b.y,
+        b.size
+      );
+      // More realistic bubble colors - slight blue tint, mostly transparent
+      grad.addColorStop(0, `rgba(200, 230, 255, ${b.alpha * 0.4})`);
+      grad.addColorStop(0.4, `rgba(150, 200, 230, ${b.alpha * 0.15})`);
+      grad.addColorStop(0.8, `rgba(100, 180, 220, ${b.alpha * 0.1})`);
+      grad.addColorStop(1, `rgba(80, 150, 200, ${b.alpha * 0.05})`);
 
-    // Secondary energy hotspots
-    const vent2Grad = ctx.createRadialGradient(
-      cx - w * 0.2, h + 30, 0,
-      cx - w * 0.2, h + 30, h * 0.3
-    );
-    vent2Grad.addColorStop(0, `rgba(0, 255, 80, ${CONFIG.ventGlow * 0.4})`);
-    vent2Grad.addColorStop(1, 'transparent');
-    ctx.fillStyle = vent2Grad;
-    ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.size, 0, TAU);
+      ctx.fill();
 
-    const vent3Grad = ctx.createRadialGradient(
-      cx + w * 0.25, h + 40, 0,
-      cx + w * 0.25, h + 40, h * 0.35
-    );
-    vent3Grad.addColorStop(0, `rgba(0, 255, 60, ${CONFIG.ventGlow * 0.3})`);
-    vent3Grad.addColorStop(1, 'transparent');
-    ctx.fillStyle = vent3Grad;
-    ctx.fillRect(0, 0, w, h);
+      // Bubble outline/rim
+      ctx.strokeStyle = `rgba(180, 220, 255, ${b.alpha * 0.3})`;
+      ctx.lineWidth = 0.5;
+      ctx.stroke();
 
-    // Floating particles (behind molecules) - green spectrum
+      // Highlight reflection
+      ctx.fillStyle = `rgba(255, 255, 255, ${b.alpha * 0.6})`;
+      ctx.beginPath();
+      ctx.arc(b.x - b.size * 0.3, b.y - b.size * 0.35, b.size * 0.2, 0, TAU);
+      ctx.fill();
+    }
+
+    // Thermal vent silhouettes (in front of bubbles, behind molecules)
+    if (this.leftVent) this.leftVent.render();
+    if (this.rightVent) this.rightVent.render();
+
+    // Floating particles (marine snow / bioluminescent plankton)
     for (const p of this.particles) {
       const depthScale = 0.5 + ((p.z + 200) / 400) * 0.5;
-      // Use the stored green hue variation
-      ctx.fillStyle = `hsla(${p.hue}, 50%, 50%, ${p.alpha * depthScale})`;
+      // Mix of pale blue particles and occasional green bioluminescence
+      ctx.fillStyle = `hsla(${p.hue}, ${p.hue > 150 ? 60 : 30}%, ${p.hue > 150 ? 60 : 70}%, ${p.alpha * depthScale})`;
       ctx.beginPath();
       ctx.arc(p.x, p.y, p.size * depthScale, 0, TAU);
       ctx.fill();
     }
 
-    // Lightning flash
+    // Energy discharge flash (electrical discharge in water)
     if (this.lightningFlash) {
       const proj = this.camera.project(
         this.lightningFlash.x,
@@ -1379,15 +1015,15 @@ class PrimordialSoupDemo extends Game {
       const flashGrad = ctx.createRadialGradient(lx, ly, 0, lx, ly, 250);
       flashGrad.addColorStop(
         0,
-        `rgba(0, 255, 150, ${this.lightningFlash.intensity * 0.9})`
+        `rgba(200, 240, 255, ${this.lightningFlash.intensity * 0.95})`
       );
       flashGrad.addColorStop(
-        0.2,
-        `rgba(0, 255, 100, ${this.lightningFlash.intensity * 0.5})`
+        0.15,
+        `rgba(150, 220, 255, ${this.lightningFlash.intensity * 0.6})`
       );
       flashGrad.addColorStop(
-        0.5,
-        `rgba(0, 200, 80, ${this.lightningFlash.intensity * 0.2})`
+        0.4,
+        `rgba(80, 180, 255, ${this.lightningFlash.intensity * 0.25})`
       );
       flashGrad.addColorStop(1, 'transparent');
       ctx.fillStyle = flashGrad;
@@ -1405,77 +1041,77 @@ class PrimordialSoupDemo extends Game {
       mol.render(cx, cy);
     }
 
-    // Bubbles (in front of molecules) - green glow
-    for (const b of this.bubbles) {
-      const grad = ctx.createRadialGradient(
-        b.x - b.size * 0.3,
-        b.y - b.size * 0.3,
-        0,
-        b.x,
-        b.y,
-        b.size
-      );
-      grad.addColorStop(0, `rgba(0, 255, 100, ${b.alpha * 0.6})`);
-      grad.addColorStop(0.5, `rgba(0, 255, 80, ${b.alpha * 0.3})`);
-      grad.addColorStop(1, `rgba(0, 200, 60, ${b.alpha * 0.1})`);
+    // Reaction burst particles (energy release - white sparks)
+    ctx.globalCompositeOperation = 'lighter';
+    for (const b of this.reactionBursts) {
+      const proj = this.camera.project(b.x, b.y, b.z);
+      if (proj.scale <= 0) continue;
 
-      ctx.fillStyle = grad;
-      ctx.beginPath();
-      ctx.arc(b.x, b.y, b.size, 0, TAU);
-      ctx.fill();
+      const screenX = cx + proj.x;
+      const screenY = cy + proj.y;
+      const size = b.size * proj.scale;
+      const alpha = b.life;
 
-      ctx.fillStyle = `rgba(0, 255, 120, ${b.alpha * 0.5})`;
+      // White hot core
+      ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
       ctx.beginPath();
-      ctx.arc(b.x - b.size * 0.3, b.y - b.size * 0.3, b.size * 0.25, 0, TAU);
+      ctx.arc(screenX, screenY, size, 0, TAU);
       ctx.fill();
     }
+    ctx.globalCompositeOperation = 'source-over';
 
-    // Vignette overlay - dark green
+    // Vignette overlay - deep sea darkness at edges
     const vignetteGrad = ctx.createRadialGradient(
-      cx, cy, Math.min(w, h) * 0.3,
-      cx, cy, Math.max(w, h) * 0.8
+      cx, cy, Math.min(w, h) * 0.35,
+      cx, cy, Math.max(w, h) * 0.85
     );
     vignetteGrad.addColorStop(0, 'transparent');
-    vignetteGrad.addColorStop(1, 'rgba(0, 10, 5, 0.6)');
+    vignetteGrad.addColorStop(0.7, 'rgba(0, 5, 15, 0.3)');
+    vignetteGrad.addColorStop(1, 'rgba(0, 2, 8, 0.7)');
     ctx.fillStyle = vignetteGrad;
     ctx.fillRect(0, 0, w, h);
 
-    // UI - scale for mobile
-    const isMobile = Screen.isMobile;
-    const fontSize = isMobile ? 9 : 11;
-    const lineHeight = isMobile ? 14 : 18;
-    const maxLogWidth = isMobile ? w - 30 : w * 0.5;
-    
-    ctx.font = `${fontSize}px "Fira Code", monospace`;
-    ctx.textAlign = 'left';
+    // UI - scale for mobile (only show if showInfo is true)
+    if (this.showInfo) {
+      const isMobile = Screen.isMobile;
+      const fontSize = isMobile ? 9 : 11;
+      const lineHeight = isMobile ? 14 : 18;
+      const maxLogWidth = isMobile ? w - 30 : w * 0.5;
 
-    // Reaction log (compact on mobile) - terminal green
-    let y = 25;
-    for (const log of this.reactionLog) {
-      const alpha = Math.min(1, log.time);
-      ctx.fillStyle = `rgba(0, 255, 100, ${alpha * 0.9})`;
-      
-      // Truncate if too wide for mobile
-      let text = log.text;
-      if (isMobile && ctx.measureText(text).width > maxLogWidth) {
-        // Truncate with ellipsis
-        while (ctx.measureText(text + '…').width > maxLogWidth && text.length > 10) {
-          text = text.slice(0, -1);
+      ctx.font = `${fontSize}px "Fira Code", monospace`;
+      ctx.textAlign = 'left';
+
+      // Reaction log (compact on mobile) - terminal green
+      let y = 25;
+      for (const log of this.reactionLog) {
+        const alpha = Math.min(1, log.time);
+        ctx.fillStyle = `rgba(0, 255, 100, ${alpha * 0.9})`;
+
+        // Truncate if too wide for mobile
+        let text = log.text;
+        if (isMobile && ctx.measureText(text).width > maxLogWidth) {
+          // Truncate with ellipsis
+          while (ctx.measureText(text + '…').width > maxLogWidth && text.length > 10) {
+            text = text.slice(0, -1);
+          }
+          text += '…';
         }
-        text += '…';
+        ctx.fillText(text, 15, y);
+        y += lineHeight;
       }
-      ctx.fillText(text, 15, y);
-      y += lineHeight;
+
+      // Stats - terminal green
+      ctx.fillStyle = 'rgba(0, 255, 120, 0.7)';
+      ctx.textAlign = 'right';
+      ctx.fillText(`Molecules: ${this.molecules.length}`, w - 15, 25);
+      ctx.fillText(`Reactions: ${this.stats.reactions}`, w - 15, 25 + lineHeight);
+
+      const tierNames = ['Primordial', 'Precursors', 'Amino Acids', 'Peptides'];
+      ctx.fillText(`Max tier: ${tierNames[this.stats.maxTier] || '???'}`, w - 15, 25 + lineHeight * 2);
     }
 
-    // Stats - terminal green
-    ctx.fillStyle = 'rgba(0, 255, 120, 0.7)';
-    ctx.textAlign = 'right';
-    ctx.fillText(`Molecules: ${this.molecules.length}`, w - 15, 25);
-    ctx.fillText(`Reactions: ${this.stats.reactions}`, w - 15, 25 + lineHeight);
-
-    const tierNames = ['Primordial', 'Precursors', 'Amino Acids', 'Peptides'];
-    ctx.fillText(`Max tier: ${tierNames[this.stats.maxTier] || '???'}`, w - 15, 25 + lineHeight * 2);
+    // Render pipeline objects (UI buttons, legend dialog)
+    this.pipeline.render(ctx);
   }
 }
 
