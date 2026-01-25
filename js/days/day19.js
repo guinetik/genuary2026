@@ -113,15 +113,40 @@ class Neuron {
       // Dim green dot (original style)
       const inactiveSize = Math.max(2, minDotSize);
       if (grokMode > 0.5) {
-        const dimBrightness = 0.4;
-        ctx.fillStyle = `rgb(${Math.floor(rainbowR * dimBrightness)}, ${Math.floor(rainbowG * dimBrightness)}, ${Math.floor(rainbowB * dimBrightness)})`;
+        // Casino jackpot wave effect! Sweeps left to right
+        const waveSpeed = 2.0;  // Speed of wave
+        const waveWidth = 4.0;  // Width of the glow band (in columns)
+        const cols = 16;
+
+        // Wave position (0-1 range, loops)
+        const wavePos = (time * waveSpeed) % 1.0;
+        // Convert to column space (0 to cols+waveWidth to let it fully exit)
+        const waveCenterCol = wavePos * (cols + waveWidth * 2) - waveWidth;
+
+        // Distance from wave center (normalized)
+        const distFromWave = Math.abs(col - waveCenterCol);
+        // Brightness falloff - peaks at wave center
+        const waveBrightness = Math.max(0, 1 - distFromWave / waveWidth);
+
+        // Base brightness + wave boost
+        const baseBrightness = 0.3;
+        const peakBrightness = 1.0;
+        const brightness = baseBrightness + waveBrightness * (peakBrightness - baseBrightness);
+
+        // Size also pulses with wave
+        const waveSize = inactiveSize * (1 + waveBrightness * 0.5);
+
+        ctx.fillStyle = `rgb(${Math.floor(rainbowR * brightness)}, ${Math.floor(rainbowG * brightness)}, ${Math.floor(rainbowB * brightness)})`;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, waveSize, 0, Math.PI * 2);
+        ctx.fill();
       } else {
         // Original: dim green
         ctx.fillStyle = 'rgba(0, 255, 0, 0.1)';
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, inactiveSize, 0, Math.PI * 2);
+        ctx.fill();
       }
-      ctx.beginPath();
-      ctx.arc(this.x, this.y, inactiveSize, 0, Math.PI * 2);
-      ctx.fill();
       return;
     }
     
@@ -623,8 +648,10 @@ class Day19Demo extends Game {
       this.restart();
     });
     
-    // Debug: Press 'g' to toggle grok mode
-    // Instead of just visuals, swap test set with train set so accuracy rises naturally
+    // DEBUG: Press 'G' to manually toggle grok mode
+    // WHY: Grokking takes ~5 minutes to occur naturally. This shortcut lets you
+    // test the rainbow/jackpot visual effects immediately without waiting.
+    // It swaps the test set with train set so accuracy rises and visuals trigger.
     this.grokModeOverride = false;
     this.originalTestData = null; // Store original test data for restoration
     window.addEventListener('keydown', (e) => {
