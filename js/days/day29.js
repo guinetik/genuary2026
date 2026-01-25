@@ -1,16 +1,23 @@
 /**
- * Day 29: Genetic Evolution and Mutation
- *
+ * Genuary 2026 - Day 29
+ * Prompt: "Genetic evolution"
+ * 
+ * @fileoverview SEIR Epidemic Simulation with Viral Evolution
+ * 
  * COVID-inspired SEIR epidemic simulation with viral evolution.
  * Procedurally generated dungeon with rooms connected by doors.
  * Agents walk around, spread disease. Virus mutates creating variants.
  * Hospital provides vaccination and treatment.
- *
+ * 
  * Features:
  * - 100 agents, some starting vaccinated
  * - Virus mutates when blocked by vaccine, creating new variants
  * - Greek letter naming for variants (Alpha, Beta, Delta, Omicron...)
  * - Each variant has different transmissibility and vaccine resistance
+ * 
+ * @author guinetik
+ * @see {@link https://genuary.art|Genuary}
+ * @see {@link https://gcanvas.guinetik.com|GCanvas Library}
  */
 import { Game, Painter, ToggleButton, Tweenetik, Easing, Screen } from "@guinetik/gcanvas";
 
@@ -168,9 +175,14 @@ function createDungeon(gridWidth, gridHeight) {
   };
 
   // 2. Calculate center position for hospital
-  const hospitalSize = 8;
-  const hospitalX = Math.floor(gridWidth / 2) - Math.floor(hospitalSize / 2);
-  const hospitalY = Math.floor(gridHeight / 2) - Math.floor(hospitalSize / 2);
+  // Make hospital larger to match thicker walls - interior should be bigger
+  const hospitalSize = 10; // Increased from 8 to 10 for better proportion with thick walls
+  const gridCenterX = Math.floor(gridWidth / 2);
+  const gridCenterY = Math.floor(gridHeight / 2);
+  // Center hospital so its center aligns with grid center
+  // For even-sized hospital, center it properly
+  const hospitalX = gridCenterX - Math.floor(hospitalSize / 2);
+  const hospitalY = gridCenterY - Math.floor(hospitalSize / 2);
   
   // Place hospital (will be converted to hospital_wall later)
   const hospital = placeRoom(hospitalX, hospitalY, hospitalSize, hospitalSize, "top");
@@ -183,7 +195,11 @@ function createDungeon(gridWidth, gridHeight) {
   //    [BL]  [Bot]   [BR]
   
   const spacing = 5; // Space between hospital and top/bottom rooms
-  const cornerMargin = 4; // Distance from border walls
+  // Calculate symmetric margins - ensure left and right columns are equidistant from hospital center
+  const hospitalCenterX = hospitalX + Math.floor(hospitalSize / 2);
+  const leftMargin = 4; // Distance from left edge
+  const rightMargin = gridWidth - hospitalCenterX - (hospitalCenterX - leftMargin); // Symmetric to left
+  const cornerMargin = Math.min(leftMargin, rightMargin); // Use smaller to ensure rooms fit
   
   // === Middle column: Top and Bottom rooms (above/below hospital) ===
   
@@ -225,33 +241,49 @@ function createDungeon(gridWidth, gridHeight) {
   rooms.push(placeRoom(leftColX, gridHeight - cornerMargin - blRoomH - 1, blRoomW, blRoomH, "right"));
   
   // === Right column: 3 rooms aligned vertically ===
+  // Position symmetric to left column - ensure right edge aligns with gridWidth - cornerMargin
+  // Left column starts at cornerMargin, so right column should end at gridWidth - cornerMargin
   
   // Top-right corner room
   const trRoomW = random(4, 6);
   const trRoomH = random(4, 5);
-  rooms.push(placeRoom(gridWidth - cornerMargin - trRoomW - 1, cornerMargin, trRoomW, trRoomH, "left"));
+  // Room interior should end before gridWidth - cornerMargin, so right wall is at gridWidth - cornerMargin - 1
+  const trRoomX = gridWidth - cornerMargin - 1 - trRoomW;
+  rooms.push(placeRoom(trRoomX, cornerMargin, trRoomW, trRoomH, "left"));
   
   // Middle-right room (aligned with hospital row)
   const mrRoomW = random(4, 6);
   const mrRoomH = random(5, 7);
   const mrRoomY = Math.floor(gridHeight / 2) - Math.floor(mrRoomH / 2);
-  rooms.push(placeRoom(gridWidth - cornerMargin - mrRoomW - 1, mrRoomY, mrRoomW, mrRoomH, "left"));
+  const mrRoomX = gridWidth - cornerMargin - 1 - mrRoomW;
+  rooms.push(placeRoom(mrRoomX, mrRoomY, mrRoomW, mrRoomH, "left"));
   
   // Bottom-right corner room
   const brRoomW = random(4, 6);
   const brRoomH = random(4, 5);
-  rooms.push(placeRoom(gridWidth - cornerMargin - brRoomW - 1, gridHeight - cornerMargin - brRoomH - 1, brRoomW, brRoomH, "left"));
+  const brRoomX = gridWidth - cornerMargin - 1 - brRoomW;
+  rooms.push(placeRoom(brRoomX, gridHeight - cornerMargin - brRoomH - 1, brRoomW, brRoomH, "left"));
 
   return { grid, rooms };
 }
 
 // Convert hospital room to white walls with doors on all 4 sides
+// Makes walls 2 cells thick for better visibility and prominence
 function setupHospital(grid, rooms) {
   // Find the hospital room (already marked isHospital in createDungeon)
   const hospital = rooms.find(r => r.isHospital);
   if (!hospital) return null;
 
-  // Change its walls to hospital walls
+  // Calculate door positions for perfect symmetry
+  // Use true grid center: for 60-cell grid, center is 29.5, so we use 29 for better balance
+  // This gives 29 cells left (0-28) and 30 cells right (30-59), which is closer to symmetric
+  const gridWidth = grid[0].length;
+  const gridHeight = grid.length;
+  // For even dimensions, use floor(center) - 1 for better visual balance
+  const gridCenterX = Math.floor((gridWidth - 1) / 2);
+  const gridCenterY = Math.floor((gridHeight - 1) / 2);
+  
+  // Change its walls to hospital walls (1-cell thick from placeRoom)
   for (let ry = hospital.y - 1; ry <= hospital.y + hospital.height; ry++) {
     for (let rx = hospital.x - 1; rx <= hospital.x + hospital.width; rx++) {
       if (grid[ry] && grid[ry][rx]) {
@@ -262,25 +294,79 @@ function setupHospital(grid, rooms) {
     }
   }
   
-  // Add doors on all 4 sides (centered on each wall)
-  const centerX = hospital.x + Math.floor(hospital.width / 2);
-  const centerY = hospital.y + Math.floor(hospital.height / 2);
+  // Add outer layer of hospital walls (2-cell thick walls for prominence)
+  // But preserve door openings by not placing outer walls where doors will be
+  const wallThickness = 1; // Additional layer thickness
+  const outerY1 = hospital.y - 1 - wallThickness;
+  const outerY2 = hospital.y + hospital.height + wallThickness;
+  const outerX1 = hospital.x - 1 - wallThickness;
+  const outerX2 = hospital.x + hospital.width + wallThickness;
   
-  // Top door
-  grid[hospital.y - 1][centerX].type = "door";
-  // Bottom door
-  grid[hospital.y + hospital.height][centerX].type = "door";
-  // Left door
-  grid[centerY][hospital.x - 1].type = "door";
-  // Right door
-  grid[centerY][hospital.x + hospital.width].type = "door";
+  // Calculate door positions at hospital center for perfect symmetry
+  // Hospital center aligns with grid center, so use hospital's geometric center
+  const hospitalCenterX = hospital.x + Math.floor(hospital.width / 2);
+  const hospitalCenterY = hospital.y + Math.floor(hospital.height / 2);
+  const doorX = hospitalCenterX;
+  const doorY = hospitalCenterY;
   
-  // Store door positions for reference
+  // Top and bottom outer walls (skip door positions)
+  for (let rx = outerX1; rx <= outerX2; rx++) {
+    if (rx >= 0 && rx < grid[0].length) {
+      // Skip door position
+      if (rx === doorX) continue;
+      
+      // Top outer wall
+      if (outerY1 >= 0 && outerY1 < grid.length && grid[outerY1][rx].type === "floor") {
+        grid[outerY1][rx].type = "hospital_wall";
+      }
+      // Bottom outer wall
+      if (outerY2 >= 0 && outerY2 < grid.length && grid[outerY2][rx].type === "floor") {
+        grid[outerY2][rx].type = "hospital_wall";
+      }
+    }
+  }
+  
+  // Left and right outer walls (skip door positions)
+  for (let ry = outerY1; ry <= outerY2; ry++) {
+    if (ry >= 0 && ry < grid.length) {
+      // Skip door position
+      if (ry === doorY) continue;
+      
+      // Left outer wall
+      if (outerX1 >= 0 && outerX1 < grid[0].length && grid[ry][outerX1].type === "floor") {
+        grid[ry][outerX1].type = "hospital_wall";
+      }
+      // Right outer wall
+      if (outerX2 >= 0 && outerX2 < grid[0].length && grid[ry][outerX2].type === "floor") {
+        grid[ry][outerX2].type = "hospital_wall";
+      }
+    }
+  }
+  
+  // Add doors on all 4 sides at true grid center for perfect symmetry
+  // Top door (in inner wall, aligned with grid center)
+  if (hospital.y - 1 >= 0 && doorX >= 0 && doorX < grid[0].length) {
+    grid[hospital.y - 1][doorX].type = "door";
+  }
+  // Bottom door (in inner wall, aligned with grid center)
+  if (hospital.y + hospital.height < grid.length && doorX >= 0 && doorX < grid[0].length) {
+    grid[hospital.y + hospital.height][doorX].type = "door";
+  }
+  // Left door (in inner wall, aligned with grid center)
+  if (doorY >= 0 && doorY < grid.length && hospital.x - 1 >= 0) {
+    grid[doorY][hospital.x - 1].type = "door";
+  }
+  // Right door (in inner wall, aligned with grid center)
+  if (doorY >= 0 && doorY < grid.length && hospital.x + hospital.width < grid[0].length) {
+    grid[doorY][hospital.x + hospital.width].type = "door";
+  }
+  
+  // Store door positions for reference (using grid center for symmetry)
   hospital.doors = [
-    { x: centerX, y: hospital.y - 1 },           // top
-    { x: centerX, y: hospital.y + hospital.height }, // bottom
-    { x: hospital.x - 1, y: centerY },           // left
-    { x: hospital.x + hospital.width, y: centerY }  // right
+    { x: doorX, y: hospital.y - 1 },           // top
+    { x: doorX, y: hospital.y + hospital.height }, // bottom
+    { x: hospital.x - 1, y: doorY },           // left
+    { x: hospital.x + hospital.width, y: doorY }  // right
   ];
 
   return hospital;
@@ -1150,28 +1236,26 @@ class Day29Demo extends Game {
   }
 
   calculateGrid() {
-    // Calculate cell size to maintain square cells (prevent stretching on mobile)
-    // Use the smaller dimension to ensure cells stay square
-    const minDim = Math.min(this.width, this.height);
-    const cellSize = Math.min(
-      this.width / this.gridWidth,
-      this.height / this.gridHeight
-    );
+    // Calculate cell size to fill the screen while maintaining square cells
+    // Use "cover" strategy: scale to fill screen, keeping rooms proportional
     
-    // On mobile/portrait, use square cells based on width to prevent vertical stretching
-    // On desktop/landscape, use square cells based on height to prevent horizontal stretching
-    const isPortrait = this.height > this.width;
-    const baseSize = isPortrait 
-      ? this.width / this.gridWidth  // Portrait: base on width
-      : this.height / this.gridHeight; // Landscape: base on height
+    const cellSizeByWidth = this.width / this.gridWidth;
+    const cellSizeByHeight = this.height / this.gridHeight;
+    
+    // Use the larger cell size to ensure grid fills the screen
+    // This keeps cells square and maximizes screen usage
+    const cellSize = Math.max(cellSizeByWidth, cellSizeByHeight);
     
     // Use square cells (same width and height)
-    this.cellW = baseSize;
-    this.cellH = baseSize;
+    this.cellW = cellSize;
+    this.cellH = cellSize;
     
-    // Calculate offsets to center the grid
+    // Calculate grid pixel dimensions
     const gridPixelWidth = this.gridWidth * this.cellW;
     const gridPixelHeight = this.gridHeight * this.cellH;
+    
+    // Center the grid - it will fill the screen in one dimension
+    // The other dimension may extend beyond bounds (will be clipped by canvas)
     this.gridOffsetX = (this.width - gridPixelWidth) / 2;
     this.gridOffsetY = (this.height - gridPixelHeight) / 2;
   }
@@ -1489,11 +1573,15 @@ class Day29Demo extends Game {
     }
 
     // Draw medical cross in hospital center (account for grid offset)
+    // Use same center calculation as doors for perfect alignment
     if (this.hospital) {
       const h = this.hospital;
-      // Use pixel-based center for proper alignment
-      const centerPxX = this.gridOffsetX + (h.x + h.width / 2) * this.cellW + this.cellW / 2;
-      const centerPxY = this.gridOffsetY + (h.y + h.height / 2) * this.cellH + this.cellH / 2;
+      // Calculate center using same integer math as door placement
+      const hospitalCenterX = h.x + Math.floor(h.width / 2);
+      const hospitalCenterY = h.y + Math.floor(h.height / 2);
+      // Convert to pixel coordinates (center of cell)
+      const centerPxX = this.gridOffsetX + hospitalCenterX * this.cellW + this.cellW / 2;
+      const centerPxY = this.gridOffsetY + hospitalCenterY * this.cellH + this.cellH / 2;
       
       ctx.fillStyle = CONFIG.colors.hospitalWall;
       ctx.shadowColor = CONFIG.colors.hospitalWall;
@@ -1916,6 +2004,17 @@ class Day29Demo extends Game {
   }
 }
 
+/**
+ * Create Day 29 visualization
+ * 
+ * Factory function that creates and starts the SEIR Epidemic demo.
+ * Returns a control object with stop() method for lifecycle management.
+ * 
+ * @param {HTMLCanvasElement} canvas - The canvas element to render to
+ * @returns {Object} Control object with stop() method and game instance
+ * @returns {Function} returns.stop - Function to stop the game
+ * @returns {Day29Demo} returns.game - The game instance
+ */
 export default function day29(canvas) {
   const game = new Day29Demo(canvas);
   game.start();
