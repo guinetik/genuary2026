@@ -24,7 +24,6 @@ import {
   Painter,
   Camera3D,
   GameObject,
-  Motion,
   Easing,
   Screen,
   zoneTemperature,
@@ -46,24 +45,24 @@ const CONFIG = {
   // Heat zones (normalized y: 0 = top, 1 = bottom)
   heatZone: 0.85, // Hydrothermal vent at bottom
   coolZone: 0.15, // Cold surface water at top
-  heatRate: 0.008,
+  heatRate: 0.06, // Was 0.008 - much faster temperature changes
 
   // Thermal physics (buoyancy handles both rise AND sink)
-  buoyancyStrength: 80, // Force coefficient
+  buoyancyStrength: 150, // Gentler vertical movement
   neutralTemp: 0.5,
 
   // Movement
-  baseSpeed: 15,
-  damping: 0.97,
-  
-  // Organic motion (using Motion.float)
-  floatRadius: 60, // How far molecules drift from their path
-  floatSpeed: 0.4, // Float animation speed
-  floatRandomness: 0.7, // Randomness in float pattern
-  
-  // Ocean currents (using Motion.oscillate)
-  tideStrength: 100, // Horizontal tide force
-  tidePeriod: 8, // Seconds per tide cycle
+  baseSpeed: 25, // Was 15
+  damping: 0.985, // Was 0.97 - less friction for more visible motion
+
+  // Convection currents (replaces Motion.float/oscillate)
+  convectionCurrentX: 80, // Horizontal circulation force
+  convectionTurbulence: 40, // Random jitter for organic feel
+
+  // Spatial bounds
+  worldWidthRatio: 0.95, // Was implicit 0.8
+  worldHeightRatio: 0.95, // Was implicit 0.9
+  worldDepth: 400, // Was 200
 
   // Heat transfer between molecules
   heatTransferDist: 80,
@@ -74,10 +73,10 @@ const CONFIG = {
   reactionCooldown: 0.3,
   baseReactionChance: 0.4, // Much higher base chance
 
-  // Collision / separation
-  separationPadding: 0, // No extra padding - only separate when truly overlapping
-  separationStiffness: 0.5, // How much of overlap to correct per frame (0-1)
-  collisionDamping: 0.25, // Velocity damping on collision (soft bounce)
+  // Collision / separation - stronger for bouncy molecules
+  separationPadding: 5, // Buffer zone around molecules
+  separationStiffness: 0.85, // Was 0.5 - faster separation
+  collisionDamping: 0.6, // Was 0.25 - bouncier collisions
 
   // Lightning
   lightningInterval: 4, // Seconds between strikes
@@ -105,14 +104,14 @@ const TIERS = {
   PEPTIDE: 3, // Di/tripeptides
 };
 
-// Atom visual properties - Terminal green spectrum
-// Differentiated by hue offset, saturation, and lightness
+// Atom visual properties - CPK coloring (standard chemistry convention)
+// Adjusted for visibility on black background
 const ATOMS = {
-  C: { radius: 18, hue: 135, sat: 60, light: 45, name: 'Carbon' },      // Base green
-  H: { radius: 10, hue: 150, sat: 40, light: 70, name: 'Hydrogen' },  // Yellow-green, lighter
-  O: { radius: 16, hue: 120, sat: 80, light: 50, name: 'Oxygen' },      // Cyan-green, vibrant
-  N: { radius: 15, hue: 145, sat: 70, light: 55, name: 'Nitrogen' },  // Yellow-green, medium
-  S: { radius: 20, hue: 125, sat: 75, light: 60, name: 'Sulfur' },    // Blue-green, brighter
+  C: { radius: 18, hue: 0,   sat: 0,  light: 40, name: 'Carbon' },     // Dark gray
+  H: { radius: 10, hue: 0,   sat: 0,  light: 90, name: 'Hydrogen' },   // White/light gray
+  O: { radius: 16, hue: 0,   sat: 85, light: 55, name: 'Oxygen' },     // Red
+  N: { radius: 15, hue: 220, sat: 80, light: 55, name: 'Nitrogen' },   // Blue
+  S: { radius: 20, hue: 50,  sat: 90, light: 55, name: 'Sulfur' },     // Yellow
 };
 
 // Molecule templates - primordial soup ingredients
@@ -437,22 +436,16 @@ class Molecule3D extends GameObject {
     this.reactionCooldown = 0;
     this.flash = 0; // Visual flash on reaction
 
-    // Molecular rotation
+    // Molecular rotation - gentle tumble
     this.rotX = Math.random() * TAU;
     this.rotY = Math.random() * TAU;
     this.rotZ = Math.random() * TAU;
-    this.rotSpeedX = (Math.random() - 0.5) * 0.5;
-    this.rotSpeedY = (Math.random() - 0.5) * 0.5;
-    this.rotSpeedZ = (Math.random() - 0.5) * 0.2;
+    this.rotSpeedX = (Math.random() - 0.5) * 0.15;
+    this.rotSpeedY = (Math.random() - 0.5) * 0.15;
+    this.rotSpeedZ = (Math.random() - 0.5) * 0.08;
 
-    // Time offsets for staggered animations (stateless Motion needs unique times)
-    this.timeOffset = Math.random() * 100;
-    this.tideOffset = Math.random() * CONFIG.tidePeriod;
-    
-    // Base position that convection moves (float orbits around this)
-    this.baseX = this.x;
-    this.baseY = this.y;
-    this.baseZ = this.z;
+    // Turbulence phase offsets for organic movement
+    this.turbulencePhase = Math.random() * Math.PI * 2;
 
     // Store atom data for rendering
     this.atomData = this.template.atoms.map((a) => ({
@@ -488,9 +481,9 @@ class Molecule3D extends GameObject {
     const demo = this.game;
     const halfHeight = demo.worldHeight / 2;
     const time = demo.totalTime;
-    
+
     // Normalized Y for temperature zones (0 = top/cold, 1 = bottom/hot)
-    const normalizedY = (this.baseY + halfHeight) / demo.worldHeight;
+    const normalizedY = (this.y + halfHeight) / demo.worldHeight;
 
     // === TEMPERATURE ZONE ===
     this.temperature = zoneTemperature(
@@ -503,76 +496,58 @@ class Molecule3D extends GameObject {
       }
     );
 
-    // === THERMAL CONVECTION (moves base position) ===
+    // === THERMAL BUOYANCY (dramatic vertical movement) ===
+    // Hot molecules rise strongly, cold sink strongly
     const buoyancy = thermalBuoyancy(
       this.temperature,
       CONFIG.neutralTemp,
       CONFIG.buoyancyStrength
     );
     this.vy -= buoyancy * dt;
-    
-    // Apply damping to convection velocity
+
+    // === OCEAN CURRENTS (wavy horizontal drift) ===
+    // Slow sinusoidal drift that varies with depth and time
+    // This brings molecules together for reactions
+    const driftPhase = time * 0.3 + normalizedY * 2.5 + this.turbulencePhase;
+    const driftStrength = CONFIG.convectionCurrentX * (0.6 + this.temperature * 0.4);
+    this.vx += Math.sin(driftPhase) * driftStrength * dt;
+
+    // Slight Z drift too for 3D ocean feel
+    const zDriftPhase = time * 0.2 + normalizedY * 1.8 + this.turbulencePhase + 1.5;
+    this.vz += Math.sin(zDriftPhase) * driftStrength * 0.5 * dt;
+
+    // === TURBULENCE (organic random jitter) ===
+    // Phase-shifted noise for each molecule - adds organic feel
+    const turbPhase = this.turbulencePhase + time;
+    const turbStrength = CONFIG.convectionTurbulence * (0.4 + this.temperature * 0.3);
+    this.vx += Math.sin(turbPhase * 1.3) * turbStrength * dt;
+    this.vy += Math.sin(turbPhase * 1.7 + 1.5) * turbStrength * 0.2 * dt;
+    this.vz += Math.sin(turbPhase * 1.1 + 3.0) * turbStrength * 0.6 * dt;
+
+    // === DAMPING ===
     const dampFactor = Math.pow(CONFIG.damping, dt * 60);
     this.vx *= dampFactor;
     this.vy *= dampFactor;
     this.vz *= dampFactor;
-    
-    // Update base position with convection
-    this.baseX += this.vx * dt;
-    this.baseY += this.vy * dt;
-    this.baseZ += this.vz * dt;
 
-    // === ORGANIC FLOAT (stateless Motion.float) ===
-    // Each molecule has unique time offset for variety
-    const myTime = time + this.timeOffset;
-    const floatRadius = CONFIG.floatRadius * (0.7 + this.temperature * 0.6);
-    
-    const floatResult = Motion.float(
-      { x: 0, y: 0 }, // Center at origin, we add offset to base
-      myTime,
-      15, // Duration of one float cycle
-      CONFIG.floatSpeed * (0.8 + this.temperature * 0.4),
-      CONFIG.floatRandomness,
-      floatRadius,
-      true,
-      Easing.smoothstep
-    );
+    // === UPDATE POSITION ===
+    this.x += this.vx * dt;
+    this.y += this.vy * dt;
+    this.z += this.vz * dt;
 
-    // === OCEAN TIDES (stateless Motion.oscillate) ===
-    const tideTime = time + this.tideOffset;
-    const tideResult = Motion.oscillate(
-      -CONFIG.tideStrength,
-      CONFIG.tideStrength,
-      tideTime,
-      CONFIG.tidePeriod,
-      true,
-      Easing.easeInOutSine
-    );
-    
-    // Depth affects tide - surface stronger
-    const depthFactor = 1 - normalizedY * 0.4;
-    const tideX = tideResult.value * depthFactor;
-
-    // === FINAL POSITION ===
-    // Base (from convection) + float offset + tide offset
-    this.x = this.baseX + floatResult.offsetX + tideX;
-    this.y = this.baseY + floatResult.offsetY * 0.3; // Less vertical float
-    this.z = this.baseZ + floatResult.offsetY * 0.5; // Use float Y for Z depth
-
-    // Tumble based on velocity - rotation coupled to motion
-    // Velocity magnitude affects tumble intensity
+    // === TUMBLE (gentle rotation coupled to motion) ===
     const speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy + this.vz * this.vz);
-    const tumbleIntensity = 0.02 + speed * 0.008;
-    
-    // Cross-axis rotation: moving in X causes Y/Z rotation, etc.
-    // This creates a "rolling through fluid" effect
-    this.rotX += (this.vy * 0.015 + this.rotSpeedX * 0.3) * tumbleIntensity * dt * 60;
-    this.rotY += (this.vx * 0.015 + this.rotSpeedY * 0.3) * tumbleIntensity * dt * 60;
-    this.rotZ += (this.vz * 0.01 + this.rotSpeedZ * 0.2) * tumbleIntensity * dt * 60;
+    // Much gentler tumble - capped velocity influence
+    const tumbleIntensity = 0.015 + Math.min(speed * 0.002, 0.03);
+
+    // Cross-axis rotation creates "rolling through fluid" effect
+    this.rotX += (this.vy * 0.008 + this.rotSpeedX * 0.2) * tumbleIntensity * dt * 60;
+    this.rotY += (this.vx * 0.008 + this.rotSpeedY * 0.2) * tumbleIntensity * dt * 60;
+    this.rotZ += (this.vz * 0.005 + this.rotSpeedZ * 0.15) * tumbleIntensity * dt * 60;
 
     // Decay cooldown and flash
     if (this.reactionCooldown > 0) this.reactionCooldown -= dt;
-    if (this.flash > 0) this.flash -= dt * 2;
+    if (this.flash > 0) this.flash -= dt * 0.5; // Slow fade (~2 sec for full)
   }
 
   /**
@@ -707,31 +682,13 @@ class Molecule3D extends GameObject {
     // Depth affects lightness
     const depthLightMod = Math.max(-15, Math.min(10, atom.worldZ / 30));
 
-    // Temperature-shifted colors - subtle green variations
-    const tempShift = (this.temperature - 0.5) * 15; // Smaller shift for cohesion
-    const hue = Math.round(props.hue + tempShift);
-    const sat = Math.round(Math.min(100, props.sat + this.temperature * 15));
-    const light = Math.round(props.light + depthLightMod);
+    // Temperature affects lightness (hot = brighter, cold = darker)
+    // For CPK grays, this creates warm/cool feel without breaking color identity
+    const tempLight = (this.temperature - 0.5) * 12; // Hot brightens, cold darkens
+    const hue = props.hue;
+    const sat = props.sat;
+    const light = Math.round(Math.max(20, Math.min(90, props.light + depthLightMod + tempLight)));
 
-    // Reaction flash - green glow
-    if (this.flash > 0) {
-      const flashRadius = radius * (2 + this.flash);
-      const flashGrad = ctx.createRadialGradient(
-        atom.screenX,
-        atom.screenY,
-        0,
-        atom.screenX,
-        atom.screenY,
-        flashRadius
-      );
-      flashGrad.addColorStop(0, `rgba(0, 255, 100, ${this.flash * 0.8})`);
-      flashGrad.addColorStop(0.4, `rgba(0, 255, 50, ${this.flash * 0.4})`);
-      flashGrad.addColorStop(1, 'transparent');
-      ctx.fillStyle = flashGrad;
-      ctx.beginPath();
-      ctx.arc(atom.screenX, atom.screenY, flashRadius, 0, TAU);
-      ctx.fill();
-    }
 
     // Atom sphere with terminal-style gradient (sharper, less photorealistic)
     const grad = ctx.createRadialGradient(
@@ -758,11 +715,18 @@ class Molecule3D extends GameObject {
     ctx.beginPath();
     ctx.arc(atom.screenX, atom.screenY, radius, 0, TAU);
     ctx.fill();
-    
-    // Add subtle outline for definition (terminal style)
-    ctx.strokeStyle = `hsla(${hue}, ${sat}%, ${light}%, 0.3)`;
-    ctx.lineWidth = 0.5;
-    ctx.stroke();
+
+    // Reaction effect - green outline that fades
+    if (this.flash > 0) {
+      ctx.strokeStyle = `rgba(0, 255, 100, ${Math.min(1, this.flash * 1.5)})`;
+      ctx.lineWidth = 2 * atom.screenScale * (0.5 + this.flash * 0.5);
+      ctx.stroke();
+    } else {
+      // Normal subtle outline for definition
+      ctx.strokeStyle = `hsla(${hue}, ${sat}%, ${light}%, 0.3)`;
+      ctx.lineWidth = 0.5;
+      ctx.stroke();
+    }
   }
 
   /**
@@ -800,6 +764,7 @@ class PrimordialSoupDemo extends Game {
 
   init() {
     super.init();
+    Screen.init(this);  // Initialize screen detection
     Painter.init(this.ctx);
 
     // Setup camera
@@ -833,27 +798,18 @@ class PrimordialSoupDemo extends Game {
     // Stats
     this.stats = { reactions: 0, maxTier: 0 };
 
-    // World bounds
-    this.worldWidth = this.width * 0.8;
-    this.worldHeight = this.height * 0.9;
+    // World bounds - expanded for better spread
+    this.worldWidth = this.width * CONFIG.worldWidthRatio;
+    this.worldHeight = this.height * CONFIG.worldHeightRatio;
 
-    // Calculate scale based on canvas size
-    // Reference: 1920x1080 = ~2M pixels
-    const refPixels = 1920 * 1080;
-    const currentPixels = this.width * this.height;
-    const scale = currentPixels / refPixels;
-    
-    // Scale molecule count proportionally
-    this.moleculeCount = Math.floor(
-      Math.min(CONFIG.maxMolecules,
-        Math.max(CONFIG.minMolecules, CONFIG.baseMolecules * scale))
-    );
-    
-    // Scale ambient effects too
-    const bubbleCount = Math.floor(CONFIG.bubbleCount * Math.max(0.5, scale));
-    const particleCount = Math.floor(CONFIG.particleCount * Math.max(0.5, scale));
-    
-    console.log(`[Day25] Canvas: ${this.width}x${this.height}, scale: ${scale.toFixed(2)}, molecules: ${this.moleculeCount}, bubbles: ${bubbleCount}, particles: ${particleCount}`);
+    // Use Screen.responsive for device-appropriate counts
+    // Mobile: fewer for performance, Desktop: more for fuller scene
+    // Tuned for good density without overcrowding
+    this.moleculeCount = Screen.responsive(18, 30, 45);
+    const bubbleCount = Screen.responsive(15, 25, 35);
+    const particleCount = Screen.responsive(25, 40, 55);
+
+    console.log(`[Day25] Screen: ${Screen.isMobile ? 'mobile' : Screen.isTablet ? 'tablet' : 'desktop'}, molecules: ${this.moleculeCount}`);
 
     // Ambient bubbles
     this.bubbles = [];
@@ -985,9 +941,44 @@ class PrimordialSoupDemo extends Game {
 
     const px = x ?? (Math.random() - 0.5) * this.worldWidth;
     const py = y ?? (Math.random() - 0.5) * this.worldHeight;
-    const pz = z ?? (Math.random() - 0.5) * 200;
+    const pz = z ?? (Math.random() - 0.5) * CONFIG.worldDepth;
 
     const mol = new Molecule3D(this, key, { x: px, y: py, z: pz });
+    this.molecules.push(mol);
+    return mol;
+  }
+
+  /**
+   * Spawn a primordial molecule from off-screen (left or right)
+   * Simulates fresh reactants being brought in by ocean currents
+   */
+  spawnFromOffscreen() {
+    // Check soft limit before spawning
+    const softLimit = Math.min(CONFIG.maxMolecules, this.moleculeCount * 3);
+    if (this.molecules.length >= softLimit) return null;
+
+    // Pick random primordial molecule
+    const key = PRIMORDIAL_KEYS[Math.floor(Math.random() * PRIMORDIAL_KEYS.length)];
+
+    // Spawn off-screen left or right
+    const fromLeft = Math.random() < 0.5;
+    const margin = 100; // How far off-screen
+    const px = fromLeft
+      ? -this.worldWidth / 2 - margin
+      : this.worldWidth / 2 + margin;
+    const py = (Math.random() - 0.5) * this.worldHeight * 0.8; // Mostly in middle band
+    const pz = (Math.random() - 0.5) * CONFIG.worldDepth * 0.6;
+
+    const mol = new Molecule3D(this, key, { x: px, y: py, z: pz });
+
+    // Give gentle drift velocity toward center
+    mol.vx = fromLeft ? 15 + Math.random() * 10 : -15 - Math.random() * 10;
+    mol.vy = (Math.random() - 0.5) * 5;
+    mol.vz = (Math.random() - 0.5) * 5;
+
+    // Start at neutral temp - will warm/cool based on position
+    mol.temperature = 0.5;
+
     this.molecules.push(mol);
     return mol;
   }
@@ -1072,7 +1063,7 @@ class PrimordialSoupDemo extends Game {
               z: midZ + offset,
             });
             product.temperature = avgTemp;
-            product.flash = reaction.energy;
+            product.flash = 1.0; // Start with full green outline effect
             product.reactionCooldown = CONFIG.reactionCooldown;
             product.vx = (mol1.vx + mol2.vx) / 2 + (Math.random() - 0.5) * 15;
             product.vy = (mol1.vy + mol2.vy) / 2 + (Math.random() - 0.5) * 15;
@@ -1096,6 +1087,10 @@ class PrimordialSoupDemo extends Game {
             time: 4,
           });
           if (this.reactionLog.length > 5) this.reactionLog.pop();
+
+          // Spawn new primordial molecule from off-screen (brought in by current)
+          // This maintains a flow of fresh reactants
+          this.spawnFromOffscreen();
 
           break;
         }
@@ -1150,12 +1145,12 @@ class PrimordialSoupDemo extends Game {
           const correction = overlap * stiffness * 0.5;
           
           // Push apart (m1 moves opposite to direction, m2 moves along direction)
-          m1.baseX -= nx * correction;
-          m1.baseY -= ny * correction;
-          m1.baseZ -= nz * correction;
-          m2.baseX += nx * correction;
-          m2.baseY += ny * correction;
-          m2.baseZ += nz * correction;
+          m1.x -= nx * correction;
+          m1.y -= ny * correction;
+          m1.z -= nz * correction;
+          m2.x += nx * correction;
+          m2.y += ny * correction;
+          m2.z += nz * correction;
 
           // Soft velocity damping on collision (prevents molecules from rushing back)
           // Project velocities onto collision normal and dampen
@@ -1264,14 +1259,16 @@ class PrimordialSoupDemo extends Game {
     for (const mol of this.molecules) {
       mol.update(dt);
       
-      // Soft boundaries
+      // Soft boundaries - stronger push to keep molecules in view
       const margin = 50;
-      if (mol.x < -this.worldWidth / 2 - margin) mol.vx += 50 * dt;
-      if (mol.x > this.worldWidth / 2 + margin) mol.vx -= 50 * dt;
-      if (mol.y < -this.worldHeight / 2 - margin) mol.vy += 50 * dt;
-      if (mol.y > this.worldHeight / 2 + margin) mol.vy -= 50 * dt;
-      if (mol.z < -200) mol.vz += 30 * dt;
-      if (mol.z > 200) mol.vz -= 30 * dt;
+      const boundaryForce = 80;
+      const halfDepth = CONFIG.worldDepth / 2;
+      if (mol.x < -this.worldWidth / 2 - margin) mol.vx += boundaryForce * dt;
+      if (mol.x > this.worldWidth / 2 + margin) mol.vx -= boundaryForce * dt;
+      if (mol.y < -this.worldHeight / 2 - margin) mol.vy += boundaryForce * dt;
+      if (mol.y > this.worldHeight / 2 + margin) mol.vy -= boundaryForce * dt;
+      if (mol.z < -halfDepth) mol.vz += boundaryForce * 0.6 * dt;
+      if (mol.z > halfDepth) mol.vz -= boundaryForce * 0.6 * dt;
     }
 
     // Collision separation, heat transfer, and reactions
