@@ -1,0 +1,18 @@
+const i={cols:80,rows:35,chars:" .:-=+*#%@",speed:2,waveFreqX:.08,waveFreqY:.1,mouseForce:3,colorCycle:.5};class v{constructor(s){this.canvas=s,this.running=!1,this.time=0,this.mouseX=.5,this.mouseY=.5,this.ripples=[]}init(){this.canvas.style.display="none",this.container=document.createElement("div"),this.container.id="ascii-art",this.container.style.cssText=`
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: #000;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      font-family: 'Courier New', monospace;
+      font-size: clamp(8px, 1.5vw, 14px);
+      line-height: 1.1;
+      overflow: hidden;
+      cursor: crosshair;
+      user-select: none;
+    `,this.canvas.parentNode.insertBefore(this.container,this.canvas.nextSibling),this.grid=[],this.spans=[];for(let s=0;s<i.rows;s++){const t=document.createElement("div");t.style.cssText="white-space: pre; letter-spacing: 0.1em;",this.grid[s]=[],this.spans[s]=[];for(let e=0;e<i.cols;e++){const n=document.createElement("span");n.textContent=" ",n.style.cssText="transition: color 0.1s;",t.appendChild(n),this.grid[s][e]=0,this.spans[s][e]=n}this.container.appendChild(t)}this.container.addEventListener("mousemove",s=>{const t=this.container.getBoundingClientRect();this.mouseX=(s.clientX-t.left)/t.width,this.mouseY=(s.clientY-t.top)/t.height}),this.container.addEventListener("click",s=>{const t=this.container.getBoundingClientRect(),e=(s.clientX-t.left)/t.width,n=(s.clientY-t.top)/t.height;this.ripples.push({x:e,y:n,time:0,strength:1})}),this.container.addEventListener("touchmove",s=>{const t=this.container.getBoundingClientRect(),e=s.touches[0];this.mouseX=(e.clientX-t.left)/t.width,this.mouseY=(e.clientY-t.top)/t.height},{passive:!0}),this.container.addEventListener("touchstart",s=>{const t=this.container.getBoundingClientRect(),e=s.touches[0],n=(e.clientX-t.left)/t.width,c=(e.clientY-t.top)/t.height;this.ripples.push({x:n,y:c,time:0,strength:1})},{passive:!0})}start(){this.init(),this.running=!0,this.lastTime=performance.now(),this.animate()}animate(){if(!this.running)return;const s=performance.now(),t=Math.min((s-this.lastTime)/1e3,.1);this.lastTime=s,this.update(t),this.render(),requestAnimationFrame(()=>this.animate())}update(s){this.time+=s*i.speed;for(let t=this.ripples.length-1;t>=0;t--)this.ripples[t].time+=s*3,this.ripples[t].strength*=.97,this.ripples[t].strength<.01&&this.ripples.splice(t,1);for(let t=0;t<i.rows;t++)for(let e=0;e<i.cols;e++){const n=e/i.cols,c=t/i.rows;let o=0;o+=Math.sin(e*i.waveFreqX+this.time)*.5,o+=Math.sin(t*i.waveFreqY+this.time*.7)*.5,o+=Math.sin((e+t)*.05+this.time*1.3)*.3,o+=Math.sin(Math.sqrt(e*e+t*t)*.08-this.time)*.4;const a=n-this.mouseX,r=(c-this.mouseY)*(i.rows/i.cols),p=Math.sqrt(a*a+r*r),m=Math.max(0,1-p/.2);o+=m*i.mouseForce*Math.sin(this.time*5);for(const h of this.ripples){const l=n-h.x,d=(c-h.y)*(i.rows/i.cols),g=Math.sqrt(l*l+d*d),f=Math.sin(g*30-h.time*10),w=Math.max(0,1-g/.5);o+=f*w*h.strength*2}this.grid[t][e]=(o+2)/4}}render(){const s=i.chars,t=s.length;for(let e=0;e<i.rows;e++)for(let n=0;n<i.cols;n++){const c=Math.max(0,Math.min(1,this.grid[e][n])),o=Math.floor(c*(t-1)),a=s[o],r=this.spans[e][n];r.textContent!==a&&(r.textContent=a);const p=(n/i.cols*60+e/i.rows*60+this.time*i.colorCycle*50)%360,m=70+c*30,h=30+c*50,l=`hsl(${p}, ${m}%, ${h}%)`;r.style.color!==l&&(r.style.color=l)}}stop(){this.running=!1,this.container&&this.container.remove(),this.canvas.style.display=""}}function x(u){const s=new v(u);return s.start(),{stop:()=>s.stop(),game:s}}export{x as default};
