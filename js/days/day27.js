@@ -12,7 +12,7 @@
  * @see {@link https://gcanvas.guinetik.com|GCanvas Library}
  */
 
-import { Game, Painter } from '@guinetik/gcanvas';
+import { Game, Painter, Screen } from '@guinetik/gcanvas';
 
 const TAU = Math.PI * 2;
 
@@ -153,6 +153,19 @@ class GaseousSentienceDemo extends Game {
   init() {
     super.init();
     Painter.init(this.ctx);
+    Screen.init(this);
+
+    // Scale creature based on screen size (larger on desktop)
+    this.scale = Screen.responsive(1.0, 1.5, 2.0);
+
+    // Scaled size values
+    this.coreRadius = CONFIG.coreRadius * this.scale;
+    this.coreGlow = CONFIG.coreGlow * this.scale;
+    this.ribbonOrbitRadius = CONFIG.ribbonOrbitRadius * this.scale;
+    this.shieldRadiusMin = CONFIG.shieldRadiusMin * this.scale;
+    this.shieldRadiusMax = CONFIG.shieldRadiusMax * this.scale;
+    this.particleRadius = CONFIG.particleRadius * this.scale;
+    this.gasCloudRadius = CONFIG.gasCloudRadius * this.scale;
 
     this.time = 0;
     this.rotationY = 0;
@@ -187,7 +200,7 @@ class GaseousSentienceDemo extends Game {
     for (let i = 0; i < CONFIG.particleCount; i++) {
       const theta = Math.random() * TAU;
       const phi = Math.acos(2 * Math.random() - 1);
-      const r = CONFIG.particleRadius * (0.5 + Math.random() * 0.5);
+      const r = this.particleRadius * (0.5 + Math.random() * 0.5);
 
       this.particles.push({
         // Current position
@@ -413,6 +426,67 @@ class GaseousSentienceDemo extends Game {
       this.mouseY = this.height / 2;
       this.mouseActive = false;
     });
+
+    // Press R to restart
+    this._onKeyDown = (e) => {
+      if (e.key === 'r' || e.key === 'R') {
+        this.restart();
+      }
+    };
+    window.addEventListener('keydown', this._onKeyDown);
+  }
+
+  /**
+   * Restart the simulation
+   */
+  restart() {
+    // Reset state
+    this.time = 0;
+    this.hue = Math.random() * 360;
+    this.targetHue = this.hue;
+    this.complexity = 0;
+    this.vitality = 1;
+    this.corePulse = 0;
+
+    // Reset ribbons
+    this.ribbons = [];
+    for (let i = 0; i < CONFIG.ribbonStartCount; i++) {
+      const ribbon = this.createRibbon(false);
+      ribbon.growth = 1;
+      this.ribbons.push(ribbon);
+    }
+
+    // Clear food
+    this.foodParticles = [];
+
+    // Regenerate gas cloud
+    this.gasCloud = [];
+    for (let i = 0; i < CONFIG.gasCloudParticles; i++) {
+      this.gasCloud.push(this.createGasParticle());
+    }
+
+    // Reset particles
+    for (const p of this.particles) {
+      const theta = Math.random() * TAU;
+      const phi = Math.acos(2 * Math.random() - 1);
+      const r = this.particleRadius * (0.5 + Math.random() * 0.5);
+      p.x = r * Math.sin(phi) * Math.cos(theta);
+      p.y = r * Math.sin(phi) * Math.sin(theta);
+      p.z = r * Math.cos(phi);
+      p.vx = 0;
+      p.vy = 0;
+      p.vz = 0;
+      p.orbitRadius = r;
+    }
+
+    console.log('Restarted');
+  }
+
+  stop() {
+    super.stop();
+    if (this._onKeyDown) {
+      window.removeEventListener('keydown', this._onKeyDown);
+    }
   }
 
   update(dt) {
@@ -575,7 +649,7 @@ class GaseousSentienceDemo extends Game {
 
       // Clamp max distance so they don't fly off forever
       const newDist = Math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z);
-      const maxDist = CONFIG.particleRadius * 2.5;
+      const maxDist = this.particleRadius * 2.5;
       if (newDist > maxDist) {
         const scale = maxDist / newDist;
         p.x *= scale;
@@ -725,7 +799,7 @@ class GaseousSentienceDemo extends Game {
         tiltZ: (Math.random() - 0.5) * 3,
         phase: Math.random() * TAU,
         speed: 0.3 + Math.random() * 0.7,
-        radius: CONFIG.ribbonOrbitRadius * (0.5 + Math.random() * 0.7),
+        radius: this.ribbonOrbitRadius * (0.5 + Math.random() * 0.7),
         freqA: 1 + Math.floor(Math.random() * 4),
         freqB: 1 + Math.floor(Math.random() * 5),
         freqC: 1 + Math.floor(Math.random() * 4),
@@ -742,7 +816,7 @@ class GaseousSentienceDemo extends Game {
         tiltZ: (Math.random() - 0.5) * 1.5,
         phase: Math.random() * TAU,
         speed: 0.2 + Math.random() * 0.3,
-        radius: CONFIG.ribbonOrbitRadius * (0.8 + Math.random() * 0.4),
+        radius: this.ribbonOrbitRadius * (0.8 + Math.random() * 0.4),
         freqA: 1,
         freqB: 2,
         freqC: 1,
@@ -821,7 +895,7 @@ class GaseousSentienceDemo extends Game {
   getShieldRadius() {
     const maxComplexity = CONFIG.ribbonMaxCount - CONFIG.ribbonStartCount;
     const t = Math.min(this.complexity / maxComplexity, 1);
-    return CONFIG.shieldRadiusMin + t * (CONFIG.shieldRadiusMax - CONFIG.shieldRadiusMin);
+    return this.shieldRadiusMin + t * (this.shieldRadiusMax - this.shieldRadiusMin);
   }
 
   /**
@@ -885,7 +959,7 @@ class GaseousSentienceDemo extends Game {
     this.renderGasCloud(ctx, cx, cy);
 
     // Outer glow halo
-    const haloGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, CONFIG.coreGlow * 2);
+    const haloGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, this.coreGlow * 2);
     haloGrad.addColorStop(0, `hsla(${this.hue}, 70%, 70%, 0.15)`);
     haloGrad.addColorStop(0.5, `hsla(${this.hue}, 60%, 50%, 0.05)`);
     haloGrad.addColorStop(1, 'transparent');
@@ -1016,7 +1090,7 @@ class GaseousSentienceDemo extends Game {
 
     // When dead/dying, render hollow shell instead of glowing core
     if (v < 0.3) {
-      const shellRadius = CONFIG.coreRadius * 0.8;
+      const shellRadius = this.coreRadius * 0.8;
       const shellAlpha = 0.15 + (v / 0.3) * 0.15; // Faint when dead
 
       // Hollow shell - transparent center, colored edge
@@ -1047,8 +1121,8 @@ class GaseousSentienceDemo extends Game {
       return;
     }
 
-    const pulseGlow = CONFIG.coreGlow * (1 + pulse * 0.5) * (0.3 + v * 0.7);
-    const pulseRadius = CONFIG.coreRadius * (1 + pulse * 0.3) * (0.5 + v * 0.5);
+    const pulseGlow = this.coreGlow * (1 + pulse * 0.5) * (0.3 + v * 0.7);
+    const pulseRadius = this.coreRadius * (1 + pulse * 0.3) * (0.5 + v * 0.5);
 
     // Brightness and saturation based on vitality
     const brightness = 30 + v * 70; // 30-100%
