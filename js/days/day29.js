@@ -1144,6 +1144,14 @@ class Day29Demo extends Game {
       e.preventDefault();
       this.handleClick(e.changedTouches[0]);
     });
+
+    // Keyboard controls
+    this.handleKeyDown = (e) => {
+      if (e.key === 'r' || e.key === 'R') {
+        this.restart();
+      }
+    };
+    window.addEventListener('keydown', this.handleKeyDown);
   }
   
   /**
@@ -1209,6 +1217,68 @@ class Day29Demo extends Game {
     }
   }
   
+  /**
+   * Restart the simulation with a fresh dungeon and agents
+   */
+  restart() {
+    // Generate new dungeon
+    const { grid, rooms } = createDungeon(CONFIG.gridWidth, CONFIG.gridHeight);
+    this.grid = grid;
+    this.rooms = rooms;
+    this.gridHeight = grid.length;
+    this.gridWidth = grid[0].length;
+
+    // Setup hospital
+    this.hospital = setupHospital(this.grid, this.rooms);
+
+    // Recalculate grid dimensions
+    this.calculateGrid();
+
+    // Cache floor cells
+    const floorCells = [];
+    for (let y = 0; y < this.gridHeight; y++) {
+      for (let x = 0; x < this.gridWidth; x++) {
+        const type = this.grid[y][x].type;
+        if (type === "floor" || type === "room_floor" || type === "door") {
+          floorCells.push({ x, y });
+        }
+      }
+    }
+    this.floorCells = floorCells;
+
+    // Reset agents
+    this.agents = [];
+    for (let i = 0; i < Math.min(CONFIG.agentCount, floorCells.length); i++) {
+      const idx = Math.floor(Math.random() * floorCells.length);
+      const cell = floorCells[idx];
+      const agent = new Agent(cell.x, cell.y, this.grid, this.rooms, this.hospital);
+
+      if (Math.random() < CONFIG.initialVaccinatedPercent) {
+        agent.healthState = "vaccinated";
+      }
+
+      this.agents.push(agent);
+    }
+
+    // Reset variants
+    this.variants = [];
+    this.nextVariantIndex = 0;
+    this.infectionStarted = false;
+    this.dominantVariant = null;
+
+    // Reset timers and history
+    this.elapsedTime = 0;
+    this.lastWaveTime = 0;
+    this.history = [];
+    this.lastHistoryTime = 0;
+
+    // Reset data overlay
+    this.showDataOverlay = false;
+    if (this.dataButton) {
+      this.dataButton.toggle(false);
+    }
+  }
+
   /**
    * Infect an agent with the virus
    * @param {Agent} agent - Agent to infect
@@ -1779,11 +1849,12 @@ class Day29Demo extends Game {
     ctx.textBaseline = "top";
     
     ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
-    ctx.fillRect(this.width - 180, 12, 168, 32);
-    
+    ctx.fillRect(this.width - 180, 12, 168, 44);
+
     ctx.fillStyle = "rgba(0, 255, 128, 0.6)";
     ctx.fillText("CLICK agent to INFECT", this.width - 16, 16);
     ctx.fillText("CLICK floor to SPAWN", this.width - 16, 28);
+    ctx.fillText("[R] RESTART", this.width - 16, 40);
     
     // Tiny stats at bottom left
     ctx.font = '12px "Fira Code", monospace';
@@ -2002,14 +2073,24 @@ class Day29Demo extends Game {
     ctx.textAlign = "right";
     ctx.fillText("■ Trans  □ Resist", x + w, y - 15);
   }
+
+  /**
+   * Clean up resources when stopping the game
+   */
+  stop() {
+    if (this.handleKeyDown) {
+      window.removeEventListener('keydown', this.handleKeyDown);
+    }
+    super.stop();
+  }
 }
 
 /**
  * Create Day 29 visualization
- * 
+ *
  * Factory function that creates and starts the SEIR Epidemic demo.
  * Returns a control object with stop() method for lifecycle management.
- * 
+ *
  * @param {HTMLCanvasElement} canvas - The canvas element to render to
  * @returns {Object} Control object with stop() method and game instance
  * @returns {Function} returns.stop - Function to stop the game
