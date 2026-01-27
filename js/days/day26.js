@@ -54,8 +54,9 @@ const CONFIG = {
     attractStrength: 8,
     damping: 0.92,
     scatterForce: 800,
-    buildDelay: 0.003, // Stagger per particle
-    infiniteSpawn: true, // Keep spawning new sponges forever
+    buildDelay: 0.001, // Stagger per particle (faster formation)
+    infiniteSpawn: true, // Keep spawning new sponges
+    maxSponges: 7,       // Cap at 7 for cross shape (center + 6 faces)
   },
 };
 
@@ -141,7 +142,7 @@ class Day26Demo extends Game {
     super.init();
     Painter.init(this.ctx);
 
-    // Create camera with mouse controls
+    // Create camera with mouse controls and auto-rotation
     this.camera = new Camera3D({
       perspective: CONFIG.camera.perspective,
       rotationX: CONFIG.camera.rotationX,
@@ -149,12 +150,14 @@ class Day26Demo extends Game {
       inertia: CONFIG.camera.inertia,
       friction: CONFIG.camera.friction,
       clampX: CONFIG.camera.clampX,
+      autoRotate: true,
+      autoRotateSpeed: CONFIG.animation.autoRotateSpeed,
+      autoRotateAxis: 'y',
     });
     this.camera.enableMouseControl(this.canvas);
 
     // Animation state
     this.time = 0;
-    this.globalRotation = 0;
     this.zoom = 1;
     this.targetZoom = 1;
 
@@ -165,6 +168,7 @@ class Day26Demo extends Game {
     // Infinite spawn state
     this.spongeCount = 0;
     this.totalParticles = 0;
+    this.isYolo = false;
     
     // Persistent set for deduplication (avoids rebuilding each sponge)
     this.existingPositions = new Set();
@@ -184,6 +188,16 @@ class Day26Demo extends Game {
       this.scatterParticles();
     });
 
+    // Keyboard controls
+    this._onKeyDown = (e) => {
+      if (e.key === 'r' || e.key === 'R') {
+        this.restart();
+      } else if (e.key === 'y' || e.key === 'Y') {
+        this.yoloMode();
+      }
+    };
+    window.addEventListener("keydown", this._onKeyDown);
+
     // Gesture handler for zoom (wheel + pinch)
     this.gesture = new Gesture(this.canvas, {
       onZoom: (delta) => {
@@ -202,6 +216,48 @@ class Day26Demo extends Game {
     if (this.gesture) {
       this.gesture.destroy();
     }
+    if (this.particles) {
+      this.particles.destroy();
+    }
+    if (this._onKeyDown) {
+      window.removeEventListener("keydown", this._onKeyDown);
+    }
+  }
+
+  /**
+   * Restart the demo from scratch
+   */
+  restart() {
+    // Clear all particles
+    this.particles.clear();
+
+    // Reset state
+    this.time = 0;
+    this.buildTime = 0;
+    this.cubesSpawned = 0;
+    this.spongeCount = 0;
+    this.nextCubeIndex = 0;
+    this.zoom = 1;
+    this.targetZoom = 1;
+    this.isYolo = false;
+
+    // Clear deduplication set and cubes
+    this.existingPositions.clear();
+    this.cubes = [];
+
+    // Regenerate initial targets
+    this.generateTargets();
+
+    console.log("Restarted");
+  }
+
+  /**
+   * YOLO mode - restart with no sponge limit
+   */
+  yoloMode() {
+    this.restart();
+    this.isYolo = true;
+    console.log("YOLO MODE - no limits!");
   }
 
   generateTargets() {
@@ -242,8 +298,6 @@ class Day26Demo extends Game {
 
   createParticleSystem() {
     // Cache for per-frame calculations
-    this._cosY = 1;
-    this._sinY = 0;
     this._strength = CONFIG.animation.attractStrength;
     this._damping = CONFIG.animation.damping;
 
@@ -253,15 +307,12 @@ class Day26Demo extends Game {
       const custom = particle.custom;
       if (custom.targetX === undefined) return;
 
-      // Use cached trig values (updated once per frame in update())
-      const tx = custom.targetX * this._cosY - custom.targetZ * this._sinY;
-      const tz = custom.targetX * this._sinY + custom.targetZ * this._cosY;
-
-      // Apply zoom and calculate delta
+      // No manual rotation - let Camera3D handle all rotation
+      // This keeps particle positions in world space for correct depth sorting
       const zoom = this.zoom;
-      const dx = tx * zoom - particle.x;
+      const dx = custom.targetX * zoom - particle.x;
       const dy = custom.targetY * zoom - particle.y;
-      const dz = tz * zoom - particle.z;
+      const dz = custom.targetZ * zoom - particle.z;
 
       // Spring attraction + damping combined
       const str = this._strength * dt;
@@ -281,10 +332,19 @@ class Day26Demo extends Game {
       depthSort: true, // Required for 3D projection to work properly
       maxParticles: 50000,
       blendMode: "source-over",
+      useWebGL: true,  // GPU-accelerated rendering
+      webglShape: "softSquare",  // Match particle shape
+      webglBlendMode: "alpha",
+      depthShading: true,  // Closer = brighter, further = darker
+      depthShadingMin: 0.25,  // Far particles at 25% brightness
+      depthShadingMax: 1.0,   // Near particles at full brightness
       updaters: [attractToTarget],
     });
 
     this.pipeline.add(this.particles);
+
+    // Log WebGL status
+    console.log(`Particle rendering: ${this.particles.isWebGL ? 'WebGL (GPU)' : 'Canvas 2D (CPU)'}`);
   }
 
   /**
@@ -367,15 +427,8 @@ class Day26Demo extends Game {
     this.time += dt;
     this.buildTime += dt;
 
-    // Update camera
+    // Update camera (handles auto-rotation internally)
     this.camera.update(dt);
-
-    // Global rotation
-    this.globalRotation += CONFIG.animation.autoRotateSpeed * dt;
-    
-    // Cache trig for particle updater
-    this._cosY = Math.cos(this.globalRotation);
-    this._sinY = Math.sin(this.globalRotation);
 
     // Smooth zoom (faster response)
     this.zoom += (this.targetZoom - this.zoom) * 0.15;
@@ -401,6 +454,9 @@ class Day26Demo extends Game {
    * Generate a new sponge beside/above/below - flush with no gap, shared faces
    */
   spawnNextSponge() {
+    // Stop at max sponges unless YOLO mode
+    if (!this.isYolo && this.spongeCount >= CONFIG.animation.maxSponges - 1) return;
+
     this.spongeCount++;
     this.totalParticles += this.cubesSpawned;
     
@@ -480,15 +536,17 @@ class Day26Demo extends Game {
     ctx.font = "12px monospace";
     ctx.textAlign = "left";
 
+    const renderMode = this.particles.isWebGL ? "WebGL" : "Canvas";
+    const modeLabel = this.isYolo ? "YOLO MODE" : `Sponges: ${this.spongeCount + 1}`;
     ctx.fillText(
-      `MENGER SPONGE | Depth: ${CONFIG.maxDepth} | Sponges: ${this.spongeCount + 1} | Particles: ${this.cubesSpawned}`,
+      `MENGER SPONGE | ${modeLabel} | Particles: ${this.cubesSpawned} | ${renderMode}`,
       10,
       this.height - 10
     );
 
     ctx.textAlign = "right";
     ctx.fillText(
-      `Zoom: ${this.zoom.toFixed(1)}x | Dbl-click to scatter`,
+      `Zoom: ${this.zoom.toFixed(1)}x | Dbl-click: scatter | R: restart | Y: yolo`,
       this.width - 10,
       20
     );
