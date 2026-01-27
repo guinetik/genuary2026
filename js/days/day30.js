@@ -13,7 +13,28 @@
  * @see {@link https://gcanvas.guinetik.com|GCanvas Library}
  */
 
-import { Game, Painter, Button, Screen, WebGLRenderer, StateMachine, Scene, VerticalLayout, HorizontalLayout, Text, ToggleButton } from '@guinetik/gcanvas';
+import {
+  Game,
+  Painter,
+  Button,
+  Screen,
+  WebGLRenderer,
+  StateMachine,
+  Scene,
+  VerticalLayout,
+  HorizontalLayout,
+  Text,
+  ToggleButton,
+  Flanger,
+  DJFilter,
+  EQFilterBank,
+  HighShelf,
+  AdvancedDelay,
+  AdvancedDistortion,
+  AdvancedTremolo,
+  Limiter,
+  MasterGain,
+} from '@guinetik/gcanvas';
 
 // Import shaders as raw strings (Vite handles this with ?raw suffix)
 import VERTEX_SHADER from '../../glsl/day30.vert?raw';
@@ -53,11 +74,24 @@ const CONFIG = {
     highEdgeIntensity: 0.5,      // Edge detection/sharpening from highs
     amplitudeSaturation: 1.5,    // Saturation boost from amplitude
     silenceSolarization: 0.8,    // Solarization when silent
-    
+
     // Visual → Audio (for visualization)
     colorTintStrength: 0.3,      // How much dominant color tints audio viz
     motionParticleRate: 0.1,      // Particle spawn rate from motion
     brightnessReverb: 0.2,       // Reverb/echo effect from brightness
+  },
+
+  // Audio effects toggles
+  // Set to false to disable specific effects
+  audioEffects: {
+    flanger: true,        // Jet sweep/chorus effect
+    djFilter: true,       // Sweeping lowpass filter
+    distortion: true,     // Overdrive/saturation
+    tremolo: true,        // LFO amplitude modulation
+    delay: true,          // Slapback echo
+    highShelf: true,      // High frequency clarity boost
+    eq: true,             // Resonant EQ bands
+    panner: true,         // Stereo panning based on motion
   },
 };
 
@@ -618,31 +652,106 @@ class Day30Demo extends Game {
       // Initialize smoothed frequency arrays
       this.smoothedAudioFreq = new Float32Array(this.spectrumBars);
       this.smoothedVideoFreq = new Float32Array(this.spectrumBars);
-      
+
       // Setup mouse event handlers for ripple effect
       this.setupMouseHandlers();
-      
-      // Create audio processing nodes for video-to-audio influence
-      // Use multiple BiquadFilterNodes as an EQ to boost frequencies based on video
-      this.audioFilters = [];
-      
-      // Create filter nodes for different frequency bands (match spectrumBars)
-      const numBands = Math.min(this.spectrumBars, 16); // Limit to 16 for performance
-      for (let i = 0; i < numBands; i++) {
-        const filter = this.audioContext.createBiquadFilter();
-        filter.type = 'peaking';
-        // Distribute frequencies logarithmically across audio spectrum
-        const minFreq = 60; // ~60Hz (low bass)
-        const maxFreq = 8000; // ~8kHz (highs)
-        const freq = numBands > 1 
-          ? minFreq * Math.pow(maxFreq / minFreq, i / (numBands - 1))
-          : (minFreq + maxFreq) / 2;
-        filter.frequency.value = freq;
-        filter.Q.value = 2; // Narrower Q for more precise frequency control
-        filter.gain.value = 0; // Start neutral (no boost/attenuation)
-        
-        this.audioFilters.push(filter);
+
+      // === AUDIO EFFECTS CHAIN ===
+      // Create effects based on CONFIG.audioEffects toggles
+      const fx = CONFIG.audioEffects;
+
+      // 1. DISTORTION - WaveShaperNode for overdrive
+      if (fx.distortion) {
+        this.distortion = new AdvancedDistortion(this.audioContext, {
+          amount: 0,
+          oversample: '4x',
+        });
+        this.distortionAmount = 0;
       }
+
+      // 2. DELAY - Short slapback echo
+      if (fx.delay) {
+        this.delay = new AdvancedDelay(this.audioContext, {
+          delayTime: 0.15,
+          maxDelay: 0.5,
+          feedback: 0.2,
+          wet: 0.15,
+          dry: 0.85,
+        });
+      }
+
+      // 3. FLANGER - Short delay with LFO for jet sweep sound
+      if (fx.flanger) {
+        this.flanger = new Flanger(this.audioContext, {
+          baseDelay: 0.005,
+          maxDelay: 0.02,
+          lfoFrequency: 0.5,
+          lfoDepth: 0.002,
+          feedback: 0.5,
+          wet: 0,
+          dry: 1.0,
+        });
+      }
+
+      // 4. DJ FILTER - Sweeping lowpass/highpass
+      if (fx.djFilter) {
+        this.djFilter = new DJFilter(this.audioContext, {
+          type: 'lowpass',
+          frequency: 20000,
+          Q: 1,
+        });
+      }
+
+      // 5. TREMOLO - LFO modulating gain
+      if (fx.tremolo) {
+        this.tremolo = new AdvancedTremolo(this.audioContext, {
+          rate: 4,
+          depth: 0.1,
+        });
+      }
+
+      // 6. EQ FILTER BANK - Resonant filters
+      if (fx.eq) {
+        const numBands = Math.min(this.spectrumBars, 16);
+        this.eqBank = new EQFilterBank(this.audioContext, {
+          numBands: numBands,
+          minFreq: 40,
+          maxFreq: 12000,
+          Q: 4,
+        });
+        this.audioFilters = this.eqBank.getFilters();
+      } else {
+        this.audioFilters = [];
+        this.eqBank = null;
+      }
+
+      // 7. HIGH SHELF - Boost highs for clarity
+      if (fx.highShelf) {
+        this.highShelf = new HighShelf(this.audioContext, {
+          frequency: 4000,
+          gain: 3,
+        });
+      }
+
+      // 8. STEREO PANNER - Pan left/right based on motion
+      if (fx.panner) {
+        this.panner = this.audioContext.createStereoPanner();
+        this.panner.pan.value = 0;
+        this.panTarget = 0;
+        this.panVelocity = 0;
+      }
+
+      // 9. LIMITER - Prevent clipping
+      this.limiter = new Limiter(this.audioContext, {
+        threshold: -3,
+        knee: 0,
+        ratio: 20,
+        attack: 0.001,
+        release: 0.1,
+      });
+
+      // 10. MASTER GAIN
+      this.masterGain = new MasterGain(this.audioContext, 1.0);
 
       if (this.audioSource === 'mic') {
         // Request microphone access
@@ -1106,76 +1215,214 @@ class Day30Demo extends Game {
    * Connect audio source through filter chain for video influence
    */
   connectAudioWithFilters(source) {
-    if (!this.audioFilters || this.audioFilters.length === 0) {
-      // Fallback: direct connection if filters not initialized
-      source.connect(this.analyser);
-      this.analyser.connect(this.audioContext.destination);
-      return;
-    }
-    
-    // Connect source -> filters -> analyser -> destination
+    if (!this.audioContext) return;
+
+    // Start of chain
     let currentNode = source;
-    
-    // Chain filters in parallel (each filter processes a frequency band)
-    // Actually, we need to chain them in series for proper EQ effect
-    for (let i = 0; i < this.audioFilters.length; i++) {
-      currentNode.connect(this.audioFilters[i]);
-      currentNode = this.audioFilters[i];
+
+    // EQ filters chain (connects all filters internally)
+    if (this.eqBank) {
+      this.eqBank.connect(currentNode);
+      const filters = this.eqBank.getFilters();
+      currentNode = filters[filters.length - 1];
     }
-    
+
+    // DJ Filter sweep (early so it affects tone)
+    if (this.djFilter) {
+      this.djFilter.connect(currentNode);
+      currentNode = this.djFilter.getNode();
+    }
+
+    // Distortion
+    if (this.distortion) {
+      this.distortion.connect(currentNode);
+      currentNode = this.distortion.getNode();
+    }
+
+    // Flanger AFTER distortion (more audible)
+    if (this.flanger) {
+      this.flanger.connect(currentNode);
+      currentNode = this.flanger.output;
+    }
+
+    // Tremolo
+    if (this.tremolo) {
+      this.tremolo.connect(currentNode);
+      currentNode = this.tremolo.getNode();
+    }
+
+    // High shelf for clarity
+    if (this.highShelf) {
+      this.highShelf.connect(currentNode);
+      currentNode = this.highShelf.getNode();
+    }
+
+    // Stereo panner
+    if (this.panner) {
+      currentNode.connect(this.panner);
+      currentNode = this.panner;
+    }
+
+    // Delay (parallel wet/dry handled internally)
+    if (this.delay) {
+      this.delay.connect(currentNode);
+      currentNode = this.delay.getOutput();
+    }
+
+    // Limiter
+    if (this.limiter) {
+      this.limiter.connect(currentNode);
+      currentNode = this.limiter.getNode();
+    }
+
+    // Master gain
+    if (this.masterGain) {
+      this.masterGain.connect(currentNode);
+      currentNode = this.masterGain.getNode();
+    }
+
     // Connect to analyser and destination
-    currentNode.connect(this.analyser);
-    this.analyser.connect(this.audioContext.destination);
+    if (this.analyser) {
+      currentNode.connect(this.analyser);
+      this.analyser.connect(this.audioContext.destination);
+    } else {
+      currentNode.connect(this.audioContext.destination);
+    }
   }
 
   /**
-   * Update audio filters based on video frequencies (equalizer-style)
-   * Maps different video properties to different audio frequency ranges:
-   * - Brightness → Bass frequencies (60-200Hz)
-   * - Color saturation → Mid frequencies (200-2000Hz)
-   * - Motion → High frequencies (2000-8000Hz)
+   * Update audio filters based on video frequencies
+   * Maps video properties to audio effects
    */
   updateAudioFilters() {
-    if (!this.videoFrequencyData || !this.audioFilters || this.audioFilters.length === 0) return;
+    if (!this.videoFrequencyData) return;
     if (!this.videoBrightnessData || !this.videoColorData || !this.videoMotionData) return;
-    
-    const numBands = this.audioFilters.length;
+
+    const numBands = this.audioFilters?.length || 0;
     const videoBands = this.videoFrequencyData.length;
-    
-    // Frequency ranges for equalizer mapping
-    const bassEnd = Math.floor(numBands * 0.3); // First 30% = bass (60-200Hz)
-    const midStart = bassEnd;
-    const midEnd = Math.floor(numBands * 0.7); // 30-70% = mids (200-2000Hz)
-    const highStart = midEnd; // 70-100% = highs (2000-8000Hz)
-    
-    // Map video properties to audio filter gains (equalizer-style)
-    for (let i = 0; i < numBands; i++) {
-      // Map filter band to video band
-      const videoBandIndex = Math.floor((i / numBands) * videoBands);
-      let gain = 0;
-      
-      if (i < bassEnd) {
-        // BASS: Brightness affects low frequencies
-        // Dark screens reduce bass, bright screens boost bass
-        const brightness = this.videoBrightnessData[videoBandIndex] || 0;
-        gain = brightness * 12.0; // 0 to 12dB boost for bass
-      } else if (i >= midStart && i < midEnd) {
-        // MIDS: Color saturation affects mid frequencies
-        // Vibrant colors boost mids, desaturated reduces mids
-        const colorSat = this.videoColorData[videoBandIndex] || 0;
-        gain = colorSat * 15.0; // 0 to 15dB boost for mids
-      } else if (i >= highStart) {
-        // HIGHS: Motion affects high frequencies
-        // Moving objects boost highs, static scenes reduce highs
-        const motion = this.videoMotionData[videoBandIndex] || 0;
-        gain = motion * 18.0; // 0 to 18dB boost for highs
+
+    // Calculate average video properties
+    let avgBrightness = 0, avgColor = 0, avgMotion = 0;
+    for (let i = 0; i < videoBands; i++) {
+      avgBrightness += this.videoBrightnessData[i] || 0;
+      avgColor += this.videoColorData[i] || 0;
+      avgMotion += this.videoMotionData[i] || 0;
+    }
+    avgBrightness /= videoBands;
+    avgColor /= videoBands;
+    avgMotion /= videoBands;
+
+    // === MOTION-DRIVEN EFFECTS ===
+    const motionClamped = Math.min(1, avgMotion * 3);
+    const smoothing = 0.85;
+
+    // FLANGER: Only on high motion + color (not always on)
+    if (this.flanger) {
+      const flangerTrigger = motionClamped * avgColor;
+      const threshold = 0.15;
+
+      let targetWet = 0;
+      if (flangerTrigger > threshold) {
+        const intensity = (flangerTrigger - threshold) / (1 - threshold);
+        targetWet = intensity * 0.7;
       }
-      
-      // Apply gain with smoothing to prevent audio clicks
-      const currentGain = this.audioFilters[i].gain.value;
-      const targetGain = gain;
-      const smoothedGain = currentGain * 0.85 + targetGain * 0.15; // Smooth transition
-      this.audioFilters[i].gain.value = smoothedGain;
+
+      const currentWet = this.flanger.wetGain.gain.value;
+      const newWet = currentWet * smoothing + targetWet * (1 - smoothing);
+      this.flanger.setMix(newWet, 1.0 - newWet * 0.3);
+      this.flanger.setLFOFrequency(0.3 + motionClamped * 3);
+      this.flanger.setFeedback(0.3 + flangerTrigger * 0.5);
+    }
+
+    // DJ FILTER: Sweep based on brightness
+    if (this.djFilter) {
+      const filterClose = (1 - avgBrightness) * motionClamped;
+      const targetFreq = 800 + avgBrightness * 19200;
+      const targetQ = 1 + filterClose * 8;
+
+      const currentFreq = this.djFilter.filter.frequency.value;
+      const currentQ = this.djFilter.filter.Q.value;
+      this.djFilter.setFrequency(currentFreq * smoothing + targetFreq * (1 - smoothing));
+      this.djFilter.setQ(currentQ * smoothing + targetQ * (1 - smoothing));
+    }
+
+    // DISTORTION: Crunch on high motion
+    if (this.distortion) {
+      const targetDistortion = motionClamped * 0.5;
+      this.distortionAmount = this.distortionAmount * smoothing + targetDistortion * (1 - smoothing);
+      this.distortion.setAmount(this.distortionAmount);
+    }
+
+    // DELAY: Echo on motion
+    if (this.delay) {
+      const targetWet = motionClamped * 0.4;
+      const currentWet = this.delay.wetGain.gain.value;
+      const newWet = currentWet * smoothing + targetWet * (1 - smoothing);
+      this.delay.setMix(newWet, 0.85);
+    }
+
+    // TREMOLO: Pulsing based on color saturation
+    if (this.tremolo) {
+      const targetDepth = avgColor * 0.4;
+      const targetRate = 2 + motionClamped * 8;
+      const currentDepth = this.tremolo.depthGain.gain.value;
+      const newDepth = currentDepth * smoothing + targetDepth * (1 - smoothing);
+      this.tremolo.setDepth(newDepth);
+      this.tremolo.setRate(targetRate);
+    }
+
+    // HIGH SHELF: Brightness boost
+    if (this.highShelf) {
+      const highTarget = avgBrightness * 8;
+      const currentGain = this.highShelf.filter.gain.value;
+      const newGain = currentGain * smoothing + highTarget * (1 - smoothing);
+      this.highShelf.setGain(newGain);
+    }
+
+    // PANNER: Swing left/right based on motion
+    if (this.panner) {
+      if (avgMotion > 0.1) {
+        const leftBrightness = this.videoBrightnessData ?
+          (this.videoBrightnessData[0] + this.videoBrightnessData[1]) / 2 : 0.5;
+        const rightBrightness = this.videoBrightnessData ?
+          (this.videoBrightnessData[this.videoBrightnessData.length - 1] +
+           this.videoBrightnessData[this.videoBrightnessData.length - 2]) / 2 : 0.5;
+
+        const panDirection = (rightBrightness - leftBrightness) * 2;
+        this.panTarget = Math.max(-0.7, Math.min(0.7, panDirection * motionClamped));
+      } else {
+        this.panTarget = 0;
+      }
+
+      const currentPan = this.panner.pan.value;
+      const panSpeed = avgMotion > 0.1 ? 0.15 : 0.05;
+      const newPan = currentPan + (this.panTarget - currentPan) * panSpeed;
+      this.panner.pan.value = Math.max(-1, Math.min(1, newPan));
+    }
+
+    // EQ: Parametric EQ responds to video bands
+    if (numBands > 0 && this.audioFilters) {
+      const bassEnd = Math.floor(numBands * 0.3);
+      const midEnd = Math.floor(numBands * 0.7);
+
+      for (let i = 0; i < numBands; i++) {
+        let gain = 0;
+        let q = 2;
+        if (i < bassEnd) {
+          gain = motionClamped * 8;
+          q = 2 + motionClamped * 4;
+        } else if (i < midEnd) {
+          gain = avgColor * 6;
+          q = 2 + avgColor * 3;
+        } else {
+          gain = avgBrightness * 10;
+          q = 2 + avgBrightness * 4;
+        }
+
+        const filter = this.audioFilters[i];
+        filter.gain.value = filter.gain.value * smoothing + gain * (1 - smoothing);
+        filter.Q.value = filter.Q.value * smoothing + q * (1 - smoothing);
+      }
     }
   }
 
@@ -1559,5 +1806,6 @@ export default function day30(canvas) {
   return {
     stop: () => game.stop(),
     game,
+    handlesResize: true, // Don't restart on resize (preserves file picker state)
   };
 }

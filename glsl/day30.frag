@@ -110,9 +110,9 @@ uniform float uRippleTime;  // Seconds since last mouse click
 
 // Smooth Wave Distortion - Dali-inspired flowing waves
 #define WAVE_BASE_SPEED 1.5          // Base wave animation speed
-#define WAVE_MID_SPEED_BOOST 2.0     // Additional speed from mid frequencies
-#define WAVE_BASS_STRENGTH 0.015     // Wave amplitude from bass
-#define WAVE_AMPLITUDE_STRENGTH 0.012 // Wave amplitude from overall volume
+#define WAVE_MID_SPEED_BOOST 2.5     // Additional speed from mid frequencies
+#define WAVE_BASS_STRENGTH 0.035     // Wave amplitude from bass (increased)
+#define WAVE_AMPLITUDE_STRENGTH 0.025 // Wave amplitude from overall volume (increased)
 
 // Mouse Ripples - Interactive water-like displacement
 #define RIPPLE_SPEED 2.0             // How fast ripples expand
@@ -129,17 +129,17 @@ uniform float uRippleTime;  // Seconds since last mouse click
 #define CHROMA_THRESHOLD 0.003       // Minimum level to apply effect
 
 // State Machine Timing (seconds)
-#define STATE_NO_EFFECT_DURATION 4.0
-#define STATE_PERLIN_DURATION 3.0
+#define STATE_NO_EFFECT_DURATION 6.0
+#define STATE_PERLIN_DURATION 1.5
 #define STATE_STARGATE_DURATION 8.0
 #define STATE_FADE_TIME 0.8
 
 // Kaleidoscope
 #define KALEIDO_ITERATIONS 10        // Number of folding iterations
-#define KALEIDO_AMPLITUDE_TRIGGER 0.6 // Volume threshold to trigger
-#define KALEIDO_BASS_TRIGGER 0.65    // Bass threshold to trigger
-#define KALEIDO_BLINK_PERIOD 0.5     // Seconds between blinks
-#define KALEIDO_BLINK_DURATION 0.15  // How long each blink lasts
+#define KALEIDO_AMPLITUDE_TRIGGER 0.55 // Volume threshold to trigger
+#define KALEIDO_BASS_TRIGGER 0.6     // Bass threshold to trigger
+#define KALEIDO_BLINK_PERIOD 0.6     // Seconds between blinks
+#define KALEIDO_BLINK_DURATION 0.35  // How long each blink lasts (longer on loud parts)
 
 // Post-Processing
 #define VIGNETTE_START 0.9           // Distance from center where vignette starts
@@ -777,31 +777,42 @@ vec2 applyAudioWaves(vec2 uv, float t) {
  */
 vec3 perlinRippleEffect(vec2 uv, float time, sampler2D videoTex, vec2 videoUV, float aspect) {
     // Use UV directly for full-screen coverage
-    vec2 scaledUV = uv * 8.0;  // Scale for nice pattern density
+    vec2 scaledUV = uv * 6.0;  // Scale for nice pattern density
     scaledUV.x *= aspect;      // Correct for aspect ratio
 
     // Create 3D position from 2D UV + time
     // The direction vectors create diagonal motion through noise space
-    vec3 pos = vec3(time * 0.5);  // Slower time for smoother animation
+    vec3 pos = vec3(time * 0.4);  // Slower time for smoother animation
     pos += scaledUV.x * vec3(-0.816496581, 0.40824829, 0.40824829);
     pos += scaledUV.y * vec3(0.0, 0.707106781, -0.707106781);
 
     // sin(noise) creates ripple rings across the WHOLE screen
-    // No center falloff - full coverage
-    float n = smoothstep(-0.4, 0.6, sin(15.0 * noise3D(pos)));
+    float n = smoothstep(-0.4, 0.6, sin(12.0 * noise3D(pos)));
 
-    // Tonemapping for ethereal color
-    vec3 rippleColor = pow(vec3(n), vec3(0.5, 0.3, 0.8));
+    // Second noise layer for more organic displacement
+    vec3 pos2 = pos * 0.5 + vec3(time * 0.2);
+    float n2 = noise3D(pos2) * 0.5;
 
-    // Get base video
+    // Use noise to DISPLACE video UVs (liquid distortion effect)
+    // This samples video pixels at displaced positions
+    vec2 displacement = vec2(n * 0.03, n2 * 0.025);
+    vec2 displacedUV = safeUV(videoUV + displacement);
+
+    // Sample video at displaced position
+    vec3 displacedVideo = texture2D(videoTex, displacedUV).rgb;
+
+    // Get base video for blending
     vec3 videoColor = texture2D(videoTex, safeUV(videoUV)).rgb;
 
-    // Use SCREEN blend mode - adds light without darkening video
-    // Subtle ripple overlay
-    vec3 blended = blendScreen(videoColor, rippleColor * 0.4);
+    // Blend displaced video with base - creates liquid glass effect
+    // The noise pattern determines where we see distorted vs clean video
+    vec3 blended = mix(videoColor, displacedVideo, n * 0.7);
 
-    // Gentle mix so video stays visible
-    return mix(videoColor, blended, n * 0.35);
+    // Add subtle edge highlight where displacement is strongest
+    float edge = abs(n - 0.5) * 2.0;
+    blended += blended * edge * 0.15;
+
+    return blended;
 }
 
 // ============================================================================
@@ -1319,10 +1330,15 @@ float determineState(float t) {
     if (kaleidoTrigger > 0.5 && kaleidoBlink > 0.5) {
         state = STATE_KALEIDO;
     }
-    // Stargate also triggers during moderate audio (not just silence)
-    // This makes it appear more frequently
-    else if (uAmplitude < 0.5 && uBassLevel < 0.5) {
+    // Stargate: triggers on very strong drums (high bass with loud amplitude)
+    // Only the biggest bass hits create the tunnel effect
+    else if (uBassLevel > 0.75 && uAmplitude > 0.65) {
         state = STATE_STARGATE;
+    }
+    // Perlin: triggers during quiet parts (low amplitude and bass)
+    // Dreamy liquid effect for calm sections
+    else if (uAmplitude < 0.25 && uBassLevel < 0.3) {
+        state = STATE_PERLIN;
     }
 
     return state;
