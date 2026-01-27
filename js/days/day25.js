@@ -29,6 +29,7 @@ import {
   Scene,
   VerticalLayout,
   HorizontalLayout,
+  TileLayout,
   Text,
   ToggleButton,
   Rectangle,
@@ -38,7 +39,9 @@ import {
 // Local modules
 import { TAU, CONFIG } from './day25.config.js';
 import { MOLECULES, PRIMORDIAL_KEYS, REACTIONS } from './day25.chemistry.js';
-import { Molecule3D, Molecule2D } from './day25.molecule.js';
+import { Molecule3D } from './day25.molecule.js';
+import { LegendUI } from './day25.ui.js';
+import { Lightning } from './day25.lightning.js';
 
 /**
  * Primordial Soup Demo
@@ -86,25 +89,39 @@ class PrimordialSoupDemo extends Game {
     this.cy = this.height / 2;
     this.reactionLog = [];
     this.totalTime = 0;
-    this.nextLightning = CONFIG.lightningInterval;
 
     // Stats
     this.stats = { reactions: 0, maxTier: 0 };
 
+    // Discovery tracking - molecules seen at least once
+    this.discovered = new Set();
+
+    // Required molecules per tier for progression
+    this.tierRequirements = {
+      0: ['water', 'methane', 'ammonia', 'hydrogen', 'carbonDioxide', 'hydrogenSulfide'],
+      1: ['formaldehyde', 'hydrogenCyanide'],
+      2: ['glycine', 'alanine', 'serine', 'asparticAcid', 'cysteine'],
+      3: ['diglycine'],
+    };
+
     // UI state - hide info by default
     this.showInfo = false;
     this.showLegend = false;
+
+    // Idle mode - auto-spawn when user is inactive
+    this.lastInteractionTime = 0;
+    this.idleSpawnTimer = 0;
 
     // World bounds - expanded for better spread
     this.worldWidth = this.width * CONFIG.worldWidthRatio;
     this.worldHeight = this.height * CONFIG.worldHeightRatio;
 
     // Use Screen.responsive for device-appropriate counts
-    // Mobile: fewer for performance, Desktop: more for fuller scene
+    // Mobile: fewer for performance, Desktop/4K: more for fuller scene
     // Tuned for good density without overcrowding
-    this.moleculeCount = Screen.responsive(14, 24, 36);
-    const bubbleCount = Screen.responsive(15, 25, 35);
-    const particleCount = Screen.responsive(25, 40, 55);
+    this.moleculeCount = Screen.responsive(14, 24, 50);
+    const bubbleCount = Screen.responsive(15, 25, 50);
+    const particleCount = Screen.responsive(25, 40, 80);
 
     console.log(`[Day25] Screen: ${Screen.isMobile ? 'mobile' : Screen.isTablet ? 'tablet' : 'desktop'}, molecules: ${this.moleculeCount}`);
 
@@ -134,17 +151,128 @@ class PrimordialSoupDemo extends Game {
     this.rightVent = null;
     this.loadThermalVents();
 
+    // Create lightning effect (screen-space, not affected by camera rotation)
+    this.createLightning();
+
     // Create UI - toggle buttons at bottom left
     this.createUI();
 
     // Track drag vs click
     let dragStart = null;
+
+    // Helper to check if point is inside a dialog's bounds
+    const isInsideDialog = (x, y, dialog) => {
+      if (!dialog) return false;
+      const dx = dialog.x - dialog.width / 2;
+      const dy = dialog.y - dialog.height / 2;
+      return x >= dx && x <= dx + dialog.width &&
+             y >= dy && y <= dy + dialog.height;
+    };
+
+    // Helper to check if point is inside legend bounds
+    const isInsideLegend = (x, y) => isInsideDialog(x, y, this.legendUI);
+
+    // Helper to check if point is inside stats bounds
+    const isInsideStats = (x, y) => isInsideDialog(x, y, this.statsScene);
+
+    // Helper to enable/disable camera drag
+    this.setCameraDragEnabled = (enabled) => {
+      if (!this.camera._boundHandlers) return;
+      const handlers = this.camera._boundHandlers;
+      if (enabled) {
+        // Re-add handlers
+        this.canvas.addEventListener('mousedown', handlers.mousedown);
+        this.canvas.addEventListener('mousemove', handlers.mousemove);
+        this.canvas.addEventListener('mouseup', handlers.mouseup);
+        if (handlers.touchstart) {
+          this.canvas.addEventListener('touchstart', handlers.touchstart);
+          this.canvas.addEventListener('touchmove', handlers.touchmove);
+          this.canvas.addEventListener('touchend', handlers.touchend);
+        }
+      } else {
+        // Remove handlers
+        this.canvas.removeEventListener('mousedown', handlers.mousedown);
+        this.canvas.removeEventListener('mousemove', handlers.mousemove);
+        this.canvas.removeEventListener('mouseup', handlers.mouseup);
+        if (handlers.touchstart) {
+          this.canvas.removeEventListener('touchstart', handlers.touchstart);
+          this.canvas.removeEventListener('touchmove', handlers.touchmove);
+          this.canvas.removeEventListener('touchend', handlers.touchend);
+        }
+      }
+    };
+
+    // Close legend when clicking outside (capture phase)
+    // Stats pane stays open and allows interaction with simulation
+    const handleClickOutside = (e) => {
+      const rect = this.canvas.getBoundingClientRect();
+      const touch = e.touches ? e.touches[0] : e;
+      const clickX = touch.clientX - rect.left;
+      const clickY = touch.clientY - rect.top;
+
+      // Handle legend click-outside (camera disabled, click outside closes)
+      if (this.showLegend && this.legendUI && this.legendUI.visible) {
+        if (!isInsideLegend(clickX, clickY)) {
+          this.showLegend = false;
+          this.legendUI.visible = false;
+          this.legendBtn.toggle(false);
+          this.setCameraDragEnabled(true);
+        }
+      }
+      // Stats pane: no click-outside-to-close, camera stays enabled
+    };
+
+    this.canvas.addEventListener('mousedown', handleClickOutside, true);
+    this.canvas.addEventListener('touchstart', handleClickOutside, true);
+
     this.canvas.addEventListener('mousedown', (e) => {
       dragStart = { x: e.clientX, y: e.clientY };
     });
 
-    // Click spawns new primordial molecule
+    // Track mouse position for repulsion effect
+    this.mouseWorld = { x: 0, y: 0, z: 0, active: false };
+
+    this.canvas.addEventListener('mousemove', (e) => {
+      const rect = this.canvas.getBoundingClientRect();
+      const screenX = e.clientX - rect.left - this.width / 2;
+      const screenY = e.clientY - rect.top - this.height / 2;
+
+      // Unproject through camera rotation
+      const cosX = Math.cos(-this.camera.rotationX);
+      const sinX = Math.sin(-this.camera.rotationX);
+      const cosY = Math.cos(-this.camera.rotationY);
+      const sinY = Math.sin(-this.camera.rotationY);
+
+      let x = screenX, y = screenY, z = 0;
+
+      // Undo X rotation (tilt)
+      let ty = y * cosX - z * sinX;
+      let tz = y * sinX + z * cosX;
+      y = ty; z = tz;
+
+      // Undo Y rotation (spin)
+      let tx = x * cosY + z * sinY;
+      tz = -x * sinY + z * cosY;
+      x = tx; z = tz;
+
+      this.mouseWorld.x = x;
+      this.mouseWorld.y = y;
+      this.mouseWorld.z = z;
+      this.mouseWorld.active = true;
+    });
+
+    this.canvas.addEventListener('mouseleave', () => {
+      this.mouseWorld.active = false;
+    });
+
+    // Click spawns smart molecule (what's needed for reactions)
     this.canvas.addEventListener('mouseup', (e) => {
+      // Don't spawn molecules when legend is visible
+      if (this.showLegend && this.legendUI && this.legendUI.visible) {
+        dragStart = null;
+        return;
+      }
+
       if (dragStart) {
         const dx = e.clientX - dragStart.x;
         const dy = e.clientY - dragStart.y;
@@ -159,7 +287,7 @@ class PrimordialSoupDemo extends Game {
       const screenX = e.clientX - rect.left - this.width / 2;
       const screenY = e.clientY - rect.top - this.height / 2;
 
-      // Unproject through camera rotation
+      // Unproject through camera rotation (reverse order: X then Y)
       const cosX = Math.cos(-this.camera.rotationX);
       const sinX = Math.sin(-this.camera.rotationX);
       const cosY = Math.cos(-this.camera.rotationY);
@@ -167,19 +295,27 @@ class PrimordialSoupDemo extends Game {
 
       let x = screenX;
       let y = screenY;
-      let z = (Math.random() - 0.5) * 100;
+      let z = (Math.random() - 0.5) * 80;
 
-      const tx = x * cosY - z * sinY;
-      const tz = x * sinY + z * cosY;
+      // First undo X rotation (tilt)
+      let ty = y * cosX - z * sinX;
+      let tz = y * sinX + z * cosX;
+      y = ty;
+      z = tz;
+
+      // Then undo Y rotation (spin)
+      let tx = x * cosY + z * sinY;
+      tz = -x * sinY + z * cosY;
       x = tx;
       z = tz;
 
-      const ty = y * cosX - z * sinX;
-      const tz2 = y * sinX + z * cosX;
-      y = ty;
-      z = tz2;
+      // Reset idle timer on user interaction
+      this.lastInteractionTime = this.totalTime;
+      this.idleSpawnTimer = 0;
 
-      const mol = this.spawnMolecule(true, x, y, z, undefined, true);
+      // Use smart picker to spawn what's needed for reactions
+      const smartKey = this.pickSmartMolecule();
+      const mol = this.spawnMolecule(false, x, y, z, smartKey, true);
       if (mol) {
         this.reactionLog.unshift({
           text: `+ ${mol.label} (${mol.name})`,
@@ -188,6 +324,74 @@ class PrimordialSoupDemo extends Game {
         if (this.reactionLog.length > 5) this.reactionLog.pop();
       }
     });
+
+    // Press R to restart simulation
+    this._keyHandler = (e) => {
+      if (e.key === 'r' || e.key === 'R') {
+        this.restart();
+      }
+    };
+    window.addEventListener('keydown', this._keyHandler);
+  }
+
+  /**
+   * Restart the simulation - clear everything and respawn
+   */
+  restart() {
+    // Clear molecules
+    this.molecules = [];
+
+    // Reset stats
+    this.stats = { reactions: 0, maxTier: 0 };
+    this.discovered = new Set();
+    this.reactionLog = [];
+
+    // Reset timers
+    this.totalTime = 0;
+    this.lastInteractionTime = 0;
+    this.idleSpawnTimer = 0;
+
+    // Reset lightning
+    if (this.lightning) {
+      this.lightning.timer = CONFIG.lightningInterval;
+      this.lightning.flash = null;
+    }
+
+    // Clear reaction bursts
+    this.reactionBursts = [];
+
+    // Clear filter
+    this.clearMoleculeFilter();
+
+    // Close dialogs
+    if (this.showLegend) {
+      this.showLegend = false;
+      this.legendUI.visible = false;
+      this.legendBtn.toggle(false);
+    }
+    if (this.showStats) {
+      this.showStats = false;
+      this.statsScene.visible = false;
+      this.statsBtn.toggle(false);
+    }
+    this.setCameraDragEnabled(true);
+
+    // Reset camera
+    this.camera.rotationX = 0.2;
+    this.camera.rotationY = 0;
+
+    // Respawn primordial molecules
+    for (let i = 0; i < this.moleculeCount; i++) {
+      this.spawnMolecule(true);
+    }
+
+    // Log restart
+    this.reactionLog.unshift({
+      text: '~ Simulation restarted',
+      time: 3,
+    });
+
+    console.log('[Day25] Simulation restarted');
   }
 
   /**
@@ -265,6 +469,150 @@ class PrimordialSoupDemo extends Game {
   }
 
   /**
+   * Create screen-space lightning effect
+   */
+  createLightning() {
+    this.lightning = new Lightning(this, {
+      interval: CONFIG.lightningInterval,
+      variance: CONFIG.lightningVariance,
+      radius: CONFIG.lightningRadius,
+      energy: CONFIG.lightningEnergy,
+      zIndex: 100,
+      onStrike: (screenX, screenY, radius, energy) => {
+        // Heat molecules that appear near the strike point on screen
+        const cx = this.width / 2;
+        const cy = this.height / 2;
+
+        for (const mol of this.molecules) {
+          const proj = this.camera.project(mol.x, mol.y, mol.z);
+          const molScreenX = cx + proj.x;
+          const molScreenY = cy + proj.y;
+
+          const dx = molScreenX - screenX;
+          const dy = molScreenY - screenY;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+
+          if (dist < radius) {
+            const intensity = 1 - dist / radius;
+            mol.temperature = Math.min(1, mol.temperature + energy * intensity);
+            mol.flash = Math.max(mol.flash, intensity * 0.5);
+          }
+        }
+
+        // Cull redundant molecules (cooked by lightning)
+        this.lightningCull(screenX, screenY);
+
+        // Chance to spawn amino acid from lightning energy (Miller-Urey style)
+        this.lightningSpawn(screenX, screenY);
+      },
+    });
+    this.pipeline.add(this.lightning);
+  }
+
+  /**
+   * Cull redundant molecules near lightning strike
+   * Removes up to 3 molecules that are overrepresented
+   */
+  lightningCull(screenX, screenY) {
+    if (this.molecules.length < 15) return; // Don't cull if population is small
+
+    // Count molecules by type
+    const counts = {};
+    for (const mol of this.molecules) {
+      counts[mol.templateKey] = (counts[mol.templateKey] || 0) + 1;
+    }
+
+    // Find redundant molecules (more than 5 of the same type, or tier 0 when we have higher tiers)
+    const redundant = [];
+    const cx = this.width / 2;
+    const cy = this.height / 2;
+
+    for (let i = 0; i < this.molecules.length; i++) {
+      const mol = this.molecules[i];
+      const count = counts[mol.templateKey];
+
+      // Check if redundant: too many of same type, or low tier primordials when we've evolved
+      const isTooMany = count > 5;
+      const isObsoletePrimordial = mol.tier === 0 && this.stats.maxTier >= 2 && count > 3;
+
+      if (isTooMany || isObsoletePrimordial) {
+        // Calculate screen distance to strike point
+        const proj = this.camera.project(mol.x, mol.y, mol.z);
+        const dist = Math.sqrt(
+          Math.pow(cx + proj.x - screenX, 2) +
+          Math.pow(cy + proj.y - screenY, 2)
+        );
+        redundant.push({ index: i, dist, key: mol.templateKey });
+      }
+    }
+
+    // Sort by distance to strike (closer = more likely to get zapped)
+    redundant.sort((a, b) => a.dist - b.dist);
+
+    // Remove up to 3 closest redundant molecules
+    const toRemove = new Set();
+    const removedTypes = {};
+    for (const r of redundant) {
+      if (toRemove.size >= 3) break;
+      // Don't remove too many of the same type in one strike
+      if ((removedTypes[r.key] || 0) >= 2) continue;
+
+      toRemove.add(r.index);
+      removedTypes[r.key] = (removedTypes[r.key] || 0) + 1;
+      counts[r.key]--;
+    }
+
+    if (toRemove.size > 0) {
+      this.molecules = this.molecules.filter((_, i) => !toRemove.has(i));
+    }
+  }
+
+  /**
+   * Chance for lightning to directly synthesize rare molecules
+   * Represents Miller-Urey style abiotic synthesis - spawns the harder-to-get stuff
+   */
+  lightningSpawn(screenX, screenY) {
+    // Only spawn if we've reached amino acid phase (maxTier >= 2)
+    if (this.stats.maxTier < 2) return;
+
+    // 15% chance to spawn rare molecule
+    if (Math.random() > 0.15) return;
+
+    // Rare molecules pool - the ones that are hard to synthesize naturally
+    const rareMolecules = ['serine', 'cysteine', 'asparticAcid', 'diglycine'];
+
+    // Add nucleobases if we've reached that tier
+    if (this.stats.maxTier >= 3) {
+      rareMolecules.push('adenine', 'cytosine', 'guanine', 'uracil');
+    }
+
+    const key = rareMolecules[Math.floor(Math.random() * rareMolecules.length)];
+
+    // Convert screen position to world position (approximate)
+    const worldX = screenX - this.width / 2 + (Math.random() - 0.5) * 50;
+    const worldY = screenY - this.height / 2 + (Math.random() - 0.5) * 50;
+    const worldZ = (Math.random() - 0.5) * 100;
+
+    const mol = new Molecule3D(this, key, { x: worldX, y: worldY, z: worldZ });
+    mol.temperature = 0.8; // Hot from lightning
+    mol.flash = 1.0;
+    mol.vx = (Math.random() - 0.5) * 30;
+    mol.vy = (Math.random() - 0.5) * 30;
+    mol.vz = (Math.random() - 0.5) * 30;
+
+    this.molecules.push(mol);
+    this.discovered.add(key);
+    this.stats.maxTier = Math.max(this.stats.maxTier, mol.tier);
+
+    // Log the synthesis
+    this.reactionLog.unshift({
+      text: `⚡ ${mol.label} synthesized!`,
+      time: 3,
+    });
+    if (this.reactionLog.length > 5) this.reactionLog.pop();
+  }
+
+  /**
    * Create UI with toggle buttons and legend dialog
    */
   createUI() {
@@ -273,6 +621,14 @@ class PrimordialSoupDemo extends Game {
     const btnFont = isMobile ? '16px "Fira Code", monospace' : '18px "Fira Code", monospace';
     const btnY = this.height - 60;
     const btnStartX = 20;
+
+    this.buttonBar = new HorizontalLayout(this, {
+      anchor: 'bottom-left',
+      spacing: 10,
+      x: btnStartX,
+      y: btnY,
+    });
+    this.pipeline.add(this.buttonBar);
 
     // Info toggle button [i]
     this.infoBtn = new ToggleButton(this, {
@@ -285,9 +641,9 @@ class PrimordialSoupDemo extends Game {
         this.showInfo = isOn;
       },
     });
-    this.infoBtn.x = btnStartX + btnSize / 2;
-    this.infoBtn.y = btnY;
-    this.pipeline.add(this.infoBtn);
+    //this.infoBtn.x = btnStartX + btnSize / 2;
+    //this.infoBtn.y = btnY;
+    this.buttonBar.add(this.infoBtn);
 
     // Legend toggle button
     this.legendBtn = new ToggleButton(this, {
@@ -298,114 +654,201 @@ class PrimordialSoupDemo extends Game {
       startToggled: this.showLegend,
       onToggle: (isOn) => {
         this.showLegend = isOn;
-        if (this.legendScene) {
-          this.legendScene.visible = isOn;
+        if (this.legendUI) {
+          this.legendUI.visible = isOn;
+        }
+        // Disable/enable camera drag when legend is open/closed
+        this.setCameraDragEnabled(!isOn);
+      },
+    });
+    //this.legendBtn.x = btnStartX + btnSize + 10 + btnSize / 2;
+    //this.legendBtn.y = btnY;
+    this.buttonBar.add(this.legendBtn);
+
+    // Stats toggle button [#]
+    this.showStats = false;
+    this.moleculeFilter = null; // Currently filtered molecule key
+    this.statsBtn = new ToggleButton(this, {
+      text: "#",
+      width: btnSize,
+      height: btnSize,
+      font: btnFont,
+      startToggled: this.showStats,
+      onToggle: (isOn) => {
+        this.showStats = isOn;
+        if (this.statsScene) {
+          this.statsScene.visible = isOn;
+        }
+        // Camera stays enabled for stats pane
+        // Clear filter when closing
+        if (!isOn) {
+          this.clearMoleculeFilter();
         }
       },
     });
-    this.legendBtn.x = btnStartX + btnSize + 10 + btnSize / 2;
-    this.legendBtn.y = btnY;
-    this.pipeline.add(this.legendBtn);
+    //this.statsBtn.x = btnStartX + (btnSize + 10) * 2 + btnSize / 2;
+    //this.statsBtn.y = btnY;
+    this.buttonBar.add(this.statsBtn);
 
     // Create legend dialog
     this.createLegendDialog();
+
+    // Create stats dialog
+    this.createStatsDialog();
   }
 
   /**
-   * Create the legend dialog showing primordial molecules
+   * Create the molecule browser dialog
    */
   createLegendDialog() {
-    const debugLegend = CONFIG.debugLegend;
+    this.legendUI = new LegendUI(this);
+    this.pipeline.add(this.legendUI);
+  }
 
+  /**
+   * Create the stats dialog showing molecule counts by type
+   */
+  createStatsDialog() {
     const isMobile = Screen.isMobile;
-    const dialogWidth = isMobile ? 240 : 300;
-    const dialogHeight = isMobile ? 260 : 320;
-    const fontSize = isMobile ? 10 : 12;
+    const btnWidth = isMobile ? 70 : 90;
+    const btnHeight = isMobile ? 18 : 18;
+    const columns = isMobile ? 2 : 2;
+    const fontSize = isMobile ? 8 : 10;
+    const dialogWidth = columns * btnWidth + 40;
+    const dialogHeight = isMobile ? 380 : 480;
 
-    // Legend scene centered on screen
-    this.legendScene = new Scene(this, {
+    // Stats scene on right side of screen
+    this.statsScene = new Scene(this, {
       width: dialogWidth,
       height: dialogHeight,
     });
-    this.legendScene.x = this.width / 2;
-    this.legendScene.y = this.height / 2;
-    this.legendScene.visible = false;
+    this.statsScene.x = this.width - dialogWidth / 2 - 20;
+    this.statsScene.y = this.height / 2;
+    this.statsScene.visible = false;
 
-    // Create background rectangle using ShapeGOFactory
+    // Create background rectangle
     const bgRect = new Rectangle({
-      x: 0,
-      y: 0,
       width: dialogWidth,
       height: dialogHeight,
-      color: 'rgba(0, 10, 15, 0.9)',
-      stroke: '#0f0',
+      color: 'rgba(0, 10, 15, 0.95)',
+      stroke: '#999',
       lineWidth: 2,
     });
     const background = ShapeGOFactory.create(this, bgRect, {
-      name: 'legendBackground',
+      name: 'statsBackground',
     });
-    this.legendScene.add(background);
+    this.statsScene.add(background);
 
-    // Vertical layout for molecule entries
-    const layout = new VerticalLayout(this, {
-      spacing: isMobile ? 4 : 6,
-      padding: 8,
-      debug: debugLegend,
-      debugColor: "red",
+    // Main vertical layout to hold title and tile grid
+    const mainLayout = new VerticalLayout(this, {
+      spacing: 10,
+      padding: 10,
     });
-    this.legendScene.add(layout);
+    this.statsScene.add(mainLayout);
 
     // Title
-    const title = new Text(this, "PRIMORDIAL MOLECULES", {
+    const title = new Text(this, "MOLECULE COUNTS", {
       font: `bold ${fontSize + 2}px "Fira Code", monospace`,
       color: '#0f0',
       align: 'center',
       baseline: 'middle',
     });
-    layout.add(title);
+    mainLayout.add(title);
 
-    // Add each primordial molecule
-    const previewSize = isMobile ? 32 : 40;
-    for (const key of PRIMORDIAL_KEYS) {
+    // TileLayout for molecule buttons
+    const tileLayout = new TileLayout(this, {
+      columns: columns,
+      spacing: 4,
+      padding: 4,
+    });
+    mainLayout.add(tileLayout);
+
+    // Create toggle buttons for each molecule type
+    this.statsButtons = {};
+    const allKeys = Object.keys(MOLECULES);
+
+    for (const key of allKeys) {
       const mol = MOLECULES[key];
-      if (!mol) continue;
-
-      // Horizontal layout for each molecule entry
-      const entry = new HorizontalLayout(this, {
-        autoSize: false,
-        width: dialogWidth - 25,
-        height: previewSize,
-        align: "start",
-        spacing: 0,
-        padding: 0,
-        debug: debugLegend,
-        debugColor: "yellow",
-      });
-
-      // Create molecule preview using Molecule2D GameObject (auto-scales to fit)
-      const preview = new Molecule2D(this, key, {
-        width: previewSize,
-        height: previewSize,
-        debug: debugLegend,
-        debugColor: "green",
-      });
-      entry.add(preview);
-
-      // Molecule name and formula - white labels
-      const label = new Text(this, `${mol.name} - ${mol.label}`, {
+      const btn = new ToggleButton(this, {
+        text: `${mol.name}: 0`,
+        width: btnWidth,
+        height: btnHeight,
         font: `${fontSize}px "Fira Code", monospace`,
-        color: '#fff',
-        align: 'left',
-        baseline: 'middle',
-        debug: debugLegend,
-        debugColor: "blue",
+        startToggled: false,
+        onToggle: (isOn) => {
+          if (isOn) {
+            // Set filter to this molecule
+            this.setMoleculeFilter(key);
+            // Radio behavior - untoggle others
+            for (const [k, b] of Object.entries(this.statsButtons)) {
+              if (k !== key && b.toggled) {
+                b.toggle(false);
+              }
+            }
+          } else {
+            // Clear filter when untoggling
+            this.clearMoleculeFilter();
+          }
+        },
       });
-      entry.add(label);
-
-      layout.add(entry);
+      btn._moleculeKey = key;
+      this.statsButtons[key] = btn;
+      tileLayout.add(btn);
     }
 
-    this.pipeline.add(this.legendScene);
+    this.pipeline.add(this.statsScene);
+  }
+
+  /**
+   * Update stats dialog button labels with current molecule counts
+   */
+  updateStatsLabels() {
+    if (!this.showStats || !this.statsButtons) return;
+
+    // Count molecules by type
+    const counts = {};
+    for (const mol of this.molecules) {
+      counts[mol.templateKey] = (counts[mol.templateKey] || 0) + 1;
+    }
+
+    // Update button labels
+    for (const key of Object.keys(MOLECULES)) {
+      const mol = MOLECULES[key];
+      const count = counts[key] || 0;
+      const btn = this.statsButtons[key];
+      if (btn && btn.label) {
+        btn.label.text = `${mol.name}: ${count}`;
+      }
+    }
+  }
+
+  /**
+   * Set molecule filter - dim non-matching molecules
+   * @param {string} key - Molecule template key to highlight
+   */
+  setMoleculeFilter(key) {
+    this.moleculeFilter = key;
+    for (const mol of this.molecules) {
+      mol.dimmed = mol.templateKey !== key;
+    }
+  }
+
+  /**
+   * Clear molecule filter - restore all molecules to full opacity
+   */
+  clearMoleculeFilter() {
+    this.moleculeFilter = null;
+    for (const mol of this.molecules) {
+      mol.dimmed = false;
+    }
+    // Untoggle all stats buttons
+    if (this.statsButtons) {
+      for (const btn of Object.values(this.statsButtons)) {
+        if (btn.toggled) {
+          btn.toggle(false);
+        }
+      }
+    }
   }
 
   /**
@@ -436,8 +879,38 @@ class PrimordialSoupDemo extends Game {
     const pz = z ?? (Math.random() - 0.5) * CONFIG.worldDepth;
 
     const mol = new Molecule3D(this, key, { x: px, y: py, z: pz });
+    // Apply current filter if active
+    if (this.moleculeFilter) {
+      mol.dimmed = key !== this.moleculeFilter;
+    }
     this.molecules.push(mol);
+
+    // Track discovery
+    this.discovered.add(key);
+
     return mol;
+  }
+
+  /**
+   * Check if all molecules in a tier have been discovered
+   * @param {number} tier - Tier to check (0-3)
+   * @returns {boolean}
+   */
+  isTierDiscovered(tier) {
+    const required = this.tierRequirements[tier];
+    if (!required) return true;
+    return required.every(key => this.discovered.has(key));
+  }
+
+  /**
+   * Check if nucleobase reactions are unlocked (all tiers 0-3 discovered)
+   * @returns {boolean}
+   */
+  areNucleobasesUnlocked() {
+    return this.isTierDiscovered(0) &&
+           this.isTierDiscovered(1) &&
+           this.isTierDiscovered(2) &&
+           this.isTierDiscovered(3);
   }
 
   /**
@@ -451,46 +924,60 @@ class PrimordialSoupDemo extends Game {
       counts[mol.templateKey] = (counts[mol.templateKey] || 0) + 1;
     }
 
-    // Calculate "need score" for each primordial molecule
-    // Higher score = spawning this would enable more reactions
-    const scores = {};
-    for (const key of PRIMORDIAL_KEYS) {
-      scores[key] = 1; // Base score so everything has some chance
-    }
+    // Priority order - these are checked in sequence, spawn first one that's needed
+    // Key precursors first, then primordials to make more precursors
+    const priority = [
+      'formaldehyde',   // HCHO - KEY for glycine, serine, cytosine, guanine
+      'hydrogenCyanide',// HCN - KEY for glycine, alanine, adenine, cytosine
+      'glycine',        // Simplest amino acid - needed for Ser, Asp, Cys, peptides
+      'methane',        // CH4 - makes formaldehyde + HCN
+      'ammonia',        // NH3 - makes HCN, alanine, adenine
+      'water',          // H2O - universal reactant
+      'carbonDioxide',  // CO2 - for aspartic acid
+      'hydrogenSulfide',// H2S - for cysteine
+      'hydrogen',       // H2 - byproduct, reducing agent
+      'alanine',        // Second amino acid
+    ];
 
-    // For each reaction, boost the score of missing/low reactants
-    for (const reaction of REACTIONS) {
-      const [r1, r2] = reaction.reactants;
-      const count1 = counts[r1] || 0;
-      const count2 = counts[r2] || 0;
-
-      // Only consider reactions where at least one reactant exists
-      if (count1 > 0 || count2 > 0) {
-        // Boost the one we have less of (or none of)
-        if (PRIMORDIAL_KEYS.includes(r1)) {
-          // More of r2 means we need more r1 to react with it
-          scores[r1] += count2 * 2;
-          // If we have zero r1, extra boost
-          if (count1 === 0) scores[r1] += 5;
-        }
-        if (PRIMORDIAL_KEYS.includes(r2)) {
-          scores[r2] += count1 * 2;
-          if (count2 === 0) scores[r2] += 5;
-        }
+    // Check each in priority order - spawn first one at 0
+    for (const key of priority) {
+      const count = counts[key] || 0;
+      if (count === 0) {
+        console.log('[Spawner] ZERO:', key);
+        return key;
       }
     }
 
-    // Weighted random selection
-    const totalScore = Object.values(scores).reduce((a, b) => a + b, 0);
-    let roll = Math.random() * totalScore;
-
-    for (const key of PRIMORDIAL_KEYS) {
-      roll -= scores[key];
-      if (roll <= 0) return key;
+    // Check each in priority order - spawn first one under 3
+    for (const key of priority) {
+      const count = counts[key] || 0;
+      if (count < 3) {
+        console.log('[Spawner] LOW (<3):', key, count);
+        return key;
+      }
     }
 
-    // Fallback
-    return PRIMORDIAL_KEYS[Math.floor(Math.random() * PRIMORDIAL_KEYS.length)];
+    // Check each in priority order - spawn first one under 8
+    for (const key of priority) {
+      const count = counts[key] || 0;
+      if (count < 8) {
+        console.log('[Spawner] MED (<8):', key, count);
+        return key;
+      }
+    }
+
+    // Everything is well-stocked, spawn lowest count from priority list
+    let lowest = priority[0];
+    let lowestCount = counts[priority[0]] || 0;
+    for (const key of priority) {
+      const count = counts[key] || 0;
+      if (count < lowestCount) {
+        lowest = key;
+        lowestCount = count;
+      }
+    }
+    console.log('[Spawner] LOWEST:', lowest, lowestCount);
+    return lowest;
   }
 
   /**
@@ -523,6 +1010,11 @@ class PrimordialSoupDemo extends Game {
 
     // Start at neutral temp - will warm/cool based on position
     mol.temperature = 0.5;
+
+    // Apply current filter if active
+    if (this.moleculeFilter) {
+      mol.dimmed = key !== this.moleculeFilter;
+    }
 
     this.molecules.push(mol);
     return mol;
@@ -560,33 +1052,6 @@ class PrimordialSoupDemo extends Game {
   }
 
   /**
-   * Trigger lightning strike
-   */
-  lightning() {
-    const lx = (Math.random() - 0.5) * this.worldWidth;
-    const ly = (Math.random() - 0.5) * this.worldHeight * 0.5;
-    const lz = (Math.random() - 0.5) * 150;
-
-    for (const mol of this.molecules) {
-      const dx = mol.x - lx;
-      const dy = mol.y - ly;
-      const dz = mol.z - lz;
-      const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
-
-      if (dist < CONFIG.lightningRadius) {
-        const intensity = 1 - dist / CONFIG.lightningRadius;
-        mol.temperature = Math.min(
-          1,
-          mol.temperature + CONFIG.lightningEnergy * intensity
-        );
-        mol.flash = Math.max(mol.flash, intensity * 0.5);
-      }
-    }
-
-    this.lightningFlash = { x: lx, y: ly, z: lz, intensity: 1 };
-  }
-
-  /**
    * Check for and process chemical reactions
    */
   checkReactions() {
@@ -618,6 +1083,12 @@ class PrimordialSoupDemo extends Game {
 
           if (!matches) continue;
 
+          // Gate nucleobase reactions until all previous tiers discovered
+          const producesNucleobase = reaction.products.some(p =>
+            ['adenine', 'cytosine', 'uracil', 'guanine'].includes(p)
+          );
+          if (producesNucleobase && !this.areNucleobasesUnlocked()) continue;
+
           const chance = CONFIG.baseReactionChance * (avgTemp / reaction.minTemp);
           if (avgTemp < reaction.minTemp * 0.8 || Math.random() > chance) continue;
 
@@ -644,7 +1115,14 @@ class PrimordialSoupDemo extends Game {
             product.vx = (mol1.vx + mol2.vx) / 2 + (Math.random() - 0.5) * 15;
             product.vy = (mol1.vy + mol2.vy) / 2 + (Math.random() - 0.5) * 15;
             product.vz = (mol1.vz + mol2.vz) / 2 + (Math.random() - 0.5) * 15;
+            // Apply current filter if active
+            if (this.moleculeFilter) {
+              product.dimmed = productKey !== this.moleculeFilter;
+            }
             toAdd.push(product);
+
+            // Track discovery
+            this.discovered.add(productKey);
 
             this.stats.maxTier = Math.max(this.stats.maxTier, product.tier);
           }
@@ -794,19 +1272,21 @@ class PrimordialSoupDemo extends Game {
     this.camera.update(dt);
     this.totalTime += dt;
 
-    // Lightning timer
-    this.nextLightning -= dt;
-    if (this.nextLightning <= 0) {
-      this.lightning();
-      this.nextLightning =
-        CONFIG.lightningInterval +
-        (Math.random() - 0.5) * CONFIG.lightningVariance * 2;
-    }
-
-    // Decay lightning flash
-    if (this.lightningFlash) {
-      this.lightningFlash.intensity -= dt * 3;
-      if (this.lightningFlash.intensity <= 0) this.lightningFlash = null;
+    // Idle mode - auto-spawn molecules when user is inactive
+    const timeSinceInteraction = this.totalTime - this.lastInteractionTime;
+    if (timeSinceInteraction >= CONFIG.idleSpawnDelay) {
+      this.idleSpawnTimer += dt;
+      if (this.idleSpawnTimer >= CONFIG.idleSpawnInterval) {
+        this.idleSpawnTimer = 0;
+        const mol = this.spawnFromOffscreen();
+        if (mol) {
+          this.reactionLog.unshift({
+            text: `~ ${mol.label} drifted in`,
+            time: 2,
+          });
+          if (this.reactionLog.length > 5) this.reactionLog.pop();
+        }
+      }
     }
 
     // Update bubbles
@@ -853,7 +1333,7 @@ class PrimordialSoupDemo extends Game {
     // Update molecules
     for (const mol of this.molecules) {
       mol.update(dt);
-      
+
       // Soft boundaries - stronger push to keep molecules in view
       const margin = 50;
       const boundaryForce = 80;
@@ -864,6 +1344,49 @@ class PrimordialSoupDemo extends Game {
       if (mol.y > this.worldHeight / 2 + margin) mol.vy -= boundaryForce * dt;
       if (mol.z < -halfDepth) mol.vz += boundaryForce * 0.6 * dt;
       if (mol.z > halfDepth) mol.vz -= boundaryForce * 0.6 * dt;
+
+      // Position-based temperature zones (hydrothermal vent at bottom, cold at top)
+      const normalizedY = (mol.y + this.worldHeight / 2) / this.worldHeight; // 0=top, 1=bottom
+      if (normalizedY > CONFIG.heatZone) {
+        // Near bottom vent - heat up
+        const intensity = (normalizedY - CONFIG.heatZone) / (1 - CONFIG.heatZone);
+        mol.temperature = Math.min(1, mol.temperature + CONFIG.heatRate * intensity * dt);
+      } else if (normalizedY < CONFIG.coolZone) {
+        // Near surface - cool down
+        const intensity = (CONFIG.coolZone - normalizedY) / CONFIG.coolZone;
+        mol.temperature = Math.max(0, mol.temperature - CONFIG.heatRate * intensity * dt);
+      } else {
+        // Middle zone - drift toward neutral
+        const drift = (CONFIG.neutralTemp - mol.temperature) * 0.02 * dt;
+        mol.temperature += drift;
+      }
+
+      // Mouse repulsion - push molecules away from cursor
+      if (this.mouseWorld.active) {
+        const dx = mol.x - this.mouseWorld.x;
+        const dy = mol.y - this.mouseWorld.y;
+        const distSq = dx * dx + dy * dy;
+        const repelRadius = 150;
+        const repelStrength = 400;
+
+        if (distSq < repelRadius * repelRadius && distSq > 1) {
+          const dist = Math.sqrt(distSq);
+          const force = (1 - dist / repelRadius) * repelStrength * dt;
+          mol.vx += (dx / dist) * force;
+          mol.vy += (dy / dist) * force;
+          // Small z scatter for 3D feel
+          mol.vz += (Math.random() - 0.5) * force * 0.3;
+        }
+
+        // Mouse energizing - heat molecules near cursor
+        const heatRadiusSq = CONFIG.mouseHeatRadius * CONFIG.mouseHeatRadius;
+        if (distSq < heatRadiusSq && distSq > 1) {
+          const dist = Math.sqrt(distSq);
+          // Falloff: closer = more heat, uses power curve
+          const intensity = Math.pow(1 - dist / CONFIG.mouseHeatRadius, CONFIG.mouseHeatFalloff);
+          mol.temperature = Math.min(1, mol.temperature + CONFIG.mouseHeatRate * intensity * dt);
+        }
+      }
     }
 
     // Collision separation, heat transfer, and reactions
@@ -874,6 +1397,9 @@ class PrimordialSoupDemo extends Game {
     // Decay log
     for (const log of this.reactionLog) log.time -= dt;
     this.reactionLog = this.reactionLog.filter((l) => l.time > 0);
+
+    // Update stats labels if panel is visible
+    this.updateStatsLabels();
   }
 
   /**
@@ -1002,33 +1528,7 @@ class PrimordialSoupDemo extends Game {
       ctx.fill();
     }
 
-    // Energy discharge flash (electrical discharge in water)
-    if (this.lightningFlash) {
-      const proj = this.camera.project(
-        this.lightningFlash.x,
-        this.lightningFlash.y,
-        this.lightningFlash.z
-      );
-      const lx = cx + proj.x;
-      const ly = cy + proj.y;
-
-      const flashGrad = ctx.createRadialGradient(lx, ly, 0, lx, ly, 250);
-      flashGrad.addColorStop(
-        0,
-        `rgba(200, 240, 255, ${this.lightningFlash.intensity * 0.95})`
-      );
-      flashGrad.addColorStop(
-        0.15,
-        `rgba(150, 220, 255, ${this.lightningFlash.intensity * 0.6})`
-      );
-      flashGrad.addColorStop(
-        0.4,
-        `rgba(80, 180, 255, ${this.lightningFlash.intensity * 0.25})`
-      );
-      flashGrad.addColorStop(1, 'transparent');
-      ctx.fillStyle = flashGrad;
-      ctx.fillRect(0, 0, w, h);
-    }
+    // Lightning is now rendered by the Lightning GameObject in the pipeline
 
     // Render molecules with depth sorting
     const sorted = [...this.molecules].sort((a, b) => {
@@ -1038,7 +1538,13 @@ class PrimordialSoupDemo extends Game {
     });
 
     for (const mol of sorted) {
+      if (mol.dimmed) {
+        ctx.globalAlpha = 0.15;
+      }
       mol.render(cx, cy);
+      if (mol.dimmed) {
+        ctx.globalAlpha = 1;
+      }
     }
 
     // Reaction burst particles (energy release - white sparks)
@@ -1106,12 +1612,28 @@ class PrimordialSoupDemo extends Game {
       ctx.fillText(`Molecules: ${this.molecules.length}`, w - 15, 25);
       ctx.fillText(`Reactions: ${this.stats.reactions}`, w - 15, 25 + lineHeight);
 
-      const tierNames = ['Primordial', 'Precursors', 'Amino Acids', 'Peptides'];
+      const tierNames = ['Primordial', 'Precursors', 'Amino Acids', 'Peptides', 'Nucleobases'];
       ctx.fillText(`Max tier: ${tierNames[this.stats.maxTier] || '???'}`, w - 15, 25 + lineHeight * 2);
     }
 
     // Render pipeline objects (UI buttons, legend dialog)
     this.pipeline.render(ctx);
+
+    // Render 3D molecule preview on top of legend dialog
+    if (this.legendUI) {
+      this.legendUI.renderPreview(ctx);
+    }
+  }
+
+  /**
+   * Clean up when stopping
+   */
+  stop() {
+    // Remove keyboard listener
+    if (this._keyHandler) {
+      window.removeEventListener('keydown', this._keyHandler);
+    }
+    super.stop();
   }
 }
 

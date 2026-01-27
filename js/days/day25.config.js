@@ -2,29 +2,33 @@ export const TAU = Math.PI * 2;
 
 export const CONFIG = {
   // Molecule counts - scaled by canvas size
-  baseMolecules: 40,    // Base count for 1920x1080
-  minMolecules: 20,     // Minimum for small screens
-  maxMolecules: 200,    // Maximum for 4K screens (soft limit for performance)
+  baseMolecules: 80,    // Base count for 1920x1080 (doubled)
+  minMolecules: 25,     // Minimum for small screens
+  maxMolecules: 400,    // Maximum for 4K screens (doubled)
 
   // Camera
   perspective: 800,
 
   // Heat zones (normalized y: 0 = top, 1 = bottom)
-  heatZone: 0.85, // Hydrothermal vent at bottom
-  coolZone: 0.15, // Cold surface water at top
-  heatRate: 0.06, // Was 0.008 - much faster temperature changes
+  heatZone: 0.7,  // Hydrothermal vent at bottom 30%
+  coolZone: 0.2,  // Cold surface water at top 20%
+  heatRate: 0.3,  // Fast temperature changes for visible reactions
 
   // Thermal physics (buoyancy handles both rise AND sink)
-  buoyancyStrength: 150, // Gentler vertical movement
+  buoyancyStrength: 200, // Stronger vertical movement
   neutralTemp: 0.5,
 
-  // Movement
-  baseSpeed: 25, // Was 15
-  damping: 0.985, // Was 0.97 - less friction for more visible motion
+  // Movement - FLUID DYNAMICS
+  baseSpeed: 50, // Initial velocity spread
+  damping: 0.992, // Less friction = more momentum (was 0.985)
 
-  // Convection currents (replaces Motion.float/oscillate)
-  convectionCurrentX: 80, // Horizontal circulation force
-  convectionTurbulence: 40, // Random jitter for organic feel
+  // Convection currents - OCEAN MIXING
+  convectionCurrentX: 150, // Strong horizontal circulation (was 80)
+  convectionTurbulence: 80, // Much more jitter for chaotic fluid feel (was 40)
+  convectionZ: 60, // Z-axis turbulence for 3D mixing
+
+  // Brownian motion - random kicks like real fluid molecules
+  brownianStrength: 30, // Random impulses each frame
 
   // Spatial bounds
   worldWidthRatio: 0.95, // Was implicit 0.8
@@ -50,6 +54,15 @@ export const CONFIG = {
   lightningVariance: 2,
   lightningEnergy: 0.4, // Temperature boost
   lightningRadius: 150,
+
+  // Mouse energizing - heat molecules near cursor
+  mouseHeatRadius: 120,   // Pixels from mouse that get heated
+  mouseHeatRate: 0.8,     // Temperature boost per second at center
+  mouseHeatFalloff: 0.5,  // Power curve for falloff (0.5 = sqrt)
+
+  // Idle mode - auto-spawn when user is inactive
+  idleSpawnDelay: 30, // Seconds of inactivity before auto-spawning
+  idleSpawnInterval: 8, // Seconds between idle spawns once active
 
   // Visual - Terminal green aesthetic
   bgColor: '#000',
@@ -97,5 +110,5 @@ export const CONFIG = {
   particleCount: 60,
   causticSpeed: 0.3,
 
-  debugLegend:true
+  debugLegend: false
 };

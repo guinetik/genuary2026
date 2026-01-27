@@ -3,116 +3,6 @@ import { TAU, CONFIG } from './day25.config.js';
 import { ATOMS, MOLECULES } from './day25.chemistry.js';
 
 /**
- * Molecule2D - A simple 2D representation of a molecule for UI/legend
- * Renders atoms as colored circles and bonds as lines
- * Auto-scales to fit within given width/height
- * @extends GameObject
- */
-export class Molecule2D extends GameObject {
-    /**
-     * @param {Game} game - Game instance
-     * @param {string} templateKey - Key into MOLECULES dictionary
-     * @param {Object} options - GameObject options (x, y, width, height)
-     */
-    constructor(game, templateKey, options = {}) {
-        // Set default dimensions before super()
-        const width = options.width ?? 50;
-        const height = options.height ?? 40;
-
-        super(game, { ...options, width, height });
-
-        this.templateKey = templateKey;
-        this.template = MOLECULES[templateKey];
-
-        if (!this.template) {
-            console.warn(`Molecule2D: Unknown template key "${templateKey}"`);
-            this.moleculeScale = 1;
-            return;
-        }
-
-        // Calculate molecule bounds for centering (include atom radii)
-        let minX = Infinity, maxX = -Infinity;
-        let minY = Infinity, maxY = -Infinity;
-        for (const atom of this.template.atoms) {
-            const props = ATOMS[atom.element];
-            const r = props ? props.radius : 10;
-            minX = Math.min(minX, atom.x - r);
-            maxX = Math.max(maxX, atom.x + r);
-            minY = Math.min(minY, atom.y - r);
-            maxY = Math.max(maxY, atom.y + r);
-        }
-        this.molWidth = maxX - minX;
-        this.molHeight = maxY - minY;
-        this.molCenterX = (minX + maxX) / 2;
-        this.molCenterY = (minY + maxY) / 2;
-
-        // Auto-scale to fit within width/height with padding
-        const padding = 4;
-        const availWidth = width - padding * 2;
-        const availHeight = height - padding * 2;
-        const scaleX = availWidth / this.molWidth;
-        const scaleY = availHeight / this.molHeight;
-        this.moleculeScale = Math.min(scaleX, scaleY, 1); // Don't scale up beyond 1
-    }
-
-    /**
-     * Draw the molecule (called after transforms are applied)
-     * Coordinates are relative to center (0,0)
-     */
-    draw() {
-        super.draw(); // Apply transforms and draw debug
-        if (!this.template) return;
-
-        const ctx = Painter.ctx;
-        const scale = this.moleculeScale;
-
-        // Draw bonds first
-        ctx.strokeStyle = 'rgba(0, 255, 100, 0.7)';
-        ctx.lineWidth = Math.max(1, 1.5 * scale);
-        ctx.lineCap = 'round';
-
-        for (const bond of this.template.bonds) {
-            const a1 = this.template.atoms[bond.from];
-            const a2 = this.template.atoms[bond.to];
-
-            const x1 = (a1.x - this.molCenterX) * scale;
-            const y1 = (a1.y - this.molCenterY) * scale;
-            const x2 = (a2.x - this.molCenterX) * scale;
-            const y2 = (a2.y - this.molCenterY) * scale;
-
-            ctx.beginPath();
-            ctx.moveTo(x1, y1);
-            ctx.lineTo(x2, y2);
-            ctx.stroke();
-        }
-
-        // Draw atoms
-        for (const atom of this.template.atoms) {
-            const props = ATOMS[atom.element];
-            if (!props) continue;
-
-            const x = (atom.x - this.molCenterX) * scale;
-            const y = (atom.y - this.molCenterY) * scale;
-            const r = Math.max(2, props.radius * scale * 0.55);
-
-            ctx.fillStyle = `hsl(${props.hue}, ${props.sat}%, ${props.light}%)`;
-            ctx.beginPath();
-            ctx.arc(x, y, r, 0, TAU);
-            ctx.fill();
-        }
-    }
-
-    getBounds() {
-        return {
-            x: this.x,
-            y: this.y,
-            width: this.width,
-            height: this.height,
-        };
-    }
-}
-
-/**
  * Molecule3D - A molecule composed of Atom3D children
  * Handles molecular rotation, movement, and thermal physics
  * @extends GameObject
@@ -147,13 +37,13 @@ export class Molecule3D extends GameObject {
         this.reactionCooldown = 0;
         this.flash = 0; // Visual flash on reaction
 
-        // Molecular rotation - gentle tumble
+        // Molecular rotation - moderate tumble like in fluid
         this.rotX = Math.random() * TAU;
         this.rotY = Math.random() * TAU;
         this.rotZ = Math.random() * TAU;
         this.rotSpeedX = (Math.random() - 0.5) * 0.15;
         this.rotSpeedY = (Math.random() - 0.5) * 0.15;
-        this.rotSpeedZ = (Math.random() - 0.5) * 0.08;
+        this.rotSpeedZ = (Math.random() - 0.5) * 0.10;
 
         // Turbulence phase offsets for organic movement
         this.turbulencePhase = Math.random() * Math.PI * 2;
@@ -223,17 +113,25 @@ export class Molecule3D extends GameObject {
         const driftStrength = CONFIG.convectionCurrentX * (0.6 + this.temperature * 0.4);
         this.vx += Math.sin(driftPhase) * driftStrength * dt;
 
-        // Slight Z drift too for 3D ocean feel
+        // Z-axis convection for 3D ocean mixing
         const zDriftPhase = time * 0.2 + normalizedY * 1.8 + this.turbulencePhase + 1.5;
-        this.vz += Math.sin(zDriftPhase) * driftStrength * 0.5 * dt;
+        const zDriftStrength = CONFIG.convectionZ * (0.5 + this.temperature * 0.5);
+        this.vz += Math.sin(zDriftPhase) * zDriftStrength * dt;
 
         // === TURBULENCE (organic random jitter) ===
         // Phase-shifted noise for each molecule - adds organic feel
         const turbPhase = this.turbulencePhase + time;
         const turbStrength = CONFIG.convectionTurbulence * (0.4 + this.temperature * 0.3);
         this.vx += Math.sin(turbPhase * 1.3) * turbStrength * dt;
-        this.vy += Math.sin(turbPhase * 1.7 + 1.5) * turbStrength * 0.2 * dt;
-        this.vz += Math.sin(turbPhase * 1.1 + 3.0) * turbStrength * 0.6 * dt;
+        this.vy += Math.sin(turbPhase * 1.7 + 1.5) * turbStrength * 0.3 * dt;
+        this.vz += Math.sin(turbPhase * 1.1 + 3.0) * turbStrength * 0.8 * dt;
+
+        // === BROWNIAN MOTION (random molecular kicks) ===
+        // Like real water molecules bumping into our molecules
+        const brownian = CONFIG.brownianStrength;
+        this.vx += (Math.random() - 0.5) * brownian * dt * 60;
+        this.vy += (Math.random() - 0.5) * brownian * dt * 60;
+        this.vz += (Math.random() - 0.5) * brownian * dt * 60;
 
         // === DAMPING ===
         const dampFactor = Math.pow(CONFIG.damping, dt * 60);
@@ -246,15 +144,26 @@ export class Molecule3D extends GameObject {
         this.y += this.vy * dt;
         this.z += this.vz * dt;
 
-        // === TUMBLE (gentle rotation coupled to motion) ===
+        // === TUMBLE (moderate rotation coupled to motion) ===
         const speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy + this.vz * this.vz);
-        // Much gentler tumble - capped velocity influence
-        const tumbleIntensity = 0.015 + Math.min(speed * 0.002, 0.03);
+        // Moderate tumble intensity
+        const tumbleIntensity = 0.025 + Math.min(speed * 0.002, 0.04);
 
         // Cross-axis rotation creates "rolling through fluid" effect
-        this.rotX += (this.vy * 0.008 + this.rotSpeedX * 0.2) * tumbleIntensity * dt * 60;
-        this.rotY += (this.vx * 0.008 + this.rotSpeedY * 0.2) * tumbleIntensity * dt * 60;
-        this.rotZ += (this.vz * 0.005 + this.rotSpeedZ * 0.15) * tumbleIntensity * dt * 60;
+        this.rotX += (this.vy * 0.005 + this.rotSpeedX) * tumbleIntensity * dt * 60;
+        this.rotY += (this.vx * 0.005 + this.rotSpeedY) * tumbleIntensity * dt * 60;
+        this.rotZ += (this.vz * 0.004 + this.rotSpeedZ) * tumbleIntensity * dt * 60;
+
+        // Dampen rotation speeds
+        this.rotSpeedX *= 0.985;
+        this.rotSpeedY *= 0.985;
+        this.rotSpeedZ *= 0.985;
+
+        // Clamp rotation speeds
+        const maxRotSpeed = 0.25;
+        this.rotSpeedX = Math.max(-maxRotSpeed, Math.min(maxRotSpeed, this.rotSpeedX));
+        this.rotSpeedY = Math.max(-maxRotSpeed, Math.min(maxRotSpeed, this.rotSpeedY));
+        this.rotSpeedZ = Math.max(-maxRotSpeed, Math.min(maxRotSpeed, this.rotSpeedZ));
 
         // Decay cooldown and flash
         if (this.reactionCooldown > 0) this.reactionCooldown -= dt;
